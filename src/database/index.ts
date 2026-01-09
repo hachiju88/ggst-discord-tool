@@ -1,42 +1,53 @@
-import Database from 'better-sqlite3';
+import { createClient, Client } from '@libsql/client';
 import fs from 'fs';
 import path from 'path';
 
-let db: Database.Database | null = null;
+let db: Client | null = null;
 
-export function initDatabase(): Database.Database {
-  const dbPath = process.env.DATABASE_PATH || './data/ggst.db';
+export async function initDatabase(): Promise<Client> {
+  // Turso接続設定
+  const url = process.env.TURSO_DATABASE_URL;
+  const authToken = process.env.TURSO_AUTH_TOKEN;
 
-  // データディレクトリが存在しない場合は作成
-  const dbDir = path.dirname(dbPath);
-  if (!fs.existsSync(dbDir)) {
-    fs.mkdirSync(dbDir, { recursive: true });
+  if (!url || !authToken) {
+    throw new Error('TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set in environment variables');
   }
 
-  // データベース接続
-  db = new Database(dbPath);
+  console.log('Initializing database...');
 
-  // WALモードを有効化（パフォーマンス向上）
-  db.pragma('journal_mode = WAL');
+  // Tursoクライアントを作成
+  db = createClient({
+    url,
+    authToken,
+  });
 
   // スキーマの適用
   const schemaPath = path.join(__dirname, 'schema.sql');
   const schema = fs.readFileSync(schemaPath, 'utf-8');
-  db.exec(schema);
+
+  // スキーマを個別のステートメントに分割して実行
+  const statements = schema
+    .split(';')
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+
+  for (const statement of statements) {
+    await db.execute(statement);
+  }
 
   console.log('Database initialized successfully');
 
   return db;
 }
 
-export function getDatabase(): Database.Database {
+export function getDatabase(): Client {
   if (!db) {
     throw new Error('Database not initialized. Call initDatabase() first.');
   }
   return db;
 }
 
-export function closeDatabase(): void {
+export async function closeDatabase(): Promise<void> {
   if (db) {
     db.close();
     db = null;

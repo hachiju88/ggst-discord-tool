@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import type { ChatInputCommandInteraction, AutocompleteInteraction } from 'discord.js';
 import { GGST_CHARACTERS } from '../config/constants';
 import { UserModel } from '../models/User';
@@ -40,13 +40,18 @@ export const data = new SlashCommandBuilder()
   );
 
 export async function autocomplete(interaction: AutocompleteInteraction) {
-  const focusedValue = interaction.options.getFocused().toLowerCase();
-  const filtered = GGST_CHARACTERS.filter(char =>
-    char.toLowerCase().includes(focusedValue)
-  );
-  await interaction.respond(
-    filtered.slice(0, 25).map(char => ({ name: char, value: char }))
-  );
+  try {
+    const focusedValue = interaction.options.getFocused().toLowerCase();
+    const filtered = GGST_CHARACTERS.filter(char =>
+      char.toLowerCase().includes(focusedValue)
+    );
+    await interaction.respond(
+      filtered.slice(0, 25).map(char => ({ name: char, value: char }))
+    );
+  } catch (error) {
+    // Autocomplete エラーは無視（タイムアウトなど）
+    console.error('Autocomplete error:', error);
+  }
 }
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -54,29 +59,28 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const userId = interaction.user.id;
 
   // ユーザーを取得または作成
-  UserModel.findOrCreate(userId);
+  await UserModel.findOrCreate(userId);
 
   if (subcommand === 'add') {
     const character = interaction.options.getString('character', true);
     const content = interaction.options.getString('content', true);
 
     // 共通戦略を追加
-    CommonStrategyModel.create(character, content, userId);
+    await CommonStrategyModel.create(character, content, userId);
 
     await interaction.reply({
-      content: `🌐 共通対策情報を登録しました\n\n対象キャラ: ${character}\n内容: ${content}\n\nこの情報は全ユーザーの \`/match\` コマンドで表示されます。`,
-      ephemeral: false
+      content: `🌐 共通対策情報を登録しました\n\n対象キャラ: ${character}\n内容: ${content}\n\nこの情報は全ユーザーの \`/ggst-match\` コマンドで表示されます。`
     });
   } else if (subcommand === 'view') {
     const character = interaction.options.getString('character', true);
 
     // 共通戦略を取得
-    const strategies = CommonStrategyModel.getByCharacter(character);
+    const strategies = await CommonStrategyModel.getByCharacter(character);
 
     if (strategies.length === 0) {
       await interaction.reply({
-        content: `${character}への共通対策情報はまだ登録されていません。\n\`/common-strategy add\` で追加してください。`,
-        ephemeral: true
+        content: `${character}への共通対策情報はまだ登録されていません。\n\`/ggst-common-strategy add\` で追加してください。`,
+        flags: MessageFlags.Ephemeral
       });
       return;
     }

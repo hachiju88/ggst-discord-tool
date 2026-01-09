@@ -3,57 +3,74 @@ import { Strategy } from '../types';
 
 export class StrategyModel {
   // 個人戦略を作成
-  static create(
+  static async create(
     userDiscordId: string,
     targetCharacter: string,
     strategyContent: string,
     source: string = 'user'
-  ): Strategy {
+  ): Promise<Strategy> {
     const db = getDatabase();
 
-    const stmt = db.prepare(`
-      INSERT INTO strategies (user_discord_id, target_character, strategy_content, source)
-      VALUES (?, ?, ?, ?)
-    `);
+    const insertResult = await db.execute({
+      sql: `
+        INSERT INTO strategies (user_discord_id, target_character, strategy_content, source)
+        VALUES (?, ?, ?, ?)
+      `,
+      args: [userDiscordId, targetCharacter, strategyContent, source]
+    });
 
-    const info = stmt.run(userDiscordId, targetCharacter, strategyContent, source);
+    const selectResult = await db.execute({
+      sql: 'SELECT * FROM strategies WHERE id = ?',
+      args: [insertResult.lastInsertRowid]
+    });
 
-    return db.prepare('SELECT * FROM strategies WHERE id = ?')
-      .get(info.lastInsertRowid) as Strategy;
+    return selectResult.rows[0] as unknown as Strategy;
   }
 
   // 特定キャラの個人戦略を取得
-  static getByCharacter(userDiscordId: string, targetCharacter: string): Strategy[] {
+  static async getByCharacter(userDiscordId: string, targetCharacter: string): Promise<Strategy[]> {
     const db = getDatabase();
 
-    return db.prepare(`
-      SELECT * FROM strategies
-      WHERE user_discord_id = ? AND target_character = ?
-      ORDER BY created_at DESC
-    `).all(userDiscordId, targetCharacter) as Strategy[];
+    const result = await db.execute({
+      sql: `
+        SELECT * FROM strategies
+        WHERE user_discord_id = ? AND target_character = ?
+        ORDER BY created_at DESC
+      `,
+      args: [userDiscordId, targetCharacter]
+    });
+
+    return result.rows as unknown as Strategy[];
   }
 
   // ユーザーの全個人戦略を取得
-  static getAllByUser(userDiscordId: string): Strategy[] {
+  static async getAllByUser(userDiscordId: string): Promise<Strategy[]> {
     const db = getDatabase();
 
-    return db.prepare(`
-      SELECT * FROM strategies
-      WHERE user_discord_id = ?
-      ORDER BY target_character, created_at DESC
-    `).all(userDiscordId) as Strategy[];
+    const result = await db.execute({
+      sql: `
+        SELECT * FROM strategies
+        WHERE user_discord_id = ?
+        ORDER BY target_character, created_at DESC
+      `,
+      args: [userDiscordId]
+    });
+
+    return result.rows as unknown as Strategy[];
   }
 
   // 個人戦略を削除
-  static delete(id: number, userDiscordId: string): boolean {
+  static async delete(id: number, userDiscordId: string): Promise<boolean> {
     const db = getDatabase();
 
-    const stmt = db.prepare(`
-      DELETE FROM strategies
-      WHERE id = ? AND user_discord_id = ?
-    `);
+    const result = await db.execute({
+      sql: `
+        DELETE FROM strategies
+        WHERE id = ? AND user_discord_id = ?
+      `,
+      args: [id, userDiscordId]
+    });
 
-    const result = stmt.run(id, userDiscordId);
-    return result.changes > 0;
+    return result.rowsAffected > 0;
   }
 }

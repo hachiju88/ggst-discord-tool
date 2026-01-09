@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import type { ChatInputCommandInteraction, AutocompleteInteraction } from 'discord.js';
 import { GGST_CHARACTERS } from '../config/constants';
 import { UserModel } from '../models/User';
@@ -40,13 +40,18 @@ export const data = new SlashCommandBuilder()
   );
 
 export async function autocomplete(interaction: AutocompleteInteraction) {
-  const focusedValue = interaction.options.getFocused().toLowerCase();
-  const filtered = GGST_CHARACTERS.filter(char =>
-    char.toLowerCase().includes(focusedValue)
-  );
-  await interaction.respond(
-    filtered.slice(0, 25).map(char => ({ name: char, value: char }))
-  );
+  try {
+    const focusedValue = interaction.options.getFocused().toLowerCase();
+    const filtered = GGST_CHARACTERS.filter(char =>
+      char.toLowerCase().includes(focusedValue)
+    );
+    await interaction.respond(
+      filtered.slice(0, 25).map(char => ({ name: char, value: char }))
+    );
+  } catch (error) {
+    // Autocomplete エラーは無視（タイムアウトなど）
+    console.error('Autocomplete error:', error);
+  }
 }
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -54,29 +59,29 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const userId = interaction.user.id;
 
   // ユーザーを取得または作成
-  UserModel.findOrCreate(userId);
+  await UserModel.findOrCreate(userId);
 
   if (subcommand === 'add') {
     const character = interaction.options.getString('character', true);
     const content = interaction.options.getString('content', true);
 
     // 個人戦略を追加
-    StrategyModel.create(userId, character, content, 'user');
+    await StrategyModel.create(userId, character, content, 'user');
 
     await interaction.reply({
-      content: `💡 個人戦略を登録しました\n\n対象キャラ: ${character}\n内容: ${content}\n\nこの情報は次回の \`/match\` コマンドで自動表示されます。`,
-      ephemeral: true
+      content: `💡 個人戦略を登録しました\n\n対象キャラ: ${character}\n内容: ${content}\n\nこの情報は次回の \`/ggst-match\` コマンドで自動表示されます。`,
+      flags: MessageFlags.Ephemeral
     });
   } else if (subcommand === 'view') {
     const character = interaction.options.getString('character', true);
 
     // 個人戦略を取得
-    const strategies = StrategyModel.getByCharacter(userId, character);
+    const strategies = await StrategyModel.getByCharacter(userId, character);
 
     if (strategies.length === 0) {
       await interaction.reply({
-        content: `${character}への個人戦略はまだ登録されていません。\n\`/strategy add\` で追加してください。`,
-        ephemeral: true
+        content: `${character}への個人戦略はまだ登録されていません。\n\`/ggst-strategy add\` で追加してください。`,
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -93,6 +98,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     embed.setDescription(strategiesText);
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
 }

@@ -46,13 +46,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const note = interaction.options.getString('note');
 
   // ユーザーを取得または作成
-  UserModel.findOrCreate(userId);
+  await UserModel.findOrCreate(userId);
 
   // 対戦記録を追加
-  MatchModel.create(userId, opponent, result, note || undefined);
+  await MatchModel.create(userId, opponent, result, note || undefined);
 
   // 通算成績を取得
-  const stats = MatchModel.getStats(userId, opponent);
+  const stats = await MatchModel.getStats(userId, opponent);
   const winRate = stats.total > 0 ? ((stats.wins / stats.total) * 100).toFixed(1) : '0.0';
 
   const resultText = result === 'win' ? '勝利' : '敗北';

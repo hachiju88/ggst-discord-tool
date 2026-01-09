@@ -3,51 +3,69 @@ import { CommonStrategy } from '../types';
 
 export class CommonStrategyModel {
   // 共通戦略を作成
-  static create(
+  static async create(
     targetCharacter: string,
     strategyContent: string,
     createdByDiscordId: string
-  ): CommonStrategy {
+  ): Promise<CommonStrategy> {
     const db = getDatabase();
 
-    const stmt = db.prepare(`
-      INSERT INTO common_strategies (target_character, strategy_content, created_by_discord_id)
-      VALUES (?, ?, ?)
-    `);
+    const insertResult = await db.execute({
+      sql: `
+        INSERT INTO common_strategies (target_character, strategy_content, created_by_discord_id)
+        VALUES (?, ?, ?)
+      `,
+      args: [targetCharacter, strategyContent, createdByDiscordId]
+    });
 
-    const info = stmt.run(targetCharacter, strategyContent, createdByDiscordId);
+    const selectResult = await db.execute({
+      sql: 'SELECT * FROM common_strategies WHERE id = ?',
+      args: [insertResult.lastInsertRowid]
+    });
 
-    return db.prepare('SELECT * FROM common_strategies WHERE id = ?')
-      .get(info.lastInsertRowid) as CommonStrategy;
+    return selectResult.rows[0] as unknown as CommonStrategy;
   }
 
   // 特定キャラの共通戦略を取得
-  static getByCharacter(targetCharacter: string): CommonStrategy[] {
+  static async getByCharacter(targetCharacter: string): Promise<CommonStrategy[]> {
     const db = getDatabase();
 
-    return db.prepare(`
-      SELECT * FROM common_strategies
-      WHERE target_character = ?
-      ORDER BY created_at DESC
-    `).all(targetCharacter) as CommonStrategy[];
+    const result = await db.execute({
+      sql: `
+        SELECT * FROM common_strategies
+        WHERE target_character = ?
+        ORDER BY created_at DESC
+      `,
+      args: [targetCharacter]
+    });
+
+    return result.rows as unknown as CommonStrategy[];
   }
 
   // 全ての共通戦略を取得
-  static getAll(): CommonStrategy[] {
+  static async getAll(): Promise<CommonStrategy[]> {
     const db = getDatabase();
 
-    return db.prepare(`
-      SELECT * FROM common_strategies
-      ORDER BY target_character, created_at DESC
-    `).all() as CommonStrategy[];
+    const result = await db.execute({
+      sql: `
+        SELECT * FROM common_strategies
+        ORDER BY target_character, created_at DESC
+      `,
+      args: []
+    });
+
+    return result.rows as unknown as CommonStrategy[];
   }
 
   // 共通戦略を削除
-  static delete(id: number): boolean {
+  static async delete(id: number): Promise<boolean> {
     const db = getDatabase();
 
-    const stmt = db.prepare('DELETE FROM common_strategies WHERE id = ?');
-    const result = stmt.run(id);
-    return result.changes > 0;
+    const result = await db.execute({
+      sql: 'DELETE FROM common_strategies WHERE id = ?',
+      args: [id]
+    });
+
+    return result.rowsAffected > 0;
   }
 }

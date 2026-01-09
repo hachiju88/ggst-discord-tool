@@ -3,55 +3,73 @@ import { User } from '../types';
 
 export class UserModel {
   // ユーザーを取得または作成
-  static findOrCreate(discordId: string): User {
+  static async findOrCreate(discordId: string): Promise<User> {
     const db = getDatabase();
 
     // 既存ユーザーを検索
-    const existingUser = db.prepare('SELECT * FROM users WHERE discord_id = ?').get(discordId) as User | undefined;
+    const result = await db.execute({
+      sql: 'SELECT * FROM users WHERE discord_id = ?',
+      args: [discordId]
+    });
 
-    if (existingUser) {
-      return existingUser;
+    if (result.rows.length > 0) {
+      return result.rows[0] as unknown as User;
     }
 
     // 新規ユーザーを作成
-    const stmt = db.prepare(
-      'INSERT INTO users (discord_id) VALUES (?)'
-    );
-    stmt.run(discordId);
+    await db.execute({
+      sql: 'INSERT INTO users (discord_id) VALUES (?)',
+      args: [discordId]
+    });
 
-    return db.prepare('SELECT * FROM users WHERE discord_id = ?').get(discordId) as User;
+    const newUserResult = await db.execute({
+      sql: 'SELECT * FROM users WHERE discord_id = ?',
+      args: [discordId]
+    });
+
+    return newUserResult.rows[0] as unknown as User;
   }
 
   // メインキャラクターを設定
-  static setMainCharacter(discordId: string, character: string): void {
+  static async setMainCharacter(discordId: string, character: string): Promise<void> {
     const db = getDatabase();
 
-    const stmt = db.prepare(`
-      UPDATE users
-      SET main_character = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE discord_id = ?
-    `);
-
-    stmt.run(character, discordId);
+    await db.execute({
+      sql: `UPDATE users SET main_character = ?, updated_at = CURRENT_TIMESTAMP WHERE discord_id = ?`,
+      args: [character, discordId]
+    });
   }
 
   // メインキャラクターを取得
-  static getMainCharacter(discordId: string): string | null {
+  static async getMainCharacter(discordId: string): Promise<string | null> {
     const db = getDatabase();
 
-    const user = db.prepare('SELECT main_character FROM users WHERE discord_id = ?')
-      .get(discordId) as { main_character: string | null } | undefined;
+    const result = await db.execute({
+      sql: 'SELECT main_character FROM users WHERE discord_id = ?',
+      args: [discordId]
+    });
 
-    return user?.main_character || null;
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0] as { main_character: string | null };
+    return row.main_character;
   }
 
   // ユーザー情報を取得
-  static getUser(discordId: string): User | null {
+  static async getUser(discordId: string): Promise<User | null> {
     const db = getDatabase();
 
-    const user = db.prepare('SELECT * FROM users WHERE discord_id = ?')
-      .get(discordId) as User | undefined;
+    const result = await db.execute({
+      sql: 'SELECT * FROM users WHERE discord_id = ?',
+      args: [discordId]
+    });
 
-    return user || null;
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return result.rows[0] as unknown as User;
   }
 }

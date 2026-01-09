@@ -37,7 +37,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const opponent = interaction.options.getString('opponent', true);
 
   // ユーザーを取得または作成
-  const user = UserModel.findOrCreate(userId);
+  const user = await UserModel.findOrCreate(userId);
   const mainChar = user.main_character;
 
   if (!mainChar) {
@@ -49,17 +49,17 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   // 対戦成績を取得
-  const stats = MatchModel.getStats(userId, opponent);
+  const stats = await MatchModel.getStats(userId, opponent);
   const winRate = stats.total > 0 ? ((stats.wins / stats.total) * 100).toFixed(1) : '0.0';
 
   // 直近の対戦記録を取得（最大5件）
-  const recentMatches = MatchModel.getByUser(userId, 5, opponent);
+  const recentMatches = await MatchModel.getByUser(userId, 5, opponent);
 
   // 個人戦略を取得
-  const personalStrategies = StrategyModel.getByCharacter(userId, opponent);
+  const personalStrategies = await StrategyModel.getByCharacter(userId, opponent);
 
   // 共通戦略を取得
-  const commonStrategies = CommonStrategyModel.getByCharacter(opponent);
+  const commonStrategies = await CommonStrategyModel.getByCharacter(opponent);
 
   // Embed作成
   const embed = new EmbedBuilder()
@@ -75,42 +75,25 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   });
 
   // 過去の戦績
-  if (stats.total > 0) {
-    embed.addFields({
-      name: '【過去の戦績】',
-      value: `総対戦数: ${stats.total}戦\n勝利: ${stats.wins}勝 / 敗北: ${stats.losses}敗\n勝率: ${winRate}%`,
-      inline: false
-    });
-  } else {
-    embed.addFields({
-      name: '【過去の戦績】',
-      value: 'まだ対戦記録がありません',
-      inline: false
-    });
-  }
+  const statsText = stats.total > 0
+    ? `総対戦数: ${stats.total}戦\n勝利: ${stats.wins}勝 / 敗北: ${stats.losses}敗\n勝率: ${winRate}%`
+    : `まだ対戦記録がありません`;
 
-  // 共通対策情報
-  if (commonStrategies.length > 0) {
-    const commonStratText = commonStrategies.map((strat, i) =>
-      `${i + 1}. ${strat.strategy_content}`
-    ).join('\n\n');
-
-    embed.addFields({
-      name: '【共通対策情報】',
-      value: commonStratText.length > 1024 ? commonStratText.substring(0, 1021) + '...' : commonStratText,
-      inline: false
-    });
-  }
+  embed.addFields({
+    name: '【過去の戦績】',
+    value: statsText,
+    inline: false
+  });
 
   // 個人戦略
   if (personalStrategies.length > 0) {
-    const personalStratText = personalStrategies.map((strat, i) =>
+    const personalText = personalStrategies.map((strat, i) =>
       `${i + 1}. ${strat.strategy_content}`
-    ).join('\n\n');
+    ).join('\n');
 
     embed.addFields({
       name: '【あなたの戦略メモ】',
-      value: personalStratText.length > 1024 ? personalStratText.substring(0, 1021) + '...' : personalStratText,
+      value: personalText,
       inline: false
     });
   }
@@ -133,7 +116,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     embed.addFields({
       name: '【直近の対戦メモ】',
-      value: recentText.length > 1024 ? recentText.substring(0, 1021) + '...' : recentText,
+      value: recentText,
       inline: false
     });
   }
@@ -141,4 +124,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   embed.setFooter({ text: '頑張ってください！🔥' });
 
   await interaction.reply({ embeds: [embed] });
+
+  // 共通対策情報をテキストで送信（読み上げ用）
+  if (commonStrategies.length > 0) {
+    const commonText = commonStrategies.map(strat =>
+      strat.strategy_content
+    ).join(' ');
+
+    await interaction.followUp({ content: commonText });
+  }
 }

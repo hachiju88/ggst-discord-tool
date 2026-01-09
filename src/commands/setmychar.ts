@@ -43,10 +43,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   // ユーザーを取得または作成
-  UserModel.findOrCreate(userId);
+  await UserModel.findOrCreate(userId);
 
   // メインキャラクターを設定
-  UserModel.setMainCharacter(userId, character);
+  await UserModel.setMainCharacter(userId, character);
 
   await interaction.reply({
     content: `✅ メインキャラクターを「${character}」に設定しました！`

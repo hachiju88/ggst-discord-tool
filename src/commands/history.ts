@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import type { ChatInputCommandInteraction, AutocompleteInteraction } from 'discord.js';
 import { GGST_CHARACTERS } from '../config/constants';
 import { UserModel } from '../models/User';
@@ -24,13 +24,18 @@ export const data = new SlashCommandBuilder()
   );
 
 export async function autocomplete(interaction: AutocompleteInteraction) {
-  const focusedValue = interaction.options.getFocused().toLowerCase();
-  const filtered = GGST_CHARACTERS.filter(char =>
-    char.toLowerCase().includes(focusedValue)
-  );
-  await interaction.respond(
-    filtered.slice(0, 25).map(char => ({ name: char, value: char }))
-  );
+  try {
+    const focusedValue = interaction.options.getFocused().toLowerCase();
+    const filtered = GGST_CHARACTERS.filter(char =>
+      char.toLowerCase().includes(focusedValue)
+    );
+    await interaction.respond(
+      filtered.slice(0, 25).map(char => ({ name: char, value: char }))
+    );
+  } catch (error) {
+    // Autocomplete エラーは無視（タイムアウトなど）
+    console.error('Autocomplete error:', error);
+  }
 }
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -39,29 +44,29 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const limit = interaction.options.getInteger('limit') || 10;
 
   // ユーザーを取得または作成
-  const user = UserModel.findOrCreate(userId);
+  const user = await UserModel.findOrCreate(userId);
 
   // 対戦履歴を取得
-  const matches = MatchModel.getByUser(userId, limit, characterFilter || undefined);
+  const matches = await MatchModel.getByUser(userId, limit, characterFilter || undefined);
 
   if (matches.length === 0) {
     await interaction.reply({
       content: characterFilter
         ? `${characterFilter}との対戦記録がありません。`
-        : '対戦記録がありません。`/addnote`コマンドで記録を追加してください。',
-      ephemeral: true
+        : '対戦記録がありません。`/ggst-addnote`コマンドで記録を追加してください。',
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
 
   // 全体統計を取得
-  const overallStats = MatchModel.getStats(userId);
+  const overallStats = await MatchModel.getStats(userId);
   const overallWinRate = overallStats.total > 0
     ? ((overallStats.wins / overallStats.total) * 100).toFixed(1)
     : '0.0';
 
   // キャラクター別成績を取得
-  const charStats = MatchModel.getStatsByCharacter(userId);
+  const charStats = await MatchModel.getStatsByCharacter(userId);
 
   // Embed作成
   const embed = new EmbedBuilder()

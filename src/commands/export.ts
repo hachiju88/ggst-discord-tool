@@ -13,7 +13,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ ephemeral: true });
 
   const userId = interaction.user.id;
-  const user = UserModel.getUser(userId);
+  const user = await UserModel.getUser(userId);
 
   if (!user) {
     await interaction.editReply('データがありません。まず `/setmychar` でキャラを設定してください。');
@@ -21,11 +21,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   // データを取得
-  const matches = MatchModel.getByUser(userId);
-  const overallStats = MatchModel.getStats(userId);
-  const charStats = MatchModel.getStatsByCharacter(userId);
-  const personalStrategies = StrategyModel.getAllByUser(userId);
-  const allCommonStrategies = CommonStrategyModel.getAll();
+  const matches = await MatchModel.getByUser(userId);
+  const overallStats = await MatchModel.getStats(userId);
+  const charStats = await MatchModel.getStatsByCharacter(userId);
+  const personalStrategies = await StrategyModel.getAllByUser(userId);
+  const allCommonStrategies = await CommonStrategyModel.getAll();
 
   // Markdown生成
   const now = new Date().toLocaleString('ja-JP');

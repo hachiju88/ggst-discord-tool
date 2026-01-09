@@ -3,31 +3,36 @@ import { Match } from '../types';
 
 export class MatchModel {
   // 対戦記録を作成
-  static create(
+  static async create(
     userDiscordId: string,
     opponentCharacter: string,
     result: 'win' | 'loss',
     note?: string
-  ): Match {
+  ): Promise<Match> {
     const db = getDatabase();
 
-    const stmt = db.prepare(`
-      INSERT INTO matches (user_discord_id, opponent_character, result, note)
-      VALUES (?, ?, ?, ?)
-    `);
+    const insertResult = await db.execute({
+      sql: `
+        INSERT INTO matches (user_discord_id, opponent_character, result, note)
+        VALUES (?, ?, ?, ?)
+      `,
+      args: [userDiscordId, opponentCharacter, result, note || null]
+    });
 
-    const info = stmt.run(userDiscordId, opponentCharacter, result, note || null);
+    const selectResult = await db.execute({
+      sql: 'SELECT * FROM matches WHERE id = ?',
+      args: [insertResult.lastInsertRowid]
+    });
 
-    return db.prepare('SELECT * FROM matches WHERE id = ?')
-      .get(info.lastInsertRowid) as Match;
+    return selectResult.rows[0] as unknown as Match;
   }
 
   // ユーザーの全対戦記録を取得
-  static getByUser(
+  static async getByUser(
     userDiscordId: string,
     limit?: number,
     characterFilter?: string
-  ): Match[] {
+  ): Promise<Match[]> {
     const db = getDatabase();
 
     let query = 'SELECT * FROM matches WHERE user_discord_id = ?';
@@ -45,15 +50,20 @@ export class MatchModel {
       params.push(limit);
     }
 
-    return db.prepare(query).all(...params) as Match[];
+    const result = await db.execute({
+      sql: query,
+      args: params
+    });
+
+    return result.rows as unknown as Match[];
   }
 
   // 特定キャラとの対戦成績を取得
-  static getStats(userDiscordId: string, opponentCharacter?: string): {
+  static async getStats(userDiscordId: string, opponentCharacter?: string): Promise<{
     total: number;
     wins: number;
     losses: number;
-  } {
+  }> {
     const db = getDatabase();
 
     let query = `
@@ -71,36 +81,44 @@ export class MatchModel {
       params.push(opponentCharacter);
     }
 
-    const result = db.prepare(query).get(...params) as {
+    const result = await db.execute({
+      sql: query,
+      args: params
+    });
+
+    return result.rows[0] as {
       total: number;
       wins: number;
       losses: number;
     };
-
-    return result;
   }
 
   // キャラクター別の成績を取得
-  static getStatsByCharacter(userDiscordId: string): Array<{
+  static async getStatsByCharacter(userDiscordId: string): Promise<Array<{
     character: string;
     total: number;
     wins: number;
     losses: number;
     winRate: number;
-  }> {
+  }>> {
     const db = getDatabase();
 
-    const results = db.prepare(`
-      SELECT
-        opponent_character as character,
-        COUNT(*) as total,
-        SUM(CASE WHEN result = 'win' THEN 1 ELSE 0 END) as wins,
-        SUM(CASE WHEN result = 'loss' THEN 1 ELSE 0 END) as losses
-      FROM matches
-      WHERE user_discord_id = ?
-      GROUP BY opponent_character
-      ORDER BY total DESC
-    `).all(userDiscordId) as Array<{
+    const result = await db.execute({
+      sql: `
+        SELECT
+          opponent_character as character,
+          COUNT(*) as total,
+          SUM(CASE WHEN result = 'win' THEN 1 ELSE 0 END) as wins,
+          SUM(CASE WHEN result = 'loss' THEN 1 ELSE 0 END) as losses
+        FROM matches
+        WHERE user_discord_id = ?
+        GROUP BY opponent_character
+        ORDER BY total DESC
+      `,
+      args: [userDiscordId]
+    });
+
+    const results = result.rows as Array<{
       character: string;
       total: number;
       wins: number;
