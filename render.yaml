@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: ggst-discord-bot
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PATH
+        value: /opt/render/project/data/ggst.db
+      - key: DISCORD_TOKEN
+        sync: false  # Secret - set in Render Dashboard
+      - key: DISCORD_APPLICATION_ID
+        sync: false  # Secret - set in Render Dashboard
+    disk:
+      name: ggst-data
+      mountPath: /opt/render/project/data
+      sizeGB: 1

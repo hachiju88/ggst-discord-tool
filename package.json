@@ -1,0 +1,30 @@
+{
+  "name": "ggst-discord-tool",
+  "version": "1.0.0",
+  "description": "ギルティギア・ストライブ対戦情報管理Discord Bot",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "register-commands": "tsx src/commands/register.ts",
+    "seed": "tsx seed/import-common-data.ts"
+  },
+  "keywords": ["discord", "bot", "ggst", "guilty-gear"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "better-sqlite3": "^12.5.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.10.6",
+    "typescript": "^5.3.3",
+    "tsx": "^4.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
