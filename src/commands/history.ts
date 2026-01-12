@@ -4,13 +4,23 @@ import { GGST_CHARACTERS } from '../config/constants';
 import { UserModel } from '../models/User';
 import { MatchModel } from '../models/Match';
 
+// キャラクター名を事前にキャッシュ（パフォーマンス最適化）
+const CHARACTERS_CACHE = GGST_CHARACTERS.map(char => ({ name: char, value: char }));
+
 export const data = new SlashCommandBuilder()
   .setName('ggst-history')
   .setDescription('[GGST] 対戦履歴を表示します')
   .addStringOption(option =>
     option
-      .setName('character')
-      .setDescription('特定のキャラクターに絞り込み（任意）')
+      .setName('opponent')
+      .setDescription('対戦相手のキャラクターで絞り込み（任意）')
+      .setRequired(false)
+      .setAutocomplete(true)
+  )
+  .addStringOption(option =>
+    option
+      .setName('mycharacter')
+      .setDescription('使用キャラクターで絞り込み（任意）')
       .setRequired(false)
       .setAutocomplete(true)
   )
@@ -26,34 +36,49 @@ export const data = new SlashCommandBuilder()
 export async function autocomplete(interaction: AutocompleteInteraction) {
   try {
     const focusedValue = interaction.options.getFocused().toLowerCase();
-    const filtered = GGST_CHARACTERS.filter(char =>
-      char.toLowerCase().includes(focusedValue)
+
+    if (!focusedValue) {
+      // 入力なしの場合は全キャラを返す（最大25件）
+      return await interaction.respond(CHARACTERS_CACHE.slice(0, 25));
+    }
+
+    const filtered = CHARACTERS_CACHE.filter(char =>
+      char.name.toLowerCase().includes(focusedValue)
     );
-    await interaction.respond(
-      filtered.slice(0, 25).map(char => ({ name: char, value: char }))
-    );
+
+    await interaction.respond(filtered.slice(0, 25));
   } catch (error) {
-    // Autocomplete エラーは無視（タイムアウトなど）
-    console.error('Autocomplete error:', error);
+    console.error('[history] Autocomplete error:', error);
   }
 }
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const userId = interaction.user.id;
-  const characterFilter = interaction.options.getString('character');
+  const opponentFilter = interaction.options.getString('opponent');
+  const myCharacterFilter = interaction.options.getString('mycharacter');
   const limit = interaction.options.getInteger('limit') || 10;
 
   // ユーザーを取得または作成
   const user = await UserModel.findOrCreate(userId);
 
   // 対戦履歴を取得
-  const matches = await MatchModel.getByUser(userId, limit, characterFilter || undefined);
+  const matches = await MatchModel.getByUser(
+    userId,
+    limit,
+    opponentFilter || undefined,
+    myCharacterFilter || undefined
+  );
 
   if (matches.length === 0) {
+    let noDataMessage = '対戦記録がありません。`/ggst-addnote`コマンドで記録を追加してください。';
+    if (opponentFilter || myCharacterFilter) {
+      const filters = [];
+      if (myCharacterFilter) filters.push(`使用キャラ: ${myCharacterFilter}`);
+      if (opponentFilter) filters.push(`vs ${opponentFilter}`);
+      noDataMessage = `${filters.join(', ')}の対戦記録がありません。`;
+    }
     await interaction.reply({
-      content: characterFilter
-        ? `${characterFilter}との対戦記録がありません。`
-        : '対戦記録がありません。`/ggst-addnote`コマンドで記録を追加してください。',
+      content: noDataMessage,
       flags: MessageFlags.Ephemeral
     });
     return;
@@ -82,7 +107,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   });
 
   // キャラクター別成績（上位5件）
-  if (charStats.length > 0 && !characterFilter) {
+  if (charStats.length > 0 && !opponentFilter && !myCharacterFilter) {
     const charStatsText = charStats.slice(0, 5).map(stat =>
       `vs ${stat.character}: ${stat.wins}勝 ${stat.losses}敗 (${stat.winRate.toFixed(1)}%)`
     ).join('\n');
@@ -104,15 +129,25 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     });
     const resultEmoji = match.result === 'win' ? '✅' : '❌';
     const resultText = match.result === 'win' ? '勝利' : '敗北';
-    let text = `${index + 1}. [${date}] vs ${match.opponent_character} ${resultEmoji}${resultText}`;
+    const myChar = match.my_character || user.main_character || '？';
+    let text = `${index + 1}. [${date}] ${myChar} vs ${match.opponent_character} ${resultEmoji}${resultText}`;
     if (match.note) {
       text += `\n   「${match.note}」`;
     }
     return text;
   }).join('\n\n');
 
+  // フィルター表示を生成
+  let filterText = '';
+  if (myCharacterFilter || opponentFilter) {
+    const filters = [];
+    if (myCharacterFilter) filters.push(myCharacterFilter);
+    if (opponentFilter) filters.push(`vs ${opponentFilter}`);
+    filterText = `（${filters.join(' ')}）`;
+  }
+
   embed.addFields({
-    name: characterFilter ? `【vs ${characterFilter}の直近${matches.length}戦】` : `【直近${matches.length}戦】`,
+    name: `【直近${matches.length}戦${filterText}】`,
     value: recentMatchesText,
     inline: false
   });

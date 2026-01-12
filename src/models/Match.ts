@@ -5,6 +5,7 @@ export class MatchModel {
   // 対戦記録を作成
   static async create(
     userDiscordId: string,
+    myCharacter: string | null,
     opponentCharacter: string,
     result: 'win' | 'loss',
     note?: string
@@ -13,10 +14,10 @@ export class MatchModel {
 
     const insertResult = await db.execute({
       sql: `
-        INSERT INTO matches (user_discord_id, opponent_character, result, note)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO matches (user_discord_id, my_character, opponent_character, result, note)
+        VALUES (?, ?, ?, ?, ?)
       `,
-      args: [userDiscordId, opponentCharacter, result, note || null]
+      args: [userDiscordId, myCharacter, opponentCharacter, result, note || null]
     });
 
     const selectResult = await db.execute({
@@ -31,16 +32,22 @@ export class MatchModel {
   static async getByUser(
     userDiscordId: string,
     limit?: number,
-    characterFilter?: string
+    opponentCharacterFilter?: string,
+    myCharacterFilter?: string
   ): Promise<Match[]> {
     const db = getDatabase();
 
     let query = 'SELECT * FROM matches WHERE user_discord_id = ?';
     const params: any[] = [userDiscordId];
 
-    if (characterFilter) {
+    if (opponentCharacterFilter) {
       query += ' AND opponent_character = ?';
-      params.push(characterFilter);
+      params.push(opponentCharacterFilter);
+    }
+
+    if (myCharacterFilter) {
+      query += ' AND my_character = ?';
+      params.push(myCharacterFilter);
     }
 
     query += ' ORDER BY match_date DESC';
@@ -59,7 +66,11 @@ export class MatchModel {
   }
 
   // 特定キャラとの対戦成績を取得
-  static async getStats(userDiscordId: string, opponentCharacter?: string): Promise<{
+  static async getStats(
+    userDiscordId: string,
+    opponentCharacter?: string,
+    myCharacter?: string
+  ): Promise<{
     total: number;
     wins: number;
     losses: number;
@@ -79,6 +90,11 @@ export class MatchModel {
     if (opponentCharacter) {
       query += ' AND opponent_character = ?';
       params.push(opponentCharacter);
+    }
+
+    if (myCharacter) {
+      query += ' AND my_character = ?';
+      params.push(myCharacter);
     }
 
     const result = await db.execute({

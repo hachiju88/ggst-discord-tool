@@ -1,5 +1,11 @@
 import { Client, GatewayIntentBits, Collection, REST, Routes } from 'discord.js';
 import { commandHandler } from './commands';
+import * as setmychar from './commands/setmychar';
+import * as addnote from './commands/addnote';
+import * as history from './commands/history';
+import * as strategy from './commands/strategy';
+import * as commonStrategy from './commands/common-strategy';
+import * as match from './commands/match';
 
 export function createClient(): Client {
   const client = new Client({
@@ -19,30 +25,39 @@ export function createClient(): Client {
     if (interaction.isAutocomplete()) {
       try {
         const { commandName } = interaction;
-        // コマンド名からファイル名へのマッピング
-        const commandFileMap: Record<string, string> = {
-          'ggst-setmychar': 'setmychar',
-          'ggst-addnote': 'addnote',
-          'ggst-history': 'history',
-          'ggst-strategy': 'strategy',
-          'ggst-common-strategy': 'common-strategy',
-          'ggst-match': 'match',
-          'ggst-export': 'export'
+
+        // コマンドモジュールのマッピング
+        const commandModules: Record<string, any> = {
+          'ggst-setmychar': setmychar,
+          'ggst-addnote': addnote,
+          'ggst-history': history,
+          'ggst-strategy': strategy,
+          'ggst-common-strategy': commonStrategy,
+          'ggst-match': match
         };
 
-        const fileName = commandFileMap[commandName];
-        if (!fileName) {
-          console.error(`Unknown command: ${commandName}`);
+        const commandModule = commandModules[commandName];
+
+        if (!commandModule) {
+          console.error(`[Autocomplete] Unknown command: ${commandName}`);
           return;
         }
 
-        const command = await import(`./commands/${fileName}`);
-
-        if (command.autocomplete) {
-          await command.autocomplete(interaction);
+        if (commandModule.autocomplete) {
+          await commandModule.autocomplete(interaction);
+        } else {
+          console.warn(`[Autocomplete] No autocomplete handler for: ${commandName}`);
         }
       } catch (error) {
-        console.error('Error handling autocomplete:', error);
+        console.error('[Autocomplete] Error handling autocomplete:', error);
+        // Discordのタイムアウトを避けるため、空の配列を返す
+        try {
+          if (!interaction.responded) {
+            await interaction.respond([]);
+          }
+        } catch (respondError) {
+          console.error('[Autocomplete] Failed to respond with empty array:', respondError);
+        }
       }
       return;
     }

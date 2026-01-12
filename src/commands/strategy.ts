@@ -4,6 +4,9 @@ import { GGST_CHARACTERS } from '../config/constants';
 import { UserModel } from '../models/User';
 import { StrategyModel } from '../models/Strategy';
 
+// キャラクター名を事前にキャッシュ（パフォーマンス最適化）
+const CHARACTERS_CACHE = GGST_CHARACTERS.map(char => ({ name: char, value: char }));
+
 export const data = new SlashCommandBuilder()
   .setName('ggst-strategy')
   .setDescription('[GGST] 個人専用の戦略を管理します')
@@ -42,15 +45,19 @@ export const data = new SlashCommandBuilder()
 export async function autocomplete(interaction: AutocompleteInteraction) {
   try {
     const focusedValue = interaction.options.getFocused().toLowerCase();
-    const filtered = GGST_CHARACTERS.filter(char =>
-      char.toLowerCase().includes(focusedValue)
+
+    if (!focusedValue) {
+      // 入力なしの場合は全キャラを返す（最大25件）
+      return await interaction.respond(CHARACTERS_CACHE.slice(0, 25));
+    }
+
+    const filtered = CHARACTERS_CACHE.filter(char =>
+      char.name.toLowerCase().includes(focusedValue)
     );
-    await interaction.respond(
-      filtered.slice(0, 25).map(char => ({ name: char, value: char }))
-    );
+
+    await interaction.respond(filtered.slice(0, 25));
   } catch (error) {
-    // Autocomplete エラーは無視（タイムアウトなど）
-    console.error('Autocomplete error:', error);
+    console.error('[strategy] Autocomplete error:', error);
   }
 }
 

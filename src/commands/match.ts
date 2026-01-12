@@ -6,6 +6,9 @@ import { MatchModel } from '../models/Match';
 import { StrategyModel } from '../models/Strategy';
 import { CommonStrategyModel } from '../models/CommonStrategy';
 
+// キャラクター名を事前にキャッシュ（パフォーマンス最適化）
+const CHARACTERS_CACHE = GGST_CHARACTERS.map(char => ({ name: char, value: char }));
+
 export const data = new SlashCommandBuilder()
   .setName('ggst-match')
   .setDescription('[GGST] 対戦開始時の情報を表示します')
@@ -15,32 +18,46 @@ export const data = new SlashCommandBuilder()
       .setDescription('対戦相手のキャラクター')
       .setRequired(true)
       .setAutocomplete(true)
+  )
+  .addStringOption(option =>
+    option
+      .setName('mycharacter')
+      .setDescription('使用キャラクター（未指定の場合はメインキャラ）')
+      .setRequired(false)
+      .setAutocomplete(true)
   );
 
 export async function autocomplete(interaction: AutocompleteInteraction) {
   try {
     const focusedValue = interaction.options.getFocused().toLowerCase();
-    const filtered = GGST_CHARACTERS.filter(char =>
-      char.toLowerCase().includes(focusedValue)
+
+    if (!focusedValue) {
+      // 入力なしの場合は全キャラを返す（最大25件）
+      return await interaction.respond(CHARACTERS_CACHE.slice(0, 25));
+    }
+
+    const filtered = CHARACTERS_CACHE.filter(char =>
+      char.name.toLowerCase().includes(focusedValue)
     );
-    await interaction.respond(
-      filtered.slice(0, 25).map(char => ({ name: char, value: char }))
-    );
+
+    await interaction.respond(filtered.slice(0, 25));
   } catch (error) {
-    // Autocomplete エラーは無視（タイムアウトなど）
-    console.error('Autocomplete error:', error);
+    console.error('[match] Autocomplete error:', error);
   }
 }
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const userId = interaction.user.id;
   const opponent = interaction.options.getString('opponent', true);
+  const myCharacterInput = interaction.options.getString('mycharacter');
 
   // ユーザーを取得または作成
   const user = await UserModel.findOrCreate(userId);
-  const mainChar = user.main_character;
 
-  if (!mainChar) {
+  // 使用キャラを決定（指定がなければメインキャラ）
+  const myCharacter = myCharacterInput || user.main_character;
+
+  if (!myCharacter) {
     await interaction.reply({
       content: 'まず `/ggst-setmychar` コマンドでメインキャラクターを設定してください。',
       flags: MessageFlags.Ephemeral
@@ -48,12 +65,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  // 対戦成績を取得
-  const stats = await MatchModel.getStats(userId, opponent);
+  // 対戦成績を取得（使用キャラでフィルタリング）
+  const stats = await MatchModel.getStats(userId, opponent, myCharacter);
   const winRate = stats.total > 0 ? ((stats.wins / stats.total) * 100).toFixed(1) : '0.0';
 
-  // 直近の対戦記録を取得（最大5件）
-  const recentMatches = await MatchModel.getByUser(userId, 5, opponent);
+  // 直近の対戦記録を取得（最大5件、使用キャラでフィルタリング）
+  const recentMatches = await MatchModel.getByUser(userId, 5, opponent, myCharacter);
 
   // 個人戦略を取得
   const personalStrategies = await StrategyModel.getByCharacter(userId, opponent);
@@ -70,7 +87,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   // 自分のキャラ
   embed.addFields({
     name: '【あなたのキャラ】',
-    value: mainChar,
+    value: myCharacter,
     inline: false
   });
 

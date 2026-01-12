@@ -69,9 +69,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         charMatches.forEach(match => {
           const date = new Date(match.match_date).toLocaleDateString('ja-JP');
           const result = match.result === 'win' ? '勝利' : '敗北';
-          markdown += `- [${date}] ${result}`;
+          const myChar = match.my_character || user.main_character || '？';
+          markdown += `- [${date}] ${myChar} vs ${match.opponent_character}: ${result}`;
           if (match.note) {
-            markdown += `: ${match.note}`;
+            markdown += ` - ${match.note}`;
           }
           markdown += `\n`;
         });

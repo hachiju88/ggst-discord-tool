@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS matches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_discord_id TEXT NOT NULL,
+    my_character TEXT,
     opponent_character TEXT NOT NULL,
     result TEXT NOT NULL CHECK(result IN ('win', 'loss')),
     note TEXT,

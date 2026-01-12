@@ -10,6 +10,7 @@ export interface User {
 export interface Match {
   id: number;
   user_discord_id: string;
+  my_character: string | null;
   opponent_character: string;
   result: 'win' | 'loss';
   note: string | null;
