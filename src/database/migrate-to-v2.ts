@@ -42,23 +42,163 @@ async function migrate() {
     console.log(`   Common Strategies: ${(commonStrategiesCount.rows[0] as any).count}\n`);
 
     // ===================================
-    // Step 2: 新テーブル作成
+    // Step 2: 新テーブル・新カラム作成
     // ===================================
-    console.log('🔨 Step 2: Creating new tables...');
+    console.log('🔨 Step 2: Creating new tables and columns...');
 
-    const schemaPath = path.join(__dirname, 'schema-v2.sql');
-    const schema = fs.readFileSync(schemaPath, 'utf-8');
+    // 2-1: charactersテーブル作成
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS characters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        name_en TEXT,
+        display_order INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('   ✅ characters table created');
 
-    // スキーマを個別のステートメントに分割して実行
-    const statements = schema
-      .split(';')
-      .map(s => s.trim())
-      .filter(s => s.length > 0 && !s.startsWith('--'));
+    // 2-2: 敗因テーブル作成
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS common_defeat_reasons (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reason TEXT NOT NULL UNIQUE,
+        display_order INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('   ✅ common_defeat_reasons table created');
 
-    for (const statement of statements) {
-      await db.execute(statement);
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS defeat_reasons (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_discord_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_discord_id, reason),
+        FOREIGN KEY (user_discord_id) REFERENCES users(discord_id)
+      )
+    `);
+    console.log('   ✅ defeat_reasons table created');
+
+    // 2-3: コンボ関連テーブル作成
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS character_moves (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id INTEGER NOT NULL,
+        move_name TEXT NOT NULL,
+        move_notation TEXT NOT NULL,
+        move_type TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(character_id, move_notation),
+        FOREIGN KEY (character_id) REFERENCES characters(id)
+      )
+    `);
+    console.log('   ✅ character_moves table created');
+
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS combos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_discord_id TEXT NOT NULL,
+        character_id INTEGER NOT NULL,
+        location TEXT NOT NULL CHECK(location IN ('center', 'corner')),
+        tension_gauge INTEGER NOT NULL CHECK(tension_gauge IN (0, 50, 100)),
+        starter TEXT NOT NULL CHECK(starter IN ('counter', 'normal')),
+        combo_notation TEXT NOT NULL,
+        damage INTEGER,
+        note TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_discord_id) REFERENCES users(discord_id),
+        FOREIGN KEY (character_id) REFERENCES characters(id)
+      )
+    `);
+    console.log('   ✅ combos table created');
+
+    // 2-4: 既存テーブルに新カラムを追加
+    console.log('   📌 Adding new columns to existing tables...');
+
+    // usersテーブル
+    try {
+      await db.execute('ALTER TABLE users ADD COLUMN main_character_id INTEGER');
+      console.log('   ✅ Added main_character_id to users');
+    } catch (error: any) {
+      if (error.message.includes('duplicate column name')) {
+        console.log('   ℹ️  main_character_id already exists in users');
+      } else {
+        throw error;
+      }
     }
-    console.log('   ✅ Tables created\n');
+
+    // matchesテーブル
+    try {
+      await db.execute('ALTER TABLE matches ADD COLUMN my_character_id INTEGER');
+      console.log('   ✅ Added my_character_id to matches');
+    } catch (error: any) {
+      if (error.message.includes('duplicate column name')) {
+        console.log('   ℹ️  my_character_id already exists in matches');
+      } else {
+        throw error;
+      }
+    }
+
+    try {
+      await db.execute('ALTER TABLE matches ADD COLUMN opponent_character_id INTEGER');
+      console.log('   ✅ Added opponent_character_id to matches');
+    } catch (error: any) {
+      if (error.message.includes('duplicate column name')) {
+        console.log('   ℹ️  opponent_character_id already exists in matches');
+      } else {
+        throw error;
+      }
+    }
+
+    try {
+      await db.execute('ALTER TABLE matches ADD COLUMN defeat_reason_id INTEGER');
+      console.log('   ✅ Added defeat_reason_id to matches');
+    } catch (error: any) {
+      if (error.message.includes('duplicate column name')) {
+        console.log('   ℹ️  defeat_reason_id already exists in matches');
+      } else {
+        throw error;
+      }
+    }
+
+    try {
+      await db.execute('ALTER TABLE matches ADD COLUMN priority TEXT CHECK(priority IN (\'critical\', \'important\', \'recommended\'))');
+      console.log('   ✅ Added priority to matches');
+    } catch (error: any) {
+      if (error.message.includes('duplicate column name')) {
+        console.log('   ℹ️  priority already exists in matches');
+      } else {
+        throw error;
+      }
+    }
+
+    // strategiesテーブル
+    try {
+      await db.execute('ALTER TABLE strategies ADD COLUMN target_character_id INTEGER');
+      console.log('   ✅ Added target_character_id to strategies');
+    } catch (error: any) {
+      if (error.message.includes('duplicate column name')) {
+        console.log('   ℹ️  target_character_id already exists in strategies');
+      } else {
+        throw error;
+      }
+    }
+
+    // common_strategiesテーブル
+    try {
+      await db.execute('ALTER TABLE common_strategies ADD COLUMN target_character_id INTEGER');
+      console.log('   ✅ Added target_character_id to common_strategies');
+    } catch (error: any) {
+      if (error.message.includes('duplicate column name')) {
+        console.log('   ℹ️  target_character_id already exists in common_strategies');
+      } else {
+        throw error;
+      }
+    }
+
+    console.log();
 
     // ===================================
     // Step 3: 初期データ投入
