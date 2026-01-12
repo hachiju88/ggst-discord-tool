@@ -53,7 +53,7 @@ export class UserModel {
       return null;
     }
 
-    const row = result.rows[0] as { main_character: string | null };
+    const row = result.rows[0] as unknown as { main_character: string | null };
     return row.main_character;
   }
 

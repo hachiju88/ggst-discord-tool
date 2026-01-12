@@ -20,7 +20,7 @@ export class CommonStrategyModel {
 
     const selectResult = await db.execute({
       sql: 'SELECT * FROM common_strategies WHERE id = ?',
-      args: [insertResult.lastInsertRowid]
+      args: [Number(insertResult.lastInsertRowid)]
     });
 
     return selectResult.rows[0] as unknown as CommonStrategy;

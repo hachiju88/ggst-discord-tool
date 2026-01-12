@@ -21,7 +21,7 @@ export class MatchModel {
 
     const selectResult = await db.execute({
       sql: 'SELECT * FROM matches WHERE id = ?',
-      args: [insertResult.lastInsertRowid]
+      args: [Number(insertResult.lastInsertRowid)]
     });
 
     return selectResult.rows[0] as unknown as Match;
@@ -86,7 +86,7 @@ export class MatchModel {
       args: params
     });
 
-    return result.rows[0] as {
+    return result.rows[0] as unknown as {
       total: number;
       wins: number;
       losses: number;
@@ -118,7 +118,7 @@ export class MatchModel {
       args: [userDiscordId]
     });
 
-    const results = result.rows as Array<{
+    const results = result.rows as unknown as Array<{
       character: string;
       total: number;
       wins: number;

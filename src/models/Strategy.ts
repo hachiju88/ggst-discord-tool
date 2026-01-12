@@ -21,7 +21,7 @@ export class StrategyModel {
 
     const selectResult = await db.execute({
       sql: 'SELECT * FROM strategies WHERE id = ?',
-      args: [insertResult.lastInsertRowid]
+      args: [Number(insertResult.lastInsertRowid)]
     });
 
     return selectResult.rows[0] as unknown as Strategy;
