@@ -60,20 +60,21 @@ export class CharacterModel {
   }
 
   // キャラクター名リストをIDリストに変換
-  static async getNamesForAutocomplete(): Promise<Array<{ name: string; value: string }>> {
+  static async getNamesForAutocomplete(): Promise<Array<{ name: string; value: string; nameEn?: string }>> {
     const characters = await this.getAll();
     return characters.map(char => ({
       name: char.name,
-      value: char.name
+      value: char.name,
+      nameEn: char.name_en || undefined
     }));
   }
 
   // キャラクター名のキャッシュ（オートコンプリート用）
-  private static cachedNames: Array<{ name: string; value: string }> | null = null;
+  private static cachedNames: Array<{ name: string; value: string; nameEn?: string }> | null = null;
   private static cacheTimestamp: number = 0;
   private static CACHE_DURATION = 1000 * 60 * 60; // 1時間
 
-  static async getCachedNamesForAutocomplete(): Promise<Array<{ name: string; value: string }>> {
+  static async getCachedNamesForAutocomplete(): Promise<Array<{ name: string; value: string; nameEn?: string }>> {
     const now = Date.now();
 
     // キャッシュが有効な場合はそれを返す

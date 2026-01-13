@@ -86,7 +86,8 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
     }
 
     const filtered = characters.filter(char =>
-      char.name.toLowerCase().includes(focusedValue)
+      char.name.toLowerCase().includes(focusedValue) ||
+      (char.nameEn && char.nameEn.toLowerCase().includes(focusedValue))
     );
 
     await interaction.respond(filtered.slice(0, 25));
