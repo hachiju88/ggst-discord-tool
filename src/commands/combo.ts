@@ -96,6 +96,72 @@ export const data = new SlashCommandBuilder()
           .setRequired(false)
           .addChoices(...STARTER_CHOICES)
       )
+  )
+  .addSubcommand(subcommand =>
+    subcommand
+      .setName('edit')
+      .setDescription('コンボを編集します')
+      .addIntegerOption(option =>
+        option
+          .setName('id')
+          .setDescription('コンボID（/gc viewで確認）')
+          .setRequired(true)
+          .setMinValue(1)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo')
+          .setDescription('新しいコンボ入力')
+          .setRequired(false)
+          .setMaxLength(500)
+      )
+      .addIntegerOption(option =>
+        option
+          .setName('damage')
+          .setDescription('新しいダメージ量')
+          .setRequired(false)
+          .setMinValue(0)
+      )
+      .addStringOption(option =>
+        option
+          .setName('note')
+          .setDescription('新しいメモ')
+          .setRequired(false)
+          .setMaxLength(500)
+      )
+      .addStringOption(option =>
+        option
+          .setName('location')
+          .setDescription('新しい位置')
+          .setRequired(false)
+          .addChoices(...LOCATION_CHOICES)
+      )
+      .addIntegerOption(option =>
+        option
+          .setName('tension')
+          .setDescription('新しいテンションゲージ')
+          .setRequired(false)
+          .addChoices(...TENSION_GAUGE_CHOICES)
+      )
+      .addStringOption(option =>
+        option
+          .setName('starter')
+          .setDescription('新しい始動')
+          .setRequired(false)
+          .addChoices(...STARTER_CHOICES)
+      )
+  )
+  .addSubcommand(subcommand =>
+    subcommand
+      .setName('delete')
+      .setDescription('コンボを削除します')
+      .addIntegerOption(option =>
+        option
+          .setName('id')
+          .setDescription('コンボID（/gc viewで確認）')
+          .setRequired(true)
+          .setMinValue(1)
+      )
   );
 
 // Alias command
@@ -188,6 +254,72 @@ export const aliasData = new SlashCommandBuilder()
           .setDescription('始動でフィルタ')
           .setRequired(false)
           .addChoices(...STARTER_CHOICES)
+      )
+  )
+  .addSubcommand(subcommand =>
+    subcommand
+      .setName('edit')
+      .setDescription('コンボを編集します')
+      .addIntegerOption(option =>
+        option
+          .setName('id')
+          .setDescription('コンボID（/gc viewで確認）')
+          .setRequired(true)
+          .setMinValue(1)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo')
+          .setDescription('新しいコンボ入力')
+          .setRequired(false)
+          .setMaxLength(500)
+      )
+      .addIntegerOption(option =>
+        option
+          .setName('damage')
+          .setDescription('新しいダメージ量')
+          .setRequired(false)
+          .setMinValue(0)
+      )
+      .addStringOption(option =>
+        option
+          .setName('note')
+          .setDescription('新しいメモ')
+          .setRequired(false)
+          .setMaxLength(500)
+      )
+      .addStringOption(option =>
+        option
+          .setName('location')
+          .setDescription('新しい位置')
+          .setRequired(false)
+          .addChoices(...LOCATION_CHOICES)
+      )
+      .addIntegerOption(option =>
+        option
+          .setName('tension')
+          .setDescription('新しいテンションゲージ')
+          .setRequired(false)
+          .addChoices(...TENSION_GAUGE_CHOICES)
+      )
+      .addStringOption(option =>
+        option
+          .setName('starter')
+          .setDescription('新しい始動')
+          .setRequired(false)
+          .addChoices(...STARTER_CHOICES)
+      )
+  )
+  .addSubcommand(subcommand =>
+    subcommand
+      .setName('delete')
+      .setDescription('コンボを削除します')
+      .addIntegerOption(option =>
+        option
+          .setName('id')
+          .setDescription('コンボID（/gc viewで確認）')
+          .setRequired(true)
+          .setMinValue(1)
       )
   );
 
@@ -377,7 +509,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       const locationEmoji = combo.location === 'center' ? '🔵' : '🔴';
       const starterEmoji = combo.starter === 'counter' ? '⚡' : '⭕';
 
-      let fieldName = `${locationEmoji} ${starterEmoji} テンション${combo.tension_gauge}%`;
+      let fieldName = `ID:${combo.id} ${locationEmoji} ${starterEmoji} テンション${combo.tension_gauge}%`;
       if (combo.damage) {
         fieldName += ` (${combo.damage}dmg)`;
       }
@@ -399,5 +531,86 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     }
 
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+
+  } else if (subcommand === 'edit') {
+    const id = interaction.options.getInteger('id', true);
+    const combo = interaction.options.getString('combo');
+    const damage = interaction.options.getInteger('damage');
+    const note = interaction.options.getString('note');
+    const location = interaction.options.getString('location') as 'center' | 'corner' | null;
+    const tension = interaction.options.getInteger('tension') as 0 | 50 | 100 | null;
+    const starter = interaction.options.getString('starter') as 'counter' | 'normal' | null;
+
+    // 少なくとも1つのフィールドが指定されているか確認
+    if (!combo && damage === null && note === null && !location && tension === null && !starter) {
+      await interaction.reply({
+        content: '❌ 少なくとも1つのフィールドを更新してください。',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    // コンボを更新
+    const updates: any = {};
+    if (combo !== null) updates.comboNotation = combo;
+    if (damage !== null) updates.damage = damage;
+    if (note !== null) updates.note = note;
+    if (location !== null) updates.location = location;
+    if (tension !== null) updates.tensionGauge = tension;
+    if (starter !== null) updates.starter = starter;
+
+    const updatedCombo = await ComboModel.update(id, userId, updates);
+
+    if (!updatedCombo) {
+      await interaction.reply({
+        content: '❌ コンボが見つからないか、編集権限がありません。',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    // キャラクター名を取得
+    const character = await CharacterModel.getById(updatedCombo.character_id);
+    const characterName = character?.name || '不明';
+
+    const locationText = updatedCombo.location === 'center' ? '画面中央' : '画面端';
+    const starterText = updatedCombo.starter === 'counter' ? 'カウンター' : '通常';
+
+    let response = `✅ コンボを更新しました (ID: ${id})\n\n`;
+    response += `キャラ: ${characterName}\n`;
+    response += `位置: ${locationText}\n`;
+    response += `テンション: ${updatedCombo.tension_gauge}%\n`;
+    response += `始動: ${starterText}\n`;
+    response += `コンボ: ${updatedCombo.combo_notation}\n`;
+    if (updatedCombo.damage) {
+      response += `ダメージ: ${updatedCombo.damage}\n`;
+    }
+    if (updatedCombo.note) {
+      response += `メモ: ${updatedCombo.note}\n`;
+    }
+
+    await interaction.reply({
+      content: response,
+      flags: MessageFlags.Ephemeral
+    });
+
+  } else if (subcommand === 'delete') {
+    const id = interaction.options.getInteger('id', true);
+
+    // コンボを削除
+    const deleted = await ComboModel.delete(id, userId);
+
+    if (!deleted) {
+      await interaction.reply({
+        content: '❌ コンボが見つからないか、削除権限がありません。',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    await interaction.reply({
+      content: `✅ コンボを削除しました (ID: ${id})`,
+      flags: MessageFlags.Ephemeral
+    });
   }
 }

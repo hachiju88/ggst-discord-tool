@@ -141,6 +141,79 @@ export class ComboModel {
     return result.rows as unknown as Combo[];
   }
 
+  // コンボを更新
+  static async update(
+    id: number,
+    userDiscordId: string,
+    updates: {
+      comboNotation?: string;
+      damage?: number | null;
+      note?: string | null;
+      location?: 'center' | 'corner';
+      tensionGauge?: 0 | 50 | 100;
+      starter?: 'counter' | 'normal';
+    }
+  ): Promise<Combo | null> {
+    const db = getDatabase();
+
+    // 更新対象のコンボが存在し、ユーザーが所有しているか確認
+    const existing = await db.execute({
+      sql: 'SELECT * FROM combos WHERE id = ? AND user_discord_id = ?',
+      args: [id, userDiscordId]
+    });
+
+    if (existing.rows.length === 0) {
+      return null;
+    }
+
+    // 更新するフィールドを構築
+    const fields: string[] = [];
+    const args: any[] = [];
+
+    if (updates.comboNotation !== undefined) {
+      fields.push('combo_notation = ?');
+      args.push(updates.comboNotation);
+    }
+    if (updates.damage !== undefined) {
+      fields.push('damage = ?');
+      args.push(updates.damage);
+    }
+    if (updates.note !== undefined) {
+      fields.push('note = ?');
+      args.push(updates.note);
+    }
+    if (updates.location !== undefined) {
+      fields.push('location = ?');
+      args.push(updates.location);
+    }
+    if (updates.tensionGauge !== undefined) {
+      fields.push('tension_gauge = ?');
+      args.push(updates.tensionGauge);
+    }
+    if (updates.starter !== undefined) {
+      fields.push('starter = ?');
+      args.push(updates.starter);
+    }
+
+    if (fields.length === 0) {
+      return existing.rows[0] as unknown as Combo;
+    }
+
+    args.push(id, userDiscordId);
+
+    await db.execute({
+      sql: `UPDATE combos SET ${fields.join(', ')} WHERE id = ? AND user_discord_id = ?`,
+      args
+    });
+
+    const result = await db.execute({
+      sql: 'SELECT * FROM combos WHERE id = ?',
+      args: [id]
+    });
+
+    return result.rows[0] as unknown as Combo;
+  }
+
   // コンボを削除
   static async delete(id: number, userDiscordId: string): Promise<boolean> {
     const db = getDatabase();
