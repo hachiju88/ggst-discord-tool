@@ -65,6 +65,9 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
 }
 
 export async function execute(interaction: ChatInputCommandInteraction) {
+  // 重い処理のため、先に応答を延期
+  await interaction.deferReply({ ephemeral: true });
+
   const userId = interaction.user.id;
   const opponent = interaction.options.getString('opponent', true);
   const myCharacterInput = interaction.options.getString('mycharacter');
@@ -76,9 +79,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const myCharacter = myCharacterInput || user.main_character;
 
   if (!myCharacter) {
-    await interaction.reply({
-      content: 'まず `/ggst-setmychar` コマンドでメインキャラクターを設定してください。',
-      flags: MessageFlags.Ephemeral
+    await interaction.editReply({
+      content: 'まず `/ggst-setmychar` コマンドでメインキャラクターを設定してください。'
     });
     return;
   }
@@ -232,7 +234,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   embed.setFooter({ text: '頑張ってください！🔥' });
 
-  await interaction.reply({ embeds: [embed] });
+  await interaction.editReply({ embeds: [embed] });
 
   // 共通対策情報をテキストで送信（読み上げ用）
   if (commonStrategies.length > 0) {
