@@ -110,10 +110,18 @@ export const data = new SlashCommandBuilder()
       )
       .addStringOption(option =>
         option
+          .setName('character')
+          .setDescription('キャラクター（技名オートコンプリート用）')
+          .setRequired(false)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
           .setName('combo')
           .setDescription('新しいコンボ入力')
           .setRequired(false)
           .setMaxLength(500)
+          .setAutocomplete(true)
       )
       .addIntegerOption(option =>
         option
@@ -269,10 +277,18 @@ export const aliasData = new SlashCommandBuilder()
       )
       .addStringOption(option =>
         option
+          .setName('character')
+          .setDescription('キャラクター（技名オートコンプリート用）')
+          .setRequired(false)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
           .setName('combo')
           .setDescription('新しいコンボ入力')
           .setRequired(false)
           .setMaxLength(500)
+          .setAutocomplete(true)
       )
       .addIntegerOption(option =>
         option
