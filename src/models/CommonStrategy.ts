@@ -1,21 +1,29 @@
 import { getDatabase } from '../database';
 import { CommonStrategy } from '../types';
+import { CharacterModel } from './Character';
 
 export class CommonStrategyModel {
   // 共通戦略を作成
   static async create(
-    targetCharacter: string,
+    targetCharacterName: string,
     strategyContent: string,
     createdByDiscordId: string
   ): Promise<CommonStrategy> {
     const db = getDatabase();
 
+    // キャラ名からIDを取得
+    const targetChar = await CharacterModel.getByName(targetCharacterName);
+    if (!targetChar) {
+      throw new Error(`Character not found: ${targetCharacterName}`);
+    }
+
+    // 新旧両方のカラムに挿入
     const insertResult = await db.execute({
       sql: `
-        INSERT INTO common_strategies (target_character, strategy_content, created_by_discord_id)
-        VALUES (?, ?, ?)
+        INSERT INTO common_strategies (target_character, target_character_id, strategy_content, created_by_discord_id)
+        VALUES (?, ?, ?, ?)
       `,
-      args: [targetCharacter, strategyContent, createdByDiscordId]
+      args: [targetCharacterName, targetChar.id, strategyContent, createdByDiscordId]
     });
 
     const selectResult = await db.execute({
@@ -27,29 +35,46 @@ export class CommonStrategyModel {
   }
 
   // 特定キャラの共通戦略を取得
-  static async getByCharacter(targetCharacter: string): Promise<CommonStrategy[]> {
+  static async getByCharacter(targetCharacterName: string): Promise<CommonStrategy[]> {
     const db = getDatabase();
 
-    const result = await db.execute({
-      sql: `
-        SELECT * FROM common_strategies
-        WHERE target_character = ?
-        ORDER BY created_at DESC
-      `,
-      args: [targetCharacter]
-    });
-
-    return result.rows as unknown as CommonStrategy[];
+    // キャラ名からIDを取得してID列でフィルタ
+    const targetChar = await CharacterModel.getByName(targetCharacterName);
+    if (targetChar) {
+      const result = await db.execute({
+        sql: `
+          SELECT * FROM common_strategies
+          WHERE target_character_id = ?
+          ORDER BY created_at DESC
+        `,
+        args: [targetChar.id]
+      });
+      return result.rows as unknown as CommonStrategy[];
+    } else {
+      // 旧カラムでフォールバック
+      const result = await db.execute({
+        sql: `
+          SELECT * FROM common_strategies
+          WHERE target_character = ?
+          ORDER BY created_at DESC
+        `,
+        args: [targetCharacterName]
+      });
+      return result.rows as unknown as CommonStrategy[];
+    }
   }
 
   // 全ての共通戦略を取得
   static async getAll(): Promise<CommonStrategy[]> {
     const db = getDatabase();
 
+    // charactersテーブルとJOINしてキャラ名でソート
     const result = await db.execute({
       sql: `
-        SELECT * FROM common_strategies
-        ORDER BY target_character, created_at DESC
+        SELECT cs.*
+        FROM common_strategies cs
+        LEFT JOIN characters c ON cs.target_character_id = c.id
+        ORDER BY COALESCE(c.display_order, 999), COALESCE(c.name, cs.target_character), cs.created_at DESC
       `,
       args: []
     });

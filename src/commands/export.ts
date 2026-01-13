@@ -9,6 +9,11 @@ export const data = new SlashCommandBuilder()
   .setName('ggst-export')
   .setDescription('[GGST] NotebookLM用にデータをエクスポートします');
 
+// Alias command
+export const aliasData = new SlashCommandBuilder()
+  .setName('ge')
+  .setDescription('[GGST] NotebookLM用にデータをエクスポートします (ggst-export の短縮形)');
+
 export async function execute(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ ephemeral: true });
 

@@ -1,13 +1,11 @@
 import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import type { ChatInputCommandInteraction, AutocompleteInteraction } from 'discord.js';
-import { GGST_CHARACTERS } from '../config/constants';
 import { UserModel } from '../models/User';
 import { MatchModel } from '../models/Match';
 import { StrategyModel } from '../models/Strategy';
 import { CommonStrategyModel } from '../models/CommonStrategy';
-
-// キャラクター名を事前にキャッシュ（パフォーマンス最適化）
-const CHARACTERS_CACHE = GGST_CHARACTERS.map(char => ({ name: char, value: char }));
+import { CharacterModel } from '../models/Character';
+import { DefeatReasonModel } from '../models/DefeatReason';
 
 export const data = new SlashCommandBuilder()
   .setName('ggst-match')
@@ -27,16 +25,36 @@ export const data = new SlashCommandBuilder()
       .setAutocomplete(true)
   );
 
+// Alias command
+export const aliasData = new SlashCommandBuilder()
+  .setName('gm')
+  .setDescription('[GGST] 対戦開始時の情報を表示します (ggst-match の短縮形)')
+  .addStringOption(option =>
+    option
+      .setName('opponent')
+      .setDescription('対戦相手のキャラクター')
+      .setRequired(true)
+      .setAutocomplete(true)
+  )
+  .addStringOption(option =>
+    option
+      .setName('mycharacter')
+      .setDescription('使用キャラクター（未指定の場合はメインキャラ）')
+      .setRequired(false)
+      .setAutocomplete(true)
+  );
+
 export async function autocomplete(interaction: AutocompleteInteraction) {
   try {
     const focusedValue = interaction.options.getFocused().toLowerCase();
+    const characters = await CharacterModel.getCachedNamesForAutocomplete();
 
     if (!focusedValue) {
       // 入力なしの場合は全キャラを返す（最大25件）
-      return await interaction.respond(CHARACTERS_CACHE.slice(0, 25));
+      return await interaction.respond(characters.slice(0, 25));
     }
 
-    const filtered = CHARACTERS_CACHE.filter(char =>
+    const filtered = characters.filter(char =>
       char.name.toLowerCase().includes(focusedValue)
     );
 
@@ -69,8 +87,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const stats = await MatchModel.getStats(userId, opponent, myCharacter);
   const winRate = stats.total > 0 ? ((stats.wins / stats.total) * 100).toFixed(1) : '0.0';
 
-  // 直近の対戦記録を取得（最大5件、使用キャラでフィルタリング）
-  const recentMatches = await MatchModel.getByUser(userId, 5, opponent, myCharacter);
+  // 敗因トップ3を取得
+  const defeatReasonStats = await MatchModel.getDefeatReasonStats(userId, opponent, myCharacter);
+
+  // 優先度別のコメントを取得
+  const criticalComments = await MatchModel.getByUserWithPriority(userId, opponent, myCharacter, 'critical');
+  const importantComments = await MatchModel.getByUserWithPriority(userId, opponent, myCharacter, 'important');
+  const recommendedComments = await MatchModel.getByUserWithPriority(userId, opponent, myCharacter, 'recommended');
 
   // 個人戦略を取得
   const personalStrategies = await StrategyModel.getByCharacter(userId, opponent);
@@ -78,38 +101,107 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   // 共通戦略を取得
   const commonStrategies = await CommonStrategyModel.getByCharacter(opponent);
 
+  // 直近の対戦記録を取得（最大5件、使用キャラでフィルタリング）
+  const recentMatches = await MatchModel.getByUser(userId, 5, opponent, myCharacter);
+
   // Embed作成
   const embed = new EmbedBuilder()
     .setColor(0xff4500)
-    .setTitle(`⚔️ vs ${opponent} の対戦情報`)
+    .setTitle(`⚔️ ${myCharacter} vs ${opponent}`)
     .setTimestamp();
-
-  // 自分のキャラ
-  embed.addFields({
-    name: '【あなたのキャラ】',
-    value: myCharacter,
-    inline: false
-  });
 
   // 過去の戦績
   const statsText = stats.total > 0
-    ? `総対戦数: ${stats.total}戦\n勝利: ${stats.wins}勝 / 敗北: ${stats.losses}敗\n勝率: ${winRate}%`
+    ? `${stats.wins}勝 ${stats.losses}敗（勝率: ${winRate}%）`
     : `まだ対戦記録がありません`;
 
   embed.addFields({
-    name: '【過去の戦績】',
+    name: '【戦績】',
     value: statsText,
     inline: false
   });
 
-  // 個人戦略
-  if (personalStrategies.length > 0) {
-    const personalText = personalStrategies.map((strat, i) =>
+  // 敗因トップ3
+  if (defeatReasonStats.length > 0) {
+    const defeatReasonTexts: string[] = [];
+    for (const stat of defeatReasonStats) {
+      // 共通敗因またはユーザー独自敗因から名前を取得
+      const commonReason = await DefeatReasonModel.getCommonById(stat.defeat_reason_id);
+      const userReason = commonReason ? null : await DefeatReasonModel.getById(stat.defeat_reason_id);
+      const reasonName = commonReason?.reason || userReason?.reason || '不明';
+      defeatReasonTexts.push(`${reasonName}（${stat.count}回）`);
+    }
+
+    embed.addFields({
+      name: '【敗因トップ3】',
+      value: defeatReasonTexts.join('\n'),
+      inline: false
+    });
+  }
+
+  // 優先度別コメント - Critical
+  if (criticalComments.length > 0) {
+    const criticalTexts = criticalComments.slice(0, 3).map(match => {
+      const note = match.note || '（メモなし）';
+      return `🔴 ${note}`;
+    });
+
+    embed.addFields({
+      name: '【🔴 重要（絶対に覚える）】',
+      value: criticalTexts.join('\n'),
+      inline: false
+    });
+  }
+
+  // 優先度別コメント - Important
+  if (importantComments.length > 0) {
+    const importantTexts = importantComments.slice(0, 3).map(match => {
+      const note = match.note || '（メモなし）';
+      return `🟡 ${note}`;
+    });
+
+    embed.addFields({
+      name: '【🟡 大事（できれば覚える）】',
+      value: importantTexts.join('\n'),
+      inline: false
+    });
+  }
+
+  // 優先度別コメント - Recommended
+  if (recommendedComments.length > 0) {
+    const recommendedTexts = recommendedComments.slice(0, 3).map(match => {
+      const note = match.note || '（メモなし）';
+      return `🟢 ${note}`;
+    });
+
+    embed.addFields({
+      name: '【🟢 推奨（余裕があれば）】',
+      value: recommendedTexts.join('\n'),
+      inline: false
+    });
+  }
+
+  // 共通対策情報
+  if (commonStrategies.length > 0) {
+    const commonText = commonStrategies.slice(0, 3).map((strat, i) =>
       `${i + 1}. ${strat.strategy_content}`
     ).join('\n');
 
     embed.addFields({
-      name: '【あなたの戦略メモ】',
+      name: '【共通対策】',
+      value: commonText,
+      inline: false
+    });
+  }
+
+  // 個人戦略
+  if (personalStrategies.length > 0) {
+    const personalText = personalStrategies.slice(0, 3).map((strat, i) =>
+      `${i + 1}. ${strat.strategy_content}`
+    ).join('\n');
+
+    embed.addFields({
+      name: '【個人戦略】',
       value: personalText,
       inline: false
     });
@@ -122,8 +214,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         month: '2-digit',
         day: '2-digit'
       });
-      const resultEmoji = match.result === 'win' ? '✅' : '❌';
-      const resultText = match.result === 'win' ? '勝利' : '敗北';
+      const resultEmoji = match.result === 'win' ? '✅' : match.result === 'loss' ? '❌' : '📝';
+      const resultText = match.result === 'win' ? '勝' : match.result === 'loss' ? '敗' : '-';
       let text = `[${date}] ${resultEmoji}${resultText}`;
       if (match.note) {
         text += `: ${match.note}`;
@@ -132,7 +224,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     }).join('\n');
 
     embed.addFields({
-      name: '【直近の対戦メモ】',
+      name: '【直近5戦】',
       value: recentText,
       inline: false
     });

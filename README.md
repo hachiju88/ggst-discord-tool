@@ -18,58 +18,57 @@ Discord botでGuilty Gear Striveの対戦記録・戦略・コンボを包括的
 - [開発ガイド](#開発ガイド)
 - [マイグレーション](#マイグレーション)
 - [デプロイ](#デプロイ)
-- [今後の実装予定](#今後の実装予定)
 - [トラブルシューティング](#トラブルシューティング)
 
 ---
 
 ## 主な機能
 
-### ✅ 現在利用可能
+### ✅ 実装済み機能
 
-- **対戦記録管理**
-  - 勝敗・メモの記録
-  - 使用キャラクター別の記録
-  - 対戦相手別の統計
-  - キャラクター別勝率表示
-
-- **戦略管理**
-  - 個人専用戦略メモ（自分だけに表示）
-  - 全ユーザー共通の対策情報（全員に表示）
-  - キャラクター別に整理
-
-- **NotebookLM連携**
-  - 対戦データをMarkdown形式でエクスポート
-  - NotebookLMにアップロードしてAI分析
-  - 分析結果を個人戦略として保存
-
-- **オートコンプリート最適化**
-  - キャラクター名の高速入力補完
-  - 約10倍の速度改善（キャッシュ機構）
-  - 空入力時の即座応答
-
-### 🚧 実装中（v2アップデート）
-
+#### 🎮 対戦記録管理
+- 勝敗・メモの記録
+- 使用キャラクター別の記録
+- 対戦相手別の統計
+- キャラクター別勝率表示
 - **敗因分析機能**
   - 共通敗因マスタ（20種類）
   - ユーザー独自敗因登録
-  - 敗因トップ3の自動集計
+  - 敗因トップ3の自動集計・表示
+- **優先度機能**
+  - 🔴 重要（絶対に覚える）
+  - 🟡 大事（できれば覚える）
+  - 🟢 推奨（余裕があれば）
 
-- **プライオリティ機能**
-  - `critical` - 最重要（全員に共有）
-  - `important` - 重要（自分用）
-  - `recommended` - 推奨（自分用）
+#### 📚 戦略管理
+- 個人専用戦略メモ（自分だけに表示）
+- 全ユーザー共通の対策情報（全員に表示）
+- キャラクター別に整理
 
-- **コマンド簡略化**
-  - 音声入力対応を見据えた短縮コマンド
-  - `/ggst-match` → `/gm` など
+#### 🥊 コンボ管理
+- キャラクター別コンボ登録
+- 場所・テンションゲージ・始動タイプ別の整理
+- ダメージ量・メモの記録
+- フィルタリング機能
 
-### 📅 今後実装予定
+#### 🎯 技データ管理
+- 全32キャラクターの技データ（564+ moves）
+- 技の追加・編集・削除（CRUD操作）
+- コンボ入力時の技名オートコンプリート
 
-- **コンボ管理機能**
-  - キャラクター別コンボ登録
-  - 場所・ゲージ・始動別の整理
-  - コマンド技の入力補完
+#### 🤖 NotebookLM連携
+- 対戦データをMarkdown形式でエクスポート
+- NotebookLMにアップロードしてAI分析
+- 分析結果を個人戦略として保存
+
+#### ⚡ オートコンプリート最適化
+- キャラクター名の高速入力補完
+- 約10倍の速度改善（キャッシュ機構）
+- 空入力時の即座応答
+
+#### 🎤 音声入力対応
+- 全コマンドの短縮エイリアス対応
+- `/ggst-match` → `/gm` など
 
 ---
 
@@ -119,21 +118,21 @@ Discord botでGuilty Gear Striveの対戦記録・戦略・コンボを包括的
 
 ### 現在のバージョン: v2
 
-v2スキーマでは、キャラクター名を文字列からID管理に変更し、敗因管理・プライオリティ機能・コンボ管理の基盤を追加しました。
+v2スキーマでは、キャラクター名を文字列からID管理に変更し、敗因管理・プライオリティ機能・コンボ管理・技データ管理を完全実装しました。
 
 #### 主要テーブル
 
 | テーブル | 説明 | レコード数 |
 |---------|------|----------|
 | `characters` | キャラクターマスタ | 32 |
-| `users` | ユーザー情報 | - |
-| `matches` | 対戦記録 | - |
-| `strategies` | 個人戦略 | - |
-| `common_strategies` | 共通対策 | - |
-| `defeat_reasons` | ユーザー独自敗因 | - |
+| `users` | ユーザー情報 | 動的 |
+| `matches` | 対戦記録 | 動的 |
+| `strategies` | 個人戦略 | 動的 |
+| `common_strategies` | 共通対策 | 動的 |
+| `defeat_reasons` | ユーザー独自敗因 | 動的 |
 | `common_defeat_reasons` | 共通敗因マスタ | 20 |
-| `character_moves` | コマンド技 (未使用) | 0 |
-| `combos` | コンボ情報 (未使用) | 0 |
+| `character_moves` | コマンド技データ | 564+ |
+| `combos` | コンボ情報 | 動的 |
 
 #### ER図（簡略版）
 
@@ -143,8 +142,8 @@ users                    characters
 │discord_id PK │        │id PK         │
 │main_char_id  │───────▶│name          │
 └──────────────┘        │name_en       │
-       │                └──────────────┘
-       │                       ▲
+       │                └──────┬───────┘
+       │                       │
        │                       │
        ▼                       │
 matches                        │
@@ -158,6 +157,25 @@ matches                        │
 │priority      │
 │note          │
 └──────────────┘
+       │
+       ▼
+combos                  character_moves
+┌──────────────┐       ┌──────────────┐
+│id PK         │       │id PK         │
+│user_id       │       │character_id  │───┐
+│character_id  │───────│move_name     │   │
+│location      │       │move_notation │   │
+│tension_gauge │       │move_type     │   │
+│starter       │       └──────────────┘   │
+│combo_notation│                          │
+│damage        │                          │
+│note          │                          │
+└──────────────┘                          │
+                                          │
+                                          │
+                              ┌───────────┘
+                              ▼
+                         characters
 ```
 
 詳細は [MIGRATION-V2.md](./MIGRATION-V2.md) を参照してください。
@@ -254,13 +272,20 @@ npm run migrate:v2
 - 32キャラクター登録
 - 20種類の共通敗因登録
 
-### 7. コマンド登録
+### 7. キャラクター技データの登録（オプション）
+
+```bash
+# 全32キャラクターの技データを登録（564+ moves）
+npm run seed:moves
+```
+
+### 8. コマンド登録
 
 ```bash
 npm run register-commands
 ```
 
-### 8. 起動
+### 9. 起動
 
 ```bash
 # 開発モード（ホットリロード）
@@ -275,54 +300,99 @@ npm start
 
 ## コマンド一覧
 
-### 現在利用可能なコマンド
+### 全コマンド（18コマンド）
 
-| コマンド | 説明 | オプション |
-|---------|------|----------|
-| `/ggst-setmychar` | メインキャラを設定 | `character`(必須) |
-| `/ggst-match` | 対戦開始時の情報表示 | `opponent`(必須), `mycharacter`(任意) |
-| `/ggst-addnote` | 対戦記録を追加 | `opponent`(必須), `result`(必須), `mycharacter`(任意), `note`(任意) |
-| `/ggst-history` | 対戦履歴を表示 | `opponent`(任意), `mycharacter`(任意), `limit`(任意) |
-| `/ggst-strategy add` | 個人戦略を追加 | `character`(必須), `content`(必須) |
-| `/ggst-strategy view` | 個人戦略を表示 | `character`(必須) |
-| `/ggst-common-strategy add` | 共通対策を追加 | `character`(必須), `content`(必須) |
-| `/ggst-common-strategy view` | 共通対策を表示 | `character`(必須) |
-| `/ggst-export` | NotebookLM用エクスポート | なし |
+すべてのコマンドは短縮エイリアスに対応しています。
+
+#### 基本コマンド
+
+| 完全版コマンド | エイリアス | 説明 |
+|--------------|-----------|------|
+| `/ggst-setmychar` | `/gs` | メインキャラを設定 |
+| `/ggst-match` | `/gm` | 対戦開始時の情報表示（敗因統計・優先度別コメント付き） |
+| `/ggst-addnote` | `/gn` | 対戦記録を追加（敗因・優先度対応） |
+| `/ggst-history` | `/gh` | 対戦履歴を表示 |
+| `/ggst-export` | `/ge` | NotebookLM用エクスポート |
+
+#### 戦略管理
+
+| 完全版コマンド | エイリアス | サブコマンド | 説明 |
+|--------------|-----------|------------|------|
+| `/ggst-strategy` | `/gps` | `add` | 個人戦略を追加 |
+|  |  | `view` | 個人戦略を表示 |
+| `/ggst-common-strategy` | `/gcs` | `add` | 共通対策を追加 |
+|  |  | `view` | 共通対策を表示 |
+
+#### コンボ管理
+
+| 完全版コマンド | エイリアス | サブコマンド | 説明 |
+|--------------|-----------|------------|------|
+| `/ggst-combo` | `/gc` | `add` | コンボを追加 |
+|  |  | `view` | コンボを表示 |
+
+#### 技データ管理
+
+| 完全版コマンド | エイリアス | サブコマンド | 説明 |
+|--------------|-----------|------------|------|
+| `/ggst-move` | `/gmv` | `add` | 技を追加 |
+|  |  | `view` | 技一覧を表示 |
+|  |  | `edit` | 技を編集 |
+|  |  | `delete` | 技を削除 |
 
 ### 使用例
 
-```
+```bash
 # 初回セットアップ
-/ggst-setmychar character:ソル=バッドガイ
+/gs character:ソル=バッドガイ
 
-# 対戦前に情報確認
-/ggst-match opponent:カイ=キスク mycharacter:ソル=バッドガイ
+# 対戦前に情報確認（敗因統計・優先度別コメント表示）
+/gm opponent:カイ=キスク
 
-# 対戦後に記録
-/ggst-addnote opponent:カイ=キスク result:win note:昇龍対策が効いた
+# 対戦後に記録（敗因・優先度付き）
+/gn opponent:カイ=キスク result:loss defeat_reason:対空が甘い priority:critical note:昇龍を確実に落とす
 
 # 対戦履歴確認
-/ggst-history opponent:カイ=キスク limit:10
+/gh opponent:カイ=キスク limit:10
+
+# コンボ登録
+/gc add character:ソル=バッドガイ location:画面中央 tension:50 starter:通常 combo:5K > 6H > 623H damage:180 note:基本コンボ
+
+# コンボ表示（フィルタ可能）
+/gc view character:ソル=バッドガイ location:画面端 tension:100
+
+# 技データ追加
+/gmv add character:ソル=バッドガイ move_name:ガンフレイム move_notation:236P
+
+# 技データ表示
+/gmv view character:ソル=バッドガイ
 
 # NotebookLM連携
-/ggst-export
+/ge
 → ファイルをダウンロード → NotebookLMにアップロード → 分析
-→ 得た知見を /ggst-strategy add で登録
+→ 得た知見を /gps add で登録
 ```
 
-### 今後追加予定のコマンド（v2完成後）
+### コマンド詳細
 
-| コマンド | 説明 |
-|---------|------|
-| `/gs` | `/ggst-setmychar`の短縮版 |
-| `/gm` | `/ggst-match`の短縮版 |
-| `/gn` | `/ggst-addnote`の短縮版（敗因・プライオリティ追加） |
-| `/gh` | `/ggst-history`の短縮版 |
-| `/gps` | `/ggst-strategy`の短縮版 |
-| `/gcs` | `/ggst-common-strategy`の短縮版 |
-| `/ge` | `/ggst-export`の短縮版 |
-| `/gc add` | コンボ追加 |
-| `/gc view` | コンボ表示 |
+#### `/gn` (addnote) のパラメータ
+
+- `opponent` (必須): 対戦相手のキャラ
+- `result` (任意): 勝敗（win/loss）
+- `defeat_reason` (任意): 敗因（オートコンプリート対応）
+- `priority` (任意): 優先度（critical/important/recommended）
+- `note` (任意): メモ（最大1000文字）
+- `mycharacter` (任意): 使用キャラ（未設定時はメインキャラ）
+
+#### `/gm` (match) の表示内容
+
+- 📊 戦績（勝率・対戦数）
+- 📉 敗因トップ3（敗北理由の統計）
+- 🔴 重要（絶対に覚える）：critical優先度のコメント
+- 🟡 大事（できれば覚える）：important優先度のコメント
+- 🟢 推奨（余裕があれば）：recommended優先度のコメント
+- 📚 共通対策情報
+- 📝 個人戦略
+- 📋 直近5戦の詳細
 
 ---
 
@@ -336,14 +406,17 @@ ggst-discord-tool/
 │   ├── index.ts              # エントリーポイント
 │   ├── bot.ts                # Discord Client初期化
 │   ├── config/
-│   │   └── constants.ts      # 定数定義
+│   │   └── constants.ts      # 定数定義（優先度・位置・ゲージ等）
 │   ├── database/
 │   │   ├── index.ts          # DB接続
 │   │   ├── schema-v2.sql     # 現行スキーマ
 │   │   ├── seed-data.sql     # 初期データ
+│   │   ├── seed-character-moves.ts  # 技データ（32キャラ）
 │   │   └── migrate-to-v2.ts  # マイグレーション
 │   ├── models/
 │   │   ├── Character.ts      # キャラクターモデル
+│   │   ├── CharacterMove.ts  # 技データモデル
+│   │   ├── Combo.ts          # コンボモデル
 │   │   ├── DefeatReason.ts   # 敗因モデル
 │   │   ├── User.ts           # ユーザーモデル
 │   │   ├── Match.ts          # 対戦記録モデル
@@ -351,19 +424,22 @@ ggst-discord-tool/
 │   │   └── CommonStrategy.ts # 共通戦略モデル
 │   ├── commands/
 │   │   ├── index.ts          # コマンドルーティング
-│   │   ├── setmychar.ts
-│   │   ├── match.ts
-│   │   ├── addnote.ts
-│   │   ├── history.ts
-│   │   ├── strategy.ts
-│   │   ├── common-strategy.ts
-│   │   └── export.ts
+│   │   ├── setmychar.ts      # /gs
+│   │   ├── match.ts          # /gm
+│   │   ├── addnote.ts        # /gn
+│   │   ├── history.ts        # /gh
+│   │   ├── strategy.ts       # /gps
+│   │   ├── common-strategy.ts # /gcs
+│   │   ├── export.ts         # /ge
+│   │   ├── combo.ts          # /gc
+│   │   └── move.ts           # /gmv
 │   └── types/
 │       └── index.ts          # 型定義
 ├── dist/                     # ビルド出力
 ├── MIGRATION-V2.md           # マイグレーションガイド
 ├── package.json
 ├── tsconfig.json
+├── render.yaml               # Renderデプロイ設定
 └── README.md
 ```
 
@@ -381,6 +457,7 @@ npm start                # 本番モード起動
 
 # データベース
 npm run migrate:v2       # v2スキーマへマイグレーション
+npm run seed:moves       # キャラクター技データ登録（564+ moves）
 
 # Discord
 npm run register-commands # コマンド登録
@@ -406,6 +483,7 @@ npm run dev
 # データベース確認
 turso db shell ggst-discord-bot
 > SELECT * FROM characters;
+> SELECT * FROM character_moves LIMIT 10;
 ```
 
 ---
@@ -488,7 +566,13 @@ Render Shell（Dashboard → Shell タブ）で：
 npm run migrate:v2
 ```
 
-#### 6. コマンド登録（初回のみ）
+#### 6. 技データ登録（オプション）
+
+```bash
+npm run seed:moves
+```
+
+#### 7. コマンド登録（初回のみ）
 
 ```bash
 npm run register-commands
@@ -500,40 +584,6 @@ Renderの無料プランは15分無通信でスリープします。
 [Uptime Robot](https://uptimerobot.com/)で5分間隔のヘルスチェックを設定すると、常時起動を維持できます。
 
 **監視URL**: `https://your-service.onrender.com/health`
-
----
-
-## 今後の実装予定
-
-### Phase 1: 基盤整備 ✅ (完了)
-- [x] データベースv2スキーマ設計
-- [x] マイグレーションスクリプト
-- [x] キャラクターDB化
-- [x] Characterモデル
-- [x] DefeatReasonモデル
-
-### Phase 1: 残作業 🚧 (次回実装)
-- [ ] 既存モデル更新（User, Match, Strategy, CommonStrategy）
-- [ ] コマンド名エイリアス追加
-- [ ] 全コマンドのキャラID対応
-
-### Phase 2: addnoteコマンド改善
-- [ ] 勝敗を任意化
-- [ ] 敗因フィールド追加
-- [ ] プライオリティ追加（critical/important/recommended）
-- [ ] 引数順序変更
-
-### Phase 3: matchコマンド改善
-- [ ] 新レイアウト実装
-- [ ] 敗因トップ3表示
-- [ ] プライオリティ別コメント表示
-- [ ] 共通の基本情報表示
-
-### Phase 4: コンボ管理機能
-- [ ] `/gc add` - コンボ追加
-- [ ] `/gc view` - コンボ表示
-- [ ] キャラクターコマンド技データ準備
-- [ ] コマンド技の入力補完
 
 ---
 
@@ -596,6 +646,25 @@ turso db shell ggst-discord-bot
 
 ---
 
+## 実装完了状況
+
+### ✅ Phase 1-6: 全機能実装完了
+
+- [x] データベースv2スキーマ設計
+- [x] マイグレーションスクリプト
+- [x] キャラクターDB化（32キャラ）
+- [x] 全モデル層実装
+- [x] コマンド名エイリアス追加（全コマンド対応）
+- [x] 敗因分析機能
+- [x] 優先度機能
+- [x] コンボ管理機能
+- [x] 技データ管理機能（CRUD操作）
+- [x] キャラクター技データ（564+ moves）
+- [x] NotebookLM連携
+- [x] デプロイ設定（render.yaml）
+
+---
+
 ## ライセンス
 
 MIT License
@@ -615,5 +684,5 @@ MIT License
 ---
 
 **開発者**: r-unit0000181
-**バージョン**: 2.0.0 (Phase 1 Foundation Complete)
-**最終更新**: 2026-01-12
+**バージョン**: 2.0.0 (All Features Complete)
+**最終更新**: 2026-01-13

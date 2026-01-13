@@ -6,6 +6,8 @@ import * as history from './commands/history';
 import * as strategy from './commands/strategy';
 import * as commonStrategy from './commands/common-strategy';
 import * as match from './commands/match';
+import * as combo from './commands/combo';
+import * as move from './commands/move';
 
 export function createClient(): Client {
   const client = new Client({
@@ -26,14 +28,24 @@ export function createClient(): Client {
       try {
         const { commandName } = interaction;
 
-        // コマンドモジュールのマッピング
+        // コマンドモジュールのマッピング（エイリアスも含む）
         const commandModules: Record<string, any> = {
           'ggst-setmychar': setmychar,
+          'gs': setmychar,
           'ggst-addnote': addnote,
+          'gn': addnote,
           'ggst-history': history,
+          'gh': history,
           'ggst-strategy': strategy,
+          'gps': strategy,
           'ggst-common-strategy': commonStrategy,
-          'ggst-match': match
+          'gcs': commonStrategy,
+          'ggst-match': match,
+          'gm': match,
+          'ggst-combo': combo,
+          'gc': combo,
+          'ggst-move': move,
+          'gmv': move
         };
 
         const commandModule = commandModules[commandName];

@@ -1,11 +1,8 @@
 import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import type { ChatInputCommandInteraction, AutocompleteInteraction } from 'discord.js';
-import { GGST_CHARACTERS } from '../config/constants';
 import { UserModel } from '../models/User';
 import { StrategyModel } from '../models/Strategy';
-
-// キャラクター名を事前にキャッシュ（パフォーマンス最適化）
-const CHARACTERS_CACHE = GGST_CHARACTERS.map(char => ({ name: char, value: char }));
+import { CharacterModel } from '../models/Character';
 
 export const data = new SlashCommandBuilder()
   .setName('ggst-strategy')
@@ -42,16 +39,53 @@ export const data = new SlashCommandBuilder()
       )
   );
 
+// Alias command
+export const aliasData = new SlashCommandBuilder()
+  .setName('gps')
+  .setDescription('[GGST] 個人専用の戦略を管理します (ggst-strategy の短縮形)')
+  .addSubcommand(subcommand =>
+    subcommand
+      .setName('add')
+      .setDescription('個人戦略を追加します')
+      .addStringOption(option =>
+        option
+          .setName('character')
+          .setDescription('対策対象キャラクター')
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('content')
+          .setDescription('戦略内容')
+          .setRequired(true)
+          .setMaxLength(2000)
+      )
+  )
+  .addSubcommand(subcommand =>
+    subcommand
+      .setName('view')
+      .setDescription('個人戦略を表示します')
+      .addStringOption(option =>
+        option
+          .setName('character')
+          .setDescription('対策対象キャラクター')
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
+  );
+
 export async function autocomplete(interaction: AutocompleteInteraction) {
   try {
     const focusedValue = interaction.options.getFocused().toLowerCase();
+    const characters = await CharacterModel.getCachedNamesForAutocomplete();
 
     if (!focusedValue) {
       // 入力なしの場合は全キャラを返す（最大25件）
-      return await interaction.respond(CHARACTERS_CACHE.slice(0, 25));
+      return await interaction.respond(characters.slice(0, 25));
     }
 
-    const filtered = CHARACTERS_CACHE.filter(char =>
+    const filtered = characters.filter(char =>
       char.name.toLowerCase().includes(focusedValue)
     );
 

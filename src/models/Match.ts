@@ -1,23 +1,57 @@
 import { getDatabase } from '../database';
 import { Match } from '../types';
+import { CharacterModel } from './Character';
 
 export class MatchModel {
   // 対戦記録を作成
   static async create(
     userDiscordId: string,
-    myCharacter: string | null,
-    opponentCharacter: string,
-    result: 'win' | 'loss',
-    note?: string
+    myCharacterName: string | null,
+    opponentCharacterName: string,
+    result: 'win' | 'loss' | null,
+    note?: string,
+    defeatReasonId?: number | null,
+    priority?: 'critical' | 'important' | 'recommended' | null
   ): Promise<Match> {
     const db = getDatabase();
 
+    // キャラ名からIDを取得
+    let myCharId: number | null = null;
+    if (myCharacterName) {
+      const myChar = await CharacterModel.getByName(myCharacterName);
+      if (myChar) {
+        myCharId = myChar.id;
+      }
+    }
+
+    const opponentChar = await CharacterModel.getByName(opponentCharacterName);
+    if (!opponentChar) {
+      throw new Error(`Opponent character not found: ${opponentCharacterName}`);
+    }
+
+    // 新旧両方のカラムに挿入（後方互換性のため）
     const insertResult = await db.execute({
       sql: `
-        INSERT INTO matches (user_discord_id, my_character, opponent_character, result, note)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO matches (
+          user_discord_id,
+          my_character, my_character_id,
+          opponent_character, opponent_character_id,
+          result,
+          defeat_reason_id,
+          priority,
+          note
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
-      args: [userDiscordId, myCharacter, opponentCharacter, result, note || null]
+      args: [
+        userDiscordId,
+        myCharacterName, myCharId,
+        opponentCharacterName, opponentChar.id,
+        result,
+        defeatReasonId || null,
+        priority || null,
+        note || null
+      ]
     });
 
     const selectResult = await db.execute({
@@ -40,14 +74,29 @@ export class MatchModel {
     let query = 'SELECT * FROM matches WHERE user_discord_id = ?';
     const params: any[] = [userDiscordId];
 
+    // フィルタがある場合は、まずキャラ名からIDを取得してID列でフィルタ（高速化）
     if (opponentCharacterFilter) {
-      query += ' AND opponent_character = ?';
-      params.push(opponentCharacterFilter);
+      const opponentChar = await CharacterModel.getByName(opponentCharacterFilter);
+      if (opponentChar) {
+        query += ' AND opponent_character_id = ?';
+        params.push(opponentChar.id);
+      } else {
+        // キャラが見つからない場合は旧カラムでフォールバック
+        query += ' AND opponent_character = ?';
+        params.push(opponentCharacterFilter);
+      }
     }
 
     if (myCharacterFilter) {
-      query += ' AND my_character = ?';
-      params.push(myCharacterFilter);
+      const myChar = await CharacterModel.getByName(myCharacterFilter);
+      if (myChar) {
+        query += ' AND my_character_id = ?';
+        params.push(myChar.id);
+      } else {
+        // キャラが見つからない場合は旧カラムでフォールバック
+        query += ' AND my_character = ?';
+        params.push(myCharacterFilter);
+      }
     }
 
     query += ' ORDER BY match_date DESC';
@@ -68,8 +117,8 @@ export class MatchModel {
   // 特定キャラとの対戦成績を取得
   static async getStats(
     userDiscordId: string,
-    opponentCharacter?: string,
-    myCharacter?: string
+    opponentCharacterName?: string,
+    myCharacterName?: string
   ): Promise<{
     total: number;
     wins: number;
@@ -87,14 +136,27 @@ export class MatchModel {
     `;
     const params: any[] = [userDiscordId];
 
-    if (opponentCharacter) {
-      query += ' AND opponent_character = ?';
-      params.push(opponentCharacter);
+    // キャラ名からIDに変換してフィルタ
+    if (opponentCharacterName) {
+      const opponentChar = await CharacterModel.getByName(opponentCharacterName);
+      if (opponentChar) {
+        query += ' AND opponent_character_id = ?';
+        params.push(opponentChar.id);
+      } else {
+        query += ' AND opponent_character = ?';
+        params.push(opponentCharacterName);
+      }
     }
 
-    if (myCharacter) {
-      query += ' AND my_character = ?';
-      params.push(myCharacter);
+    if (myCharacterName) {
+      const myChar = await CharacterModel.getByName(myCharacterName);
+      if (myChar) {
+        query += ' AND my_character_id = ?';
+        params.push(myChar.id);
+      } else {
+        query += ' AND my_character = ?';
+        params.push(myCharacterName);
+      }
     }
 
     const result = await db.execute({
@@ -119,16 +181,18 @@ export class MatchModel {
   }>> {
     const db = getDatabase();
 
+    // キャラクターIDでグループ化し、charactersテーブルとJOIN
     const result = await db.execute({
       sql: `
         SELECT
-          opponent_character as character,
+          COALESCE(c.name, m.opponent_character) as character,
           COUNT(*) as total,
-          SUM(CASE WHEN result = 'win' THEN 1 ELSE 0 END) as wins,
-          SUM(CASE WHEN result = 'loss' THEN 1 ELSE 0 END) as losses
-        FROM matches
-        WHERE user_discord_id = ?
-        GROUP BY opponent_character
+          SUM(CASE WHEN m.result = 'win' THEN 1 ELSE 0 END) as wins,
+          SUM(CASE WHEN m.result = 'loss' THEN 1 ELSE 0 END) as losses
+        FROM matches m
+        LEFT JOIN characters c ON m.opponent_character_id = c.id
+        WHERE m.user_discord_id = ?
+        GROUP BY COALESCE(m.opponent_character_id, m.opponent_character)
         ORDER BY total DESC
       `,
       args: [userDiscordId]
@@ -145,5 +209,107 @@ export class MatchModel {
       ...r,
       winRate: r.total > 0 ? (r.wins / r.total) * 100 : 0
     }));
+  }
+
+  // 特定キャラとの敗因トップ3を取得
+  static async getDefeatReasonStats(
+    userDiscordId: string,
+    opponentCharacterName?: string,
+    myCharacterName?: string
+  ): Promise<Array<{
+    defeat_reason_id: number;
+    count: number;
+  }>> {
+    const db = getDatabase();
+
+    let query = `
+      SELECT defeat_reason_id, COUNT(*) as count
+      FROM matches
+      WHERE user_discord_id = ? AND result = 'loss' AND defeat_reason_id IS NOT NULL
+    `;
+    const params: any[] = [userDiscordId];
+
+    if (opponentCharacterName) {
+      const opponentChar = await CharacterModel.getByName(opponentCharacterName);
+      if (opponentChar) {
+        query += ' AND opponent_character_id = ?';
+        params.push(opponentChar.id);
+      } else {
+        query += ' AND opponent_character = ?';
+        params.push(opponentCharacterName);
+      }
+    }
+
+    if (myCharacterName) {
+      const myChar = await CharacterModel.getByName(myCharacterName);
+      if (myChar) {
+        query += ' AND my_character_id = ?';
+        params.push(myChar.id);
+      } else {
+        query += ' AND my_character = ?';
+        params.push(myCharacterName);
+      }
+    }
+
+    query += ' GROUP BY defeat_reason_id ORDER BY count DESC LIMIT 3';
+
+    const result = await db.execute({
+      sql: query,
+      args: params
+    });
+
+    return result.rows as unknown as Array<{
+      defeat_reason_id: number;
+      count: number;
+    }>;
+  }
+
+  // 優先度フィルタ付きで対戦記録を取得
+  static async getByUserWithPriority(
+    userDiscordId: string,
+    opponentCharacterFilter?: string,
+    myCharacterFilter?: string,
+    priorityFilter?: 'critical' | 'important' | 'recommended'
+  ): Promise<Match[]> {
+    const db = getDatabase();
+
+    let query = 'SELECT * FROM matches WHERE user_discord_id = ?';
+    const params: any[] = [userDiscordId];
+
+    if (opponentCharacterFilter) {
+      const opponentChar = await CharacterModel.getByName(opponentCharacterFilter);
+      if (opponentChar) {
+        query += ' AND opponent_character_id = ?';
+        params.push(opponentChar.id);
+      } else {
+        query += ' AND opponent_character = ?';
+        params.push(opponentCharacterFilter);
+      }
+    }
+
+    if (myCharacterFilter) {
+      const myChar = await CharacterModel.getByName(myCharacterFilter);
+      if (myChar) {
+        query += ' AND my_character_id = ?';
+        params.push(myChar.id);
+      } else {
+        query += ' AND my_character = ?';
+        params.push(myCharacterFilter);
+      }
+    }
+
+    if (priorityFilter) {
+      query += ' AND priority = ?';
+      params.push(priorityFilter);
+    }
+
+    query += ' ORDER BY match_date DESC';
+
+    const result = await db.execute({
+      sql: query,
+      args: params
+    });
+
+    return result.rows as unknown as Match[];
   }
 }
