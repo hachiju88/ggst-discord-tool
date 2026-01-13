@@ -62,12 +62,18 @@ export const TENSION_GAUGE_CHOICES = [
 
 // 始動の選択肢
 export const STARTER_CHOICES = [
-  { name: 'カウンター', value: 'counter' },
-  { name: '通常', value: 'normal' }
+  { name: '通常', value: 'normal' },
+  { name: 'カウンター', value: 'counter' }
 ] as const;
 
 // エクスポート形式の選択肢
 export const EXPORT_FORMAT_CHOICES = [
   { name: 'Markdown', value: 'markdown' },
   { name: 'テキスト', value: 'text' }
+] as const;
+
+// コンボ表示範囲の選択肢
+export const COMBO_SCOPE_CHOICES = [
+  { name: '自分のコンボのみ', value: 'mine' },
+  { name: 'みんなのコンボ', value: 'all' }
 ] as const;

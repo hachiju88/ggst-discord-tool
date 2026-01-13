@@ -8,27 +8,8 @@ import { CharacterModel } from '../models/Character';
 import { DefeatReasonModel } from '../models/DefeatReason';
 
 export const data = new SlashCommandBuilder()
-  .setName('ggst-match')
-  .setDescription('[GGST] 対戦開始時の情報を表示します')
-  .addStringOption(option =>
-    option
-      .setName('opponent')
-      .setDescription('対戦相手のキャラクター')
-      .setRequired(true)
-      .setAutocomplete(true)
-  )
-  .addStringOption(option =>
-    option
-      .setName('mycharacter')
-      .setDescription('使用キャラクター（未指定の場合はメインキャラ）')
-      .setRequired(false)
-      .setAutocomplete(true)
-  );
-
-// Alias command
-export const aliasData = new SlashCommandBuilder()
   .setName('gm')
-  .setDescription('[GGST] 対戦開始時の情報を表示します (ggst-match の短縮形)')
+  .setDescription('[GGST] 対戦開始時の情報を表示します')
   .addStringOption(option =>
     option
       .setName('opponent')

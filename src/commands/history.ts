@@ -5,35 +5,8 @@ import { MatchModel } from '../models/Match';
 import { CharacterModel } from '../models/Character';
 
 export const data = new SlashCommandBuilder()
-  .setName('ggst-history')
-  .setDescription('[GGST] 対戦履歴を表示します')
-  .addStringOption(option =>
-    option
-      .setName('opponent')
-      .setDescription('対戦相手のキャラクターで絞り込み（任意）')
-      .setRequired(false)
-      .setAutocomplete(true)
-  )
-  .addStringOption(option =>
-    option
-      .setName('mycharacter')
-      .setDescription('使用キャラクターで絞り込み（任意）')
-      .setRequired(false)
-      .setAutocomplete(true)
-  )
-  .addIntegerOption(option =>
-    option
-      .setName('limit')
-      .setDescription('表示件数（デフォルト: 10、最大: 50）')
-      .setRequired(false)
-      .setMinValue(1)
-      .setMaxValue(50)
-  );
-
-// Alias command
-export const aliasData = new SlashCommandBuilder()
   .setName('gh')
-  .setDescription('[GGST] 対戦履歴を表示します (ggst-history の短縮形)')
+  .setDescription('[GGST] 対戦履歴を表示します')
   .addStringOption(option =>
     option
       .setName('opponent')

@@ -5,44 +5,8 @@ import { StrategyModel } from '../models/Strategy';
 import { CharacterModel } from '../models/Character';
 
 export const data = new SlashCommandBuilder()
-  .setName('ggst-strategy')
-  .setDescription('[GGST] 個人専用の戦略を管理します')
-  .addSubcommand(subcommand =>
-    subcommand
-      .setName('add')
-      .setDescription('個人戦略を追加します')
-      .addStringOption(option =>
-        option
-          .setName('character')
-          .setDescription('対策対象キャラクター')
-          .setRequired(true)
-          .setAutocomplete(true)
-      )
-      .addStringOption(option =>
-        option
-          .setName('content')
-          .setDescription('戦略内容')
-          .setRequired(true)
-          .setMaxLength(2000)
-      )
-  )
-  .addSubcommand(subcommand =>
-    subcommand
-      .setName('view')
-      .setDescription('個人戦略を表示します')
-      .addStringOption(option =>
-        option
-          .setName('character')
-          .setDescription('対策対象キャラクター')
-          .setRequired(true)
-          .setAutocomplete(true)
-      )
-  );
-
-// Alias command
-export const aliasData = new SlashCommandBuilder()
   .setName('gps')
-  .setDescription('[GGST] 個人専用の戦略を管理します (ggst-strategy の短縮形)')
+  .setDescription('[GGST] 個人専用の戦略を管理します')
   .addSubcommand(subcommand =>
     subcommand
       .setName('add')

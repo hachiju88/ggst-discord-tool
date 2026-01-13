@@ -1,13 +1,13 @@
 import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import type { ChatInputCommandInteraction, AutocompleteInteraction } from 'discord.js';
-import { LOCATION_CHOICES, TENSION_GAUGE_CHOICES, STARTER_CHOICES } from '../config/constants';
+import { LOCATION_CHOICES, TENSION_GAUGE_CHOICES, STARTER_CHOICES, COMBO_SCOPE_CHOICES } from '../config/constants';
 import { UserModel } from '../models/User';
 import { ComboModel } from '../models/Combo';
 import { CharacterModel } from '../models/Character';
 import { CharacterMoveModel } from '../models/CharacterMove';
 
 export const data = new SlashCommandBuilder()
-  .setName('ggst-combo')
+  .setName('gc')
   .setDescription('[GGST] コンボを管理します')
   .addSubcommand(subcommand =>
     subcommand
@@ -43,18 +43,163 @@ export const data = new SlashCommandBuilder()
       )
       .addStringOption(option =>
         option
-          .setName('combo')
-          .setDescription('コンボ入力（例: 5K > 6H > 623H）')
+          .setName('combo1')
+          .setDescription('技1（例: 5K）')
           .setRequired(true)
-          .setMaxLength(500)
+          .setMaxLength(50)
           .setAutocomplete(true)
       )
-      .addIntegerOption(option =>
+      .addStringOption(option =>
         option
-          .setName('damage')
-          .setDescription('ダメージ量')
+          .setName('combo2')
+          .setDescription('技2（任意）')
           .setRequired(false)
-          .setMinValue(0)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo3')
+          .setDescription('技3（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo4')
+          .setDescription('技4（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo5')
+          .setDescription('技5（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo6')
+          .setDescription('技6（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo7')
+          .setDescription('技7（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo8')
+          .setDescription('技8（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo9')
+          .setDescription('技9（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo10')
+          .setDescription('技10（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo11')
+          .setDescription('技11（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo12')
+          .setDescription('技12（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo13')
+          .setDescription('技13（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo14')
+          .setDescription('技14（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo15')
+          .setDescription('技15（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo16')
+          .setDescription('技16（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo17')
+          .setDescription('技17（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo18')
+          .setDescription('技18（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo19')
+          .setDescription('技19（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo20')
+          .setDescription('技20（任意）')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
       )
       .addStringOption(option =>
         option
@@ -96,172 +241,12 @@ export const data = new SlashCommandBuilder()
           .setRequired(false)
           .addChoices(...STARTER_CHOICES)
       )
-  )
-  .addSubcommand(subcommand =>
-    subcommand
-      .setName('edit')
-      .setDescription('コンボを編集します')
-      .addIntegerOption(option =>
-        option
-          .setName('id')
-          .setDescription('コンボID（/gc viewで確認）')
-          .setRequired(true)
-          .setMinValue(1)
-      )
       .addStringOption(option =>
         option
-          .setName('character')
-          .setDescription('キャラクター（技名オートコンプリート用）')
+          .setName('scope')
+          .setDescription('表示範囲')
           .setRequired(false)
-          .setAutocomplete(true)
-      )
-      .addStringOption(option =>
-        option
-          .setName('combo')
-          .setDescription('新しいコンボ入力')
-          .setRequired(false)
-          .setMaxLength(500)
-          .setAutocomplete(true)
-      )
-      .addIntegerOption(option =>
-        option
-          .setName('damage')
-          .setDescription('新しいダメージ量')
-          .setRequired(false)
-          .setMinValue(0)
-      )
-      .addStringOption(option =>
-        option
-          .setName('note')
-          .setDescription('新しいコメント')
-          .setRequired(false)
-          .setMaxLength(500)
-      )
-      .addStringOption(option =>
-        option
-          .setName('location')
-          .setDescription('新しい位置')
-          .setRequired(false)
-          .addChoices(...LOCATION_CHOICES)
-      )
-      .addIntegerOption(option =>
-        option
-          .setName('tension')
-          .setDescription('新しいテンションゲージ')
-          .setRequired(false)
-          .addChoices(...TENSION_GAUGE_CHOICES)
-      )
-      .addStringOption(option =>
-        option
-          .setName('starter')
-          .setDescription('新しい始動')
-          .setRequired(false)
-          .addChoices(...STARTER_CHOICES)
-      )
-  )
-  .addSubcommand(subcommand =>
-    subcommand
-      .setName('delete')
-      .setDescription('コンボを削除します')
-      .addIntegerOption(option =>
-        option
-          .setName('id')
-          .setDescription('コンボID（/gc viewで確認）')
-          .setRequired(true)
-          .setMinValue(1)
-      )
-  );
-
-// Alias command
-export const aliasData = new SlashCommandBuilder()
-  .setName('gc')
-  .setDescription('[GGST] コンボを管理します (ggst-combo の短縮形)')
-  .addSubcommand(subcommand =>
-    subcommand
-      .setName('add')
-      .setDescription('コンボを追加します')
-      .addStringOption(option =>
-        option
-          .setName('character')
-          .setDescription('キャラクター')
-          .setRequired(true)
-          .setAutocomplete(true)
-      )
-      .addStringOption(option =>
-        option
-          .setName('location')
-          .setDescription('位置')
-          .setRequired(true)
-          .addChoices(...LOCATION_CHOICES)
-      )
-      .addIntegerOption(option =>
-        option
-          .setName('tension')
-          .setDescription('テンションゲージ')
-          .setRequired(true)
-          .addChoices(...TENSION_GAUGE_CHOICES)
-      )
-      .addStringOption(option =>
-        option
-          .setName('starter')
-          .setDescription('始動')
-          .setRequired(true)
-          .addChoices(...STARTER_CHOICES)
-      )
-      .addStringOption(option =>
-        option
-          .setName('combo')
-          .setDescription('コンボ入力（例: 5K > 6H > 623H）')
-          .setRequired(true)
-          .setMaxLength(500)
-          .setAutocomplete(true)
-      )
-      .addIntegerOption(option =>
-        option
-          .setName('damage')
-          .setDescription('ダメージ量')
-          .setRequired(false)
-          .setMinValue(0)
-      )
-      .addStringOption(option =>
-        option
-          .setName('note')
-          .setDescription('コメント（任意）')
-          .setRequired(false)
-          .setMaxLength(500)
-      )
-  )
-  .addSubcommand(subcommand =>
-    subcommand
-      .setName('view')
-      .setDescription('コンボを表示します')
-      .addStringOption(option =>
-        option
-          .setName('character')
-          .setDescription('キャラクター')
-          .setRequired(true)
-          .setAutocomplete(true)
-      )
-      .addStringOption(option =>
-        option
-          .setName('location')
-          .setDescription('位置でフィルタ')
-          .setRequired(false)
-          .addChoices(...LOCATION_CHOICES)
-      )
-      .addIntegerOption(option =>
-        option
-          .setName('tension')
-          .setDescription('テンションゲージでフィルタ')
-          .setRequired(false)
-          .addChoices(...TENSION_GAUGE_CHOICES)
-      )
-      .addStringOption(option =>
-        option
-          .setName('starter')
-          .setDescription('始動でフィルタ')
-          .setRequired(false)
-          .addChoices(...STARTER_CHOICES)
+          .addChoices(...COMBO_SCOPE_CHOICES)
       )
   )
   .addSubcommand(subcommand =>
@@ -277,25 +262,163 @@ export const aliasData = new SlashCommandBuilder()
       )
       .addStringOption(option =>
         option
-          .setName('character')
-          .setDescription('キャラクター（技名オートコンプリート用）')
+          .setName('combo1')
+          .setDescription('技1')
           .setRequired(false)
+          .setMaxLength(50)
           .setAutocomplete(true)
       )
       .addStringOption(option =>
         option
-          .setName('combo')
-          .setDescription('新しいコンボ入力')
+          .setName('combo2')
+          .setDescription('技2')
           .setRequired(false)
-          .setMaxLength(500)
+          .setMaxLength(50)
           .setAutocomplete(true)
       )
-      .addIntegerOption(option =>
+      .addStringOption(option =>
         option
-          .setName('damage')
-          .setDescription('新しいダメージ量')
+          .setName('combo3')
+          .setDescription('技3')
           .setRequired(false)
-          .setMinValue(0)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo4')
+          .setDescription('技4')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo5')
+          .setDescription('技5')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo6')
+          .setDescription('技6')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo7')
+          .setDescription('技7')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo8')
+          .setDescription('技8')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo9')
+          .setDescription('技9')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo10')
+          .setDescription('技10')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo11')
+          .setDescription('技11')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo12')
+          .setDescription('技12')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo13')
+          .setDescription('技13')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo14')
+          .setDescription('技14')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo15')
+          .setDescription('技15')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo16')
+          .setDescription('技16')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo17')
+          .setDescription('技17')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo18')
+          .setDescription('技18')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo19')
+          .setDescription('技19')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
+      )
+      .addStringOption(option =>
+        option
+          .setName('combo20')
+          .setDescription('技20')
+          .setRequired(false)
+          .setMaxLength(50)
+          .setAutocomplete(true)
       )
       .addStringOption(option =>
         option
@@ -361,13 +484,31 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
     }
 
     // comboフィールドのオートコンプリート（技名サジェスト）
-    if (focusedOption.name === 'combo') {
-      // 選択されているキャラクターを取得
-      const characterName = interaction.options.getString('character');
+    if (focusedOption.name === 'combo' || focusedOption.name.startsWith('combo')) {
+      // サブコマンドを取得
+      const subcommand = interaction.options.getSubcommand();
+      let characterName: string | null = null;
+
+      // editサブコマンドの場合：idからキャラクターを取得
+      if (subcommand === 'edit') {
+        const comboId = interaction.options.getInteger('id');
+        if (comboId) {
+          const combo = await ComboModel.getById(comboId);
+          if (combo && combo.character_id) {
+            const character = await CharacterModel.getById(combo.character_id);
+            if (character) {
+              characterName = character.name;
+            }
+          }
+        }
+      } else {
+        // addサブコマンドの場合：characterフィールドから取得
+        characterName = interaction.options.getString('character');
+      }
 
       if (!characterName) {
         return await interaction.respond([
-          { name: 'まず「character」を選択してください', value: '' }
+          { name: 'まず「character」または「id」を選択してください', value: '' }
         ]);
       }
 
@@ -380,30 +521,60 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
         ]);
       }
 
-      // 入力中の最後の部分を取得（" > " で分割）
-      const parts = focusedValue.split('>').map(p => p.trim());
-      const lastPart = parts[parts.length - 1].toLowerCase();
+      // comboフィールド（aliasコマンド用）の場合
+      if (focusedOption.name === 'combo') {
+        // 入力中の最後の部分を取得（" > " で分割）
+        const parts = focusedValue.split('>').map(p => p.trim());
+        const lastPart = parts[parts.length - 1].toLowerCase();
 
-      // 既存の入力（最後の部分を除く）
-      const prefix = parts.slice(0, -1).join(' > ');
-      const prefixWithSeparator = prefix ? prefix + ' > ' : '';
+        // 既存の入力（最後の部分を除く）
+        const prefix = parts.slice(0, -1).join(' > ');
+        const prefixWithSeparator = prefix ? prefix + ' > ' : '';
 
-      // 最後の部分に一致する技をフィルタ（日本語名・英語名・表記で検索）
+        // 最後の部分に一致する技をフィルタ（日本語名・英語名・表記で検索）
+        const filtered = movesData.filter(move =>
+          move.move_name.toLowerCase().includes(lastPart) ||
+          move.move_notation.toLowerCase().includes(lastPart) ||
+          (move.move_name_en && move.move_name_en.toLowerCase().includes(lastPart))
+        );
+
+        // オートコンプリート用の表示形式に変換
+        const suggestions = (filtered.length > 0 ? filtered : movesData).slice(0, 25).map(move => {
+          // ドロップダウン表示用（日本語名/英語名を含む）
+          const dropdownName = move.move_name_en
+            ? `${move.move_name} / ${move.move_name_en} (${move.move_notation})`
+            : `${move.move_name} (${move.move_notation})`;
+
+          // 入力フィールド表示用（moveNotationのみ）
+          const inputValue = prefixWithSeparator + move.move_notation + ' >';
+
+          return {
+            name: dropdownName,
+            value: inputValue
+          };
+        });
+
+        return await interaction.respond(suggestions);
+      }
+
+      // combo1-combo20フィールド（通常コマンド用）の場合
+      // 入力値に一致する技をフィルタ
       const filtered = movesData.filter(move =>
-        move.move_name.toLowerCase().includes(lastPart) ||
-        move.move_notation.toLowerCase().includes(lastPart) ||
-        (move.move_name_en && move.move_name_en.toLowerCase().includes(lastPart))
+        move.move_name.toLowerCase().includes(focusedValue) ||
+        move.move_notation.toLowerCase().includes(focusedValue) ||
+        (move.move_name_en && move.move_name_en.toLowerCase().includes(focusedValue))
       );
 
       // オートコンプリート用の表示形式に変換
       const suggestions = (filtered.length > 0 ? filtered : movesData).slice(0, 25).map(move => {
-        const displayName = move.move_name_en
+        // ドロップダウン表示用（日本語名/英語名を含む）
+        const dropdownName = move.move_name_en
           ? `${move.move_name} / ${move.move_name_en} (${move.move_notation})`
           : `${move.move_name} (${move.move_notation})`;
 
         return {
-          name: displayName,
-          value: prefixWithSeparator + move.move_notation + ' >'
+          name: dropdownName,
+          value: move.move_notation
         };
       });
 
@@ -428,9 +599,17 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const location = interaction.options.getString('location', true) as 'center' | 'corner';
     const tension = interaction.options.getInteger('tension', true) as 0 | 50 | 100;
     const starter = interaction.options.getString('starter', true) as 'counter' | 'normal';
-    const combo = interaction.options.getString('combo', true);
-    const damage = interaction.options.getInteger('damage');
     const note = interaction.options.getString('note');
+
+    // combo1-20を連結
+    const comboParts: string[] = [];
+    for (let i = 1; i <= 20; i++) {
+      const comboPart = interaction.options.getString(`combo${i}`);
+      if (comboPart) {
+        comboParts.push(comboPart);
+      }
+    }
+    const combo = comboParts.join(' > ');
 
     // キャラクターの存在確認
     const characterData = await CharacterModel.getByName(character);
@@ -450,7 +629,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       tension,
       starter,
       combo,
-      damage,
+      null,
       note
     );
 
@@ -463,9 +642,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     response += `テンション: ${tension}%\n`;
     response += `始動: ${starterText}\n`;
     response += `コンボ: ${combo}\n`;
-    if (damage) {
-      response += `ダメージ: ${damage}\n`;
-    }
     if (note) {
       response += `コメント: ${note}\n`;
     }
@@ -480,6 +656,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const location = interaction.options.getString('location') as 'center' | 'corner' | null;
     const tension = interaction.options.getInteger('tension') as 0 | 50 | 100 | null;
     const starter = interaction.options.getString('starter') as 'counter' | 'normal' | null;
+    const scope = interaction.options.getString('scope') as 'mine' | 'all' | null;
 
     // キャラクターの存在確認
     const characterData = await CharacterModel.getByName(character);
@@ -497,7 +674,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       character,
       location || undefined,
       tension ?? undefined,
-      starter || undefined
+      starter || undefined,
+      scope || undefined
     );
 
     if (combos.length === 0) {
@@ -519,6 +697,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     // フィルタ情報を追加
     let filterText = '';
+    if (scope) {
+      filterText += `表示範囲: ${scope === 'mine' ? '自分のコンボのみ' : 'みんなのコンボ'} `;
+    }
     if (location) {
       filterText += `位置: ${location === 'center' ? '画面中央' : '画面端'} `;
     }
@@ -564,15 +745,23 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   } else if (subcommand === 'edit') {
     const id = interaction.options.getInteger('id', true);
-    const combo = interaction.options.getString('combo');
-    const damage = interaction.options.getInteger('damage');
     const note = interaction.options.getString('note');
     const location = interaction.options.getString('location') as 'center' | 'corner' | null;
     const tension = interaction.options.getInteger('tension') as 0 | 50 | 100 | null;
     const starter = interaction.options.getString('starter') as 'counter' | 'normal' | null;
 
+    // combo1-20を連結
+    const comboParts: string[] = [];
+    for (let i = 1; i <= 20; i++) {
+      const comboPart = interaction.options.getString(`combo${i}`);
+      if (comboPart) {
+        comboParts.push(comboPart);
+      }
+    }
+    const combo = comboParts.length > 0 ? comboParts.join(' > ') : null;
+
     // 少なくとも1つのフィールドが指定されているか確認
-    if (!combo && damage === null && note === null && !location && tension === null && !starter) {
+    if (!combo && note === null && !location && tension === null && !starter) {
       await interaction.reply({
         content: '❌ 少なくとも1つのフィールドを更新してください。',
         flags: MessageFlags.Ephemeral
@@ -583,7 +772,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     // コンボを更新
     const updates: any = {};
     if (combo !== null) updates.comboNotation = combo;
-    if (damage !== null) updates.damage = damage;
     if (note !== null) updates.note = note;
     if (location !== null) updates.location = location;
     if (tension !== null) updates.tensionGauge = tension;
@@ -612,9 +800,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     response += `テンション: ${updatedCombo.tension_gauge}%\n`;
     response += `始動: ${starterText}\n`;
     response += `コンボ: ${updatedCombo.combo_notation}\n`;
-    if (updatedCombo.damage) {
-      response += `ダメージ: ${updatedCombo.damage}\n`;
-    }
     if (updatedCombo.note) {
       response += `コメント: ${updatedCombo.note}\n`;
     }

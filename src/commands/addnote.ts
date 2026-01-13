@@ -7,55 +7,8 @@ import { CharacterModel } from '../models/Character';
 import { DefeatReasonModel } from '../models/DefeatReason';
 
 export const data = new SlashCommandBuilder()
-  .setName('ggst-addnote')
-  .setDescription('[GGST] 対戦記録とメモを追加します')
-  .addStringOption(option =>
-    option
-      .setName('opponent')
-      .setDescription('対戦相手のキャラクター')
-      .setRequired(true)
-      .setAutocomplete(true)
-  )
-  .addStringOption(option =>
-    option
-      .setName('result')
-      .setDescription('勝敗（未指定の場合は記録なし）')
-      .setRequired(false)
-      .addChoices(...RESULT_CHOICES)
-  )
-  .addStringOption(option =>
-    option
-      .setName('defeat_reason')
-      .setDescription('敗因（敗北時のみ）')
-      .setRequired(false)
-      .setAutocomplete(true)
-  )
-  .addStringOption(option =>
-    option
-      .setName('priority')
-      .setDescription('メモの重要度')
-      .setRequired(false)
-      .addChoices(...PRIORITY_CHOICES)
-  )
-  .addStringOption(option =>
-    option
-      .setName('note')
-      .setDescription('メモ')
-      .setRequired(false)
-      .setMaxLength(1000)
-  )
-  .addStringOption(option =>
-    option
-      .setName('mycharacter')
-      .setDescription('使用キャラクター（未指定の場合はメインキャラ）')
-      .setRequired(false)
-      .setAutocomplete(true)
-  );
-
-// Alias command
-export const aliasData = new SlashCommandBuilder()
   .setName('gn')
-  .setDescription('[GGST] 対戦記録とメモを追加します (ggst-addnote の短縮形)')
+  .setDescription('[GGST] 対戦記録とメモを追加します')
   .addStringOption(option =>
     option
       .setName('opponent')

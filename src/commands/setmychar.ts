@@ -4,20 +4,8 @@ import { UserModel } from '../models/User';
 import { CharacterModel } from '../models/Character';
 
 export const data = new SlashCommandBuilder()
-  .setName('ggst-setmychar')
-  .setDescription('[GGST] メインキャラクターを設定します')
-  .addStringOption(option =>
-    option
-      .setName('character')
-      .setDescription('あなたのメインキャラクター')
-      .setRequired(true)
-      .setAutocomplete(true)
-  );
-
-// Alias command
-export const aliasData = new SlashCommandBuilder()
   .setName('gs')
-  .setDescription('[GGST] メインキャラクターを設定します (ggst-setmychar の短縮形)')
+  .setDescription('[GGST] メインキャラクターを設定します')
   .addStringOption(option =>
     option
       .setName('character')

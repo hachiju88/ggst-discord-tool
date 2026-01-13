@@ -104,7 +104,8 @@ export class ComboModel {
     characterName: string,
     location?: 'center' | 'corner',
     tensionGauge?: 0 | 50 | 100,
-    starter?: 'counter' | 'normal'
+    starter?: 'counter' | 'normal',
+    scope?: 'mine' | 'all'
   ): Promise<Combo[]> {
     const db = getDatabase();
 
@@ -113,8 +114,16 @@ export class ComboModel {
       return [];
     }
 
-    let query = 'SELECT * FROM combos WHERE user_discord_id = ? AND character_id = ?';
-    const params: any[] = [userDiscordId, character.id];
+    // scopeが'all'の場合は全ユーザーのコンボを取得、'mine'（デフォルト）の場合は自分のコンボのみ
+    const effectiveScope = scope || 'mine';
+
+    let query = 'SELECT * FROM combos WHERE character_id = ?';
+    const params: any[] = [character.id];
+
+    if (effectiveScope === 'mine') {
+      query += ' AND user_discord_id = ?';
+      params.push(userDiscordId);
+    }
 
     if (location) {
       query += ' AND location = ?';
