@@ -355,10 +355,10 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
         ]);
       }
 
-      // そのキャラの技リストを取得
-      const moves = await CharacterMoveModel.getMovesForAutocomplete(characterName);
+      // そのキャラの技の生データを取得
+      const movesData = await CharacterMoveModel.getByCharacter(characterName);
 
-      if (moves.length === 0) {
+      if (movesData.length === 0) {
         return await interaction.respond([
           { name: '（このキャラの技データが未登録です）', value: focusedValue }
         ]);
@@ -366,23 +366,30 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
 
       // 入力中の最後の部分を取得（" > " で分割）
       const parts = focusedValue.split('>').map(p => p.trim());
-      const lastPart = parts[parts.length - 1];
+      const lastPart = parts[parts.length - 1].toLowerCase();
 
       // 既存の入力（最後の部分を除く）
       const prefix = parts.slice(0, -1).join(' > ');
       const prefixWithSeparator = prefix ? prefix + ' > ' : '';
 
-      // 最後の部分に一致する技をフィルタ
-      const filtered = moves.filter(move =>
-        move.name.toLowerCase().includes(lastPart) ||
-        move.value.toLowerCase().includes(lastPart)
+      // 最後の部分に一致する技をフィルタ（日本語名・英語名・表記で検索）
+      const filtered = movesData.filter(move =>
+        move.move_name.toLowerCase().includes(lastPart) ||
+        move.move_notation.toLowerCase().includes(lastPart) ||
+        (move.move_name_en && move.move_name_en.toLowerCase().includes(lastPart))
       );
 
-      // 選択肢のvalueに既存入力 + 技名 + " > " を含める
-      const suggestions = (filtered.length > 0 ? filtered : moves).slice(0, 25).map(move => ({
-        name: move.name,
-        value: prefixWithSeparator + move.value + ' > '
-      }));
+      // オートコンプリート用の表示形式に変換
+      const suggestions = (filtered.length > 0 ? filtered : movesData).slice(0, 25).map(move => {
+        const displayName = move.move_name_en
+          ? `${move.move_name} / ${move.move_name_en} (${move.move_notation})`
+          : `${move.move_name} (${move.move_notation})`;
+
+        return {
+          name: displayName,
+          value: prefixWithSeparator + move.move_notation + ' > '
+        };
+      });
 
       return await interaction.respond(suggestions);
     }

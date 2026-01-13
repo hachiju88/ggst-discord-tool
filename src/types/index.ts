@@ -90,6 +90,7 @@ export interface CharacterMove {
   id: number;
   character_id: number;
   move_name: string;
+  move_name_en: string | null;
   move_notation: string;
   move_type: string | null;
   created_at: string;

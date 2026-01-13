@@ -8,7 +8,8 @@ export class CharacterMoveModel {
     characterName: string,
     moveName: string,
     moveNotation: string,
-    moveType?: string | null
+    moveType?: string | null,
+    moveNameEn?: string | null
   ): Promise<CharacterMove> {
     const db = getDatabase();
 
@@ -20,10 +21,10 @@ export class CharacterMoveModel {
 
     const insertResult = await db.execute({
       sql: `
-        INSERT INTO character_moves (character_id, move_name, move_notation, move_type)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO character_moves (character_id, move_name, move_name_en, move_notation, move_type)
+        VALUES (?, ?, ?, ?, ?)
       `,
-      args: [character.id, moveName, moveNotation, moveType || null]
+      args: [character.id, moveName, moveNameEn || null, moveNotation, moveType || null]
     });
 
     const selectResult = await db.execute({
@@ -55,16 +56,24 @@ export class CharacterMoveModel {
   static async getMovesForAutocomplete(characterName: string): Promise<Array<{ name: string; value: string }>> {
     const moves = await this.getByCharacter(characterName);
 
-    return moves.map(move => ({
-      name: `${move.move_name} (${move.move_notation})`,
-      value: move.move_notation
-    }));
+    return moves.map(move => {
+      // 英語名がある場合は「日本語名 / English Name (コマンド)」形式
+      // 英語名がない場合は「日本語名 (コマンド)」形式
+      const displayName = move.move_name_en
+        ? `${move.move_name} / ${move.move_name_en} (${move.move_notation})`
+        : `${move.move_name} (${move.move_notation})`;
+
+      return {
+        name: displayName,
+        value: move.move_notation
+      };
+    });
   }
 
   // 技をバルク登録（複数一括）
   static async bulkCreate(
     characterName: string,
-    moves: Array<{ moveName: string; moveNotation: string; moveType?: string | null }>
+    moves: Array<{ moveName: string; moveNotation: string; moveType?: string | null; moveNameEn?: string | null }>
   ): Promise<void> {
     const db = getDatabase();
 
@@ -76,10 +85,10 @@ export class CharacterMoveModel {
     for (const move of moves) {
       await db.execute({
         sql: `
-          INSERT INTO character_moves (character_id, move_name, move_notation, move_type)
-          VALUES (?, ?, ?, ?)
+          INSERT INTO character_moves (character_id, move_name, move_name_en, move_notation, move_type)
+          VALUES (?, ?, ?, ?, ?)
         `,
-        args: [character.id, move.moveName, move.moveNotation, move.moveType || null]
+        args: [character.id, move.moveName, move.moveNameEn || null, move.moveNotation, move.moveType || null]
       });
     }
   }
@@ -122,7 +131,8 @@ export class CharacterMoveModel {
     id: number,
     moveName?: string,
     moveNotation?: string,
-    moveType?: string | null
+    moveType?: string | null,
+    moveNameEn?: string | null
   ): Promise<boolean> {
     const db = getDatabase();
 
@@ -134,16 +144,17 @@ export class CharacterMoveModel {
 
     // 更新するフィールドを決定
     const finalMoveName = moveName !== undefined ? moveName : existing.move_name;
+    const finalMoveNameEn = moveNameEn !== undefined ? moveNameEn : existing.move_name_en;
     const finalMoveNotation = moveNotation !== undefined ? moveNotation : existing.move_notation;
     const finalMoveType = moveType !== undefined ? moveType : existing.move_type;
 
     const result = await db.execute({
       sql: `
         UPDATE character_moves
-        SET move_name = ?, move_notation = ?, move_type = ?
+        SET move_name = ?, move_name_en = ?, move_notation = ?, move_type = ?
         WHERE id = ?
       `,
-      args: [finalMoveName, finalMoveNotation, finalMoveType, id]
+      args: [finalMoveName, finalMoveNameEn, finalMoveNotation, finalMoveType, id]
     });
 
     return result.rowsAffected > 0;

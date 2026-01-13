@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS character_moves (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     character_id INTEGER NOT NULL,
     move_name TEXT NOT NULL,
+    move_name_en TEXT,
     move_notation TEXT NOT NULL,
     move_type TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

@@ -5,7 +5,7 @@ import { createClient, Client } from '@libsql/client';
 // キャラクター技データのシード
 // ソースのフレーム表および各キャラクター解説に基づく全キャラクターの技データ
 
-const characterMovesData = {
+const characterMovesData: Record<string, Array<{ moveName: string; moveNotation: string; moveNameEn?: string }>> = {
   'ソル=バッドガイ': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
@@ -21,15 +21,15 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'ガンフレイム', moveNotation: '236P' },
-    { moveName: 'ヴォルカニックヴァイパー', moveNotation: '623S' },
-    { moveName: 'バンディットリヴォルバー', moveNotation: '236K' },
-    { moveName: 'バンディットブリンガー', moveNotation: '214K' },
-    { moveName: 'ぶっきらぼうに投げる', moveNotation: '623K' },
-    { moveName: 'ナイトレイドヴォルテックス', moveNotation: '214S' },
-    { moveName: 'ファフニール', moveNotation: '41236H' },
-    { moveName: 'タイランレイヴ', moveNotation: '632146H' },
-    { moveName: 'ヘヴィモブセメタリー', moveNotation: '214214H' }
+    { moveName: 'ガンフレイム', moveNotation: '236P', moveNameEn: 'Gun Flame' },
+    { moveName: 'ヴォルカニックヴァイパー', moveNotation: '623S', moveNameEn: 'Volcanic Viper' },
+    { moveName: 'バンディットリヴォルバー', moveNotation: '236K', moveNameEn: 'Bandit Revolver' },
+    { moveName: 'バンディットブリンガー', moveNotation: '214K', moveNameEn: 'Bandit Bringer' },
+    { moveName: 'ぶっきらぼうに投げる', moveNotation: '623K', moveNameEn: 'Brash Throw' },
+    { moveName: 'ナイトレイドヴォルテックス', moveNotation: '214S', moveNameEn: 'Night Raid Vortex' },
+    { moveName: 'ファフニール', moveNotation: '41236H', moveNameEn: 'Fafnir' },
+    { moveName: 'タイランレイヴ', moveNotation: '632146H', moveNameEn: 'Tyrant Rave' },
+    { moveName: 'ヘヴィモブセメタリー', moveNotation: '214214H', moveNameEn: 'Heavy Mob Cemetery' }
   ],
   'カイ=キスク': [
     { moveName: '5P', moveNotation: '5P' },
@@ -46,15 +46,15 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'スタンエッジ', moveNotation: '236S' },
-    { moveName: 'チャージスタンエッジ', moveNotation: '236H' },
-    { moveName: 'ヴェイパースラスト', moveNotation: '623S' },
-    { moveName: 'スタンディッパー', moveNotation: '236K' },
-    { moveName: 'フードゥルアルク', moveNotation: '214K' },
-    { moveName: 'ダイアエクラ', moveNotation: '214S' },
-    { moveName: 'ライド・ザ・ライトニング', moveNotation: '632146H' },
-    { moveName: 'セイクリッドエッジ', moveNotation: '236236P' },
-    { moveName: 'ドラゴンインストール', moveNotation: '214214H' }
+    { moveName: 'スタンエッジ', moveNotation: '236S', moveNameEn: 'Stun Edge' },
+    { moveName: 'チャージスタンエッジ', moveNotation: '236H', moveNameEn: 'Charged Stun Edge' },
+    { moveName: 'ヴェイパースラスト', moveNotation: '623S', moveNameEn: 'Vapor Thrust' },
+    { moveName: 'スタンディッパー', moveNotation: '236K', moveNameEn: 'Stun Dipper' },
+    { moveName: 'フードゥルアルク', moveNotation: '214K', moveNameEn: 'Foudre Arc' },
+    { moveName: 'ダイアエクラ', moveNotation: '214S', moveNameEn: 'Dire Eclat' },
+    { moveName: 'ライド・ザ・ライトニング', moveNotation: '632146H', moveNameEn: 'Ride the Lightning' },
+    { moveName: 'セイクリッドエッジ', moveNotation: '236236P', moveNameEn: 'Sacred Edge' },
+    { moveName: 'ドラゴンインストール', moveNotation: '214214H', moveNameEn: 'Dragon Install' }
   ],
   'メイ': [
     { moveName: '5P', moveNotation: '5P' },
@@ -728,7 +728,9 @@ async function seedCharacterMoves() {
         await CharacterMoveModel.create(
           characterName,
           move.moveName,
-          move.moveNotation
+          move.moveNotation,
+          null, // moveType
+          move.moveNameEn || null // moveNameEn
         );
       } catch (error: any) {
         // UNIQUE制約エラー（すでに登録済み）は無視
