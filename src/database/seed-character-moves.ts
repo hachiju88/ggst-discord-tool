@@ -3,7 +3,7 @@ import { CharacterMoveModel } from '../models/CharacterMove';
 import { createClient, Client } from '@libsql/client';
 
 // キャラクター技データのシード
-// ソースのフレーム表に基づく全キャラクターの技データ
+// ソースのフレーム表および各キャラクター解説に基づく全キャラクターの技データ
 
 const characterMovesData = {
   'ソル=バッドガイ': [
@@ -21,15 +21,15 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'ガンフレイム', moveNotation: 'ガンフレイム' },
-    { moveName: 'ヴォルカニックヴァイパー', moveNotation: 'ヴォルカニックヴァイパー' },
-    { moveName: 'バンディットリヴォルバー', moveNotation: 'バンディットリヴォルバー' },
-    { moveName: 'バンディットブリンガー', moveNotation: 'バンディットブリンガー' },
-    { moveName: 'ぶっきらぼうに投げる', moveNotation: 'ぶっきらぼうに投げる' },
-    { moveName: 'ナイトレイドヴォルテックス', moveNotation: 'ナイトレイドヴォルテックス' },
-    { moveName: 'ファフニール', moveNotation: 'ファフニール' },
-    { moveName: 'タイランレイヴ', moveNotation: 'タイランレイヴ' },
-    { moveName: 'ヘヴィモブセメタリー', moveNotation: 'ヘヴィモブセメタリー' }
+    { moveName: 'ガンフレイム', moveNotation: '236P' },
+    { moveName: 'ヴォルカニックヴァイパー', moveNotation: '623S' },
+    { moveName: 'バンディットリヴォルバー', moveNotation: '236K' },
+    { moveName: 'バンディットブリンガー', moveNotation: '214K' },
+    { moveName: 'ぶっきらぼうに投げる', moveNotation: '623K' },
+    { moveName: 'ナイトレイドヴォルテックス', moveNotation: '214S' },
+    { moveName: 'ファフニール', moveNotation: '41236H' },
+    { moveName: 'タイランレイヴ', moveNotation: '632146H' },
+    { moveName: 'ヘヴィモブセメタリー', moveNotation: '214214H' }
   ],
   'カイ=キスク': [
     { moveName: '5P', moveNotation: '5P' },
@@ -46,15 +46,15 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'スタンエッジ', moveNotation: 'スタンエッジ' },
-    { moveName: 'チャージスタンエッジ', moveNotation: 'チャージスタンエッジ' },
-    { moveName: 'ヴェイパースラスト', moveNotation: 'ヴェイパースラスト' },
-    { moveName: 'スタンディッパー', moveNotation: 'スタンディッパー' },
-    { moveName: 'フードゥルアルク', moveNotation: 'フードゥルアルク' },
-    { moveName: 'ダイアエクラ', moveNotation: 'ダイアエクラ' },
-    { moveName: 'ライド・ザ・ライトニング', moveNotation: 'ライド・ザ・ライトニング' },
-    { moveName: 'セイクリッドエッジ', moveNotation: 'セイクリッドエッジ' },
-    { moveName: 'ドラゴンインストール', moveNotation: 'ドラゴンインストール' }
+    { moveName: 'スタンエッジ', moveNotation: '236S' },
+    { moveName: 'チャージスタンエッジ', moveNotation: '236H' },
+    { moveName: 'ヴェイパースラスト', moveNotation: '623S' },
+    { moveName: 'スタンディッパー', moveNotation: '236K' },
+    { moveName: 'フードゥルアルク', moveNotation: '214K' },
+    { moveName: 'ダイアエクラ', moveNotation: '214S' },
+    { moveName: 'ライド・ザ・ライトニング', moveNotation: '632146H' },
+    { moveName: 'セイクリッドエッジ', moveNotation: '236236P' },
+    { moveName: 'ドラゴンインストール', moveNotation: '214214H' }
   ],
   'メイ': [
     { moveName: '5P', moveNotation: '5P' },
@@ -67,17 +67,15 @@ const characterMovesData = {
     { moveName: '2S', moveNotation: '2S' },
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
-    { moveName: '6K', moveNotation: '6K' },
-    { moveName: '3K', moveNotation: '3K' },
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'イルカさん・横', moveNotation: 'イルカさん・横' },
-    { moveName: 'イルカさん・縦', moveNotation: 'イルカさん・縦' },
-    { moveName: 'オーバーヘッドキッス', moveNotation: 'オーバーヘッドキッス' },
-    { moveName: '有栖川スパークル', moveNotation: '有栖川スパークル' },
-    { moveName: 'グレート山田アタック', moveNotation: 'グレート山田アタック' },
-    { moveName: '五所川原', moveNotation: '五所川原' }
+    { moveName: 'イルカさん・横', moveNotation: '6S' },
+    { moveName: 'イルカさん・縦', moveNotation: '8S' },
+    { moveName: 'オーバーヘッドキッス', moveNotation: '623K' },
+    { moveName: '有栖川スパークル', moveNotation: '214P' },
+    { moveName: 'グレート山田アタック', moveNotation: '236236S' },
+    { moveName: '五所川原', moveNotation: '632146H' }
   ],
   'アクセル・ロウ': [
     { moveName: '5P', moveNotation: '5P' },
@@ -94,17 +92,12 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: '鎌閃撃', moveNotation: '鎌閃撃' },
-    { moveName: '曲鎖撃', moveNotation: '曲鎖撃' },
-    { moveName: '旋鎖撃', moveNotation: '旋鎖撃' },
-    { moveName: '鬼灯', moveNotation: '鬼灯' },
-    { moveName: '冬蟷螂', moveNotation: '冬蟷螂' },
-    { moveName: '潦', moveNotation: '潦' },
-    { moveName: '蝸牛', moveNotation: '蝸牛' },
-    { moveName: '虎落笛', moveNotation: '虎落笛' },
-    { moveName: 'アクセルボンバー', moveNotation: 'アクセルボンバー' },
-    { moveName: '百重鎌焼', moveNotation: '百重鎌焼' },
-    { moveName: 'ワンヴィジョン', moveNotation: 'ワンヴィジョン' }
+    { moveName: '鎌閃撃', moveNotation: '6S' },
+    { moveName: '冬蟷螂', moveNotation: '41236H' },
+    { moveName: '潦', moveNotation: '623S' },
+    { moveName: '蝸牛', moveNotation: '214H' },
+    { moveName: '百重鎌焼', moveNotation: '632146H' },
+    { moveName: 'ワンヴィジョン', moveNotation: '236236S' }
   ],
   'チップ・ザナフ': [
     { moveName: '5P', moveNotation: '5P' },
@@ -118,20 +111,15 @@ const characterMovesData = {
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
     { moveName: '6K', moveNotation: '6K' },
-    { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'αブレード', moveNotation: 'αブレード' },
-    { moveName: 'βブレード', moveNotation: 'βブレード' },
-    { moveName: 'γブレード', moveNotation: 'γブレード' },
-    { moveName: '冽掌', moveNotation: '冽掌' },
-    { moveName: '麓砕', moveNotation: '麓砕' },
-    { moveName: '穿踵', moveNotation: '穿踵' },
-    { moveName: '幻朧斬', moveNotation: '幻朧斬' },
-    { moveName: '手裏剣', moveNotation: '手裏剣' },
-    { moveName: '綱張り', moveNotation: '綱張り' },
-    { moveName: '万鬼滅砕', moveNotation: '万鬼滅砕' },
-    { moveName: '斬星狼牙', moveNotation: '斬星狼牙' }
+    { moveName: 'αブレード', moveNotation: '236P' },
+    { moveName: 'βブレード', moveNotation: '623S' },
+    { moveName: 'γブレード', moveNotation: '236H' },
+    { moveName: '冽掌', moveNotation: '236S' },
+    { moveName: '幻朧斬', moveNotation: '632146S' },
+    { moveName: '万鬼滅砕', moveNotation: '236236P' },
+    { moveName: '斬星狼牙', moveNotation: '236236H' }
   ],
   'ポチョムキン': [
     { moveName: '5P', moveNotation: '5P' },
@@ -145,20 +133,18 @@ const characterMovesData = {
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
     { moveName: '6K', moveNotation: '6K' },
-    { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'ハンマフォール', moveNotation: 'ハンマフォール' },
-    { moveName: 'ハンマフォールブレーキ', moveNotation: 'ハンマフォールブレーキ' },
-    { moveName: 'ポチョムキンバスター', moveNotation: 'ポチョムキンバスター' },
-    { moveName: 'ヒートナックル', moveNotation: 'ヒートナックル' },
-    { moveName: 'メガフィスト', moveNotation: 'メガフィスト' },
-    { moveName: 'スライドヘッド', moveNotation: 'スライドヘッド' },
-    { moveName: 'F.D.B.', moveNotation: 'F.D.B.' },
-    { moveName: 'ガルダインパクト', moveNotation: 'ガルダインパクト' },
-    { moveName: 'ヒートタックル', moveNotation: 'ヒートタックル' },
-    { moveName: 'ヘブンリーポチョムキンバスター', moveNotation: 'ヘブンリーポチョムキンバスター' },
-    { moveName: 'ガイガンター改', moveNotation: 'ガイガンター改' }
+    { moveName: 'ハンマフォール', moveNotation: '6H' },
+    { moveName: 'ポチョムキンバスター', moveNotation: '632146P' },
+    { moveName: 'ヒートナックル', moveNotation: '623H' },
+    { moveName: 'メガフィスト', moveNotation: '236P' },
+    { moveName: 'スライドヘッド', moveNotation: '236S' },
+    { moveName: 'F.D.B.', moveNotation: '214S' },
+    { moveName: 'ガルダインパクト', moveNotation: '214H' },
+    { moveName: 'ヒートタックル', moveNotation: '41236H' },
+    { moveName: 'ヘブンリーポチョムキンバスター', moveNotation: '236236S' },
+    { moveName: 'ガイガンター改', moveNotation: '632146H' }
   ],
   'ファウスト': [
     { moveName: '5P', moveNotation: '5P' },
@@ -174,18 +160,15 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: '突きます', moveNotation: '突きます' },
-    { moveName: '引き戻し', moveNotation: '引き戻し' },
-    { moveName: 'ナイスショット', moveNotation: 'ナイスショット' },
-    { moveName: '何が出るかな？', moveNotation: '何が出るかな？' },
-    { moveName: '涅和混練', moveNotation: '涅和混練' },
-    { moveName: 'メッタ刈り', moveNotation: 'メッタ刈り' },
-    { moveName: '愛', moveNotation: '愛' },
-    { moveName: '久延毘古', moveNotation: '久延毘古' },
-    { moveName: 'エキサイティング骨折', moveNotation: 'エキサイティング骨折' },
-    { moveName: 'な・な・な・なにがでるかな？', moveNotation: 'な・な・な・なにがでるかな？' }
+    { moveName: '突きます', moveNotation: '236S' },
+    { moveName: '何が出るかな？', moveNotation: '236P' },
+    { moveName: '涅和混練', moveNotation: '236K' },
+    { moveName: 'メッタ刈り', moveNotation: '632146S' },
+    { moveName: '愛', moveNotation: 'j.236P' },
+    { moveName: '久延毘古', moveNotation: '214P' },
+    { moveName: 'エキサイティング骨折', moveNotation: '236236H' }
   ],
-  'ミリア・レイジ': [
+  'ミリア=レイジ': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -196,19 +179,17 @@ const characterMovesData = {
     { moveName: '2S', moveNotation: '2S' },
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
-    { moveName: '6K', moveNotation: '6K' },
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'タンデムトップ', moveNotation: 'タンデムトップ' },
-    { moveName: 'ラストシェイカー', moveNotation: 'ラストシェイカー' },
-    { moveName: 'アイアンセイバー', moveNotation: 'アイアンセイバー' },
-    { moveName: 'バッドムーン', moveNotation: 'バッドムーン' },
-    { moveName: '高速落下', moveNotation: '高速落下' },
-    { moveName: 'ミラーシュ', moveNotation: 'ミラーシュ' },
-    { moveName: 'カピエル', moveNotation: 'カピエル' },
-    { moveName: 'セプテムヴォイシズ', moveNotation: 'セプテムヴォイシズ' },
-    { moveName: 'ウィンガー', moveNotation: 'ウィンガー' }
+    { moveName: 'タンデムトップ', moveNotation: '236S' },
+    { moveName: 'ラストシェイカー', moveNotation: '214P' },
+    { moveName: 'アイアンセイバー', moveNotation: '214K' },
+    { moveName: 'バッドムーン', moveNotation: 'j.236P' },
+    { moveName: 'ミラーシュ', moveNotation: '214S' },
+    { moveName: 'カピエル', moveNotation: '214H' },
+    { moveName: 'セプテムヴォイシズ', moveNotation: '236236P' },
+    { moveName: 'ウィンガー', moveNotation: '632146H' }
   ],
   'ザトー=ONE': [
     { moveName: '5P', moveNotation: '5P' },
@@ -221,22 +202,19 @@ const characterMovesData = {
     { moveName: '2S', moveNotation: '2S' },
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
-    { moveName: '6K', moveNotation: '6K' },
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'インヴァイトヘル', moveNotation: 'インヴァイトヘル' },
-    { moveName: '「突く」', moveNotation: '「突く」' },
-    { moveName: '「多い！」', moveNotation: '「多い！」' },
-    { moveName: '「跳ねる」', moveNotation: '「跳ねる」' },
-    { moveName: '「張り合う」', moveNotation: '「張り合う」' },
-    { moveName: 'ダムドファング', moveNotation: 'ダムドファング' },
-    { moveName: 'ブレイク・ザ・ロウ', moveNotation: 'ブレイク・ザ・ロウ' },
-    { moveName: 'ドランカーシェイド', moveNotation: 'ドランカーシェイド' },
-    { moveName: 'エディ召喚', moveNotation: 'エディ召喚' },
-    { moveName: '収納', moveNotation: '収納' },
-    { moveName: 'アモルファス', moveNotation: 'アモルファス' },
-    { moveName: 'サンヴォイド', moveNotation: 'サンヴォイド' }
+    { moveName: 'インヴァイトヘル', moveNotation: '22S' },
+    { moveName: '「突く」', moveNotation: 'P離し' },
+    { moveName: '「多い！」', moveNotation: 'S離し' },
+    { moveName: '「跳ねる」', moveNotation: 'K離し' },
+    { moveName: '「張り合う」', moveNotation: 'H離し' },
+    { moveName: 'ダムドファング', moveNotation: '623S' },
+    { moveName: 'ブレイク・ザ・ロウ', moveNotation: '214K' },
+    { moveName: 'ドランカーシェイド', moveNotation: '214S' },
+    { moveName: 'アモルファス', moveNotation: '632146H' },
+    { moveName: 'サンヴォイド', moveNotation: '236236S' }
   ],
   'ラムレザル=ヴァレンタイン': [
     { moveName: '5P', moveNotation: '5P' },
@@ -252,15 +230,14 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'バヨネート', moveNotation: 'バヨネート' },
-    { moveName: 'ダウロ', moveNotation: 'ダウロ' },
-    { moveName: 'シルドデトルオ', moveNotation: 'シルドデトルオ' },
-    { moveName: 'サブロバート', moveNotation: 'サブロバート' },
-    { moveName: 'エラルルーモ', moveNotation: 'エラルルーモ' },
-    { moveName: 'オンド', moveNotation: 'オンド' },
-    { moveName: 'アグレーサオルドーノ', moveNotation: 'アグレーサオルドーノ' },
-    { moveName: 'カルヴァドス', moveNotation: 'カルヴァドス' },
-    { moveName: 'モルトバート', moveNotation: 'モルトバート' }
+    { moveName: 'バヨネート', moveNotation: '236S' },
+    { moveName: 'ダウロ', moveNotation: '623P' },
+    { moveName: 'シルドデトルオ', moveNotation: '214K' },
+    { moveName: 'サブロバート', moveNotation: '214H' },
+    { moveName: 'エラルルーモ', moveNotation: '214P' },
+    { moveName: 'オンド', moveNotation: '214S' },
+    { moveName: 'カルヴァドス', moveNotation: '632146H' },
+    { moveName: 'モルトバート', moveNotation: '236236S' }
   ],
   'レオ・ホワイトファング': [
     { moveName: '5P', moveNotation: '5P' },
@@ -277,16 +254,13 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'グラヴィエットヴァーダ', moveNotation: 'グラヴィエットヴァーダ' },
-    { moveName: 'アイゼンシュトルム', moveNotation: 'アイゼンシュトルム' },
-    { moveName: 'エアースト・カルタスゲシュトゥーバー', moveNotation: 'エアースト・カルタスゲシュトゥーバー' },
-    { moveName: 'ツヴァイト・カルタスゲシュトゥーバー', moveNotation: 'ツヴァイト・カルタスゲシュトゥーバー' },
-    { moveName: 'トゥルブレンツ', moveNotation: 'トゥルブレンツ' },
-    { moveName: 'グレンツェンドゥンケル', moveNotation: 'グレンツェンドゥンケル' },
-    { moveName: 'ブリッツシュラーク', moveNotation: 'ブリッツシュラーク' },
-    { moveName: 'シュタイルヴァービル', moveNotation: 'シュタイルヴァービル' },
-    { moveName: 'ライデンシャフトディリガント', moveNotation: 'ライデンシャフトディリガント' },
-    { moveName: 'カーンシルト', moveNotation: 'カーンシルト' }
+    { moveName: 'グラヴィエットヴァーダ', moveNotation: '6S' },
+    { moveName: 'アイゼンシュトルム', moveNotation: '8S' },
+    { moveName: 'エアースト・カルタスゲシュトゥーバー', moveNotation: '236S' },
+    { moveName: 'ツヴァイト・カルタスゲシュトゥーバー', moveNotation: '236H' },
+    { moveName: 'トゥルブレンツ', moveNotation: '214S' },
+    { moveName: 'シュタイルヴァービル', moveNotation: '236236H' },
+    { moveName: 'ライデンシャフトディリガント', moveNotation: '632146H' }
   ],
   'ナゴリユキ': [
     { moveName: '5P', moveNotation: '5P' },
@@ -299,17 +273,16 @@ const characterMovesData = {
     { moveName: '2S', moveNotation: '2S' },
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
-    { moveName: '6K', moveNotation: '6K' },
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: '粒雪', moveNotation: '粒雪' },
-    { moveName: '不香', moveNotation: '不香' },
-    { moveName: '冠雪', moveNotation: '冠雪' },
-    { moveName: '垂雪', moveNotation: '垂雪' },
-    { moveName: 'Bloodsucking Universe', moveNotation: 'Bloodsucking Universe' },
-    { moveName: '忘れ雪', moveNotation: '忘れ雪' },
-    { moveName: '残雪', moveNotation: '残雪' }
+    { moveName: '粒雪', moveNotation: '236S' },
+    { moveName: '不香', moveNotation: '236K' },
+    { moveName: '冠雪', moveNotation: '623H' },
+    { moveName: '垂雪', moveNotation: '623S' },
+    { moveName: 'Bloodsucking Universe', moveNotation: '623P' },
+    { moveName: '忘れ雪', moveNotation: '632146H' },
+    { moveName: '残雪', moveNotation: '214214H' }
   ],
   'ジオヴァーナ': [
     { moveName: '5P', moveNotation: '5P' },
@@ -325,14 +298,14 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'トロヴァォン', moveNotation: 'トロヴァォン' },
-    { moveName: 'セパルトゥラ', moveNotation: 'セパルトゥラ' },
-    { moveName: 'ソウ・ナセンテ', moveNotation: 'ソウ・ナセンテ' },
-    { moveName: 'ソウ・ポエンチ', moveNotation: 'ソウ・ポエンチ' },
-    { moveName: 'ヴェンターニア', moveNotation: 'ヴェンターニア' },
-    { moveName: 'テンペスターヂ', moveNotation: 'テンペスターヂ' }
+    { moveName: 'トロヴァォン', moveNotation: '236H' },
+    { moveName: 'セパルトゥラ', moveNotation: '214K' },
+    { moveName: 'ソウ・ナセンテ', moveNotation: '623S' },
+    { moveName: 'ソウ・ポエンチ', moveNotation: '214S' },
+    { moveName: 'ヴェンターニア', moveNotation: '632146H' },
+    { moveName: 'テンペスターヂ', moveNotation: 'j.236236H' }
   ],
-  'アンジー': [
+  '御津闇慈': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -346,16 +319,11 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: '疾', moveNotation: '疾' },
-    { moveName: '水月のハコビ', moveNotation: '水月のハコビ' },
-    { moveName: '紅', moveNotation: '紅' },
-    { moveName: '風神', moveNotation: '風神' },
-    { moveName: '針・壱式', moveNotation: '針・壱式' },
-    { moveName: '一足飛び', moveNotation: '一足飛び' },
-    { moveName: '凪刃', moveNotation: '凪刃' },
-    { moveName: '臨', moveNotation: '臨' },
-    { moveName: '一誠奥義「彩」', moveNotation: '一誠奥義「彩」' },
-    { moveName: '花鳥風月・改', moveNotation: '花鳥風月・改' }
+    { moveName: '疾', moveNotation: '236P' },
+    { moveName: '紅', moveNotation: '623H' },
+    { moveName: '風神', moveNotation: '236S' },
+    { moveName: '一誠奥義「彩」', moveNotation: '632146H' },
+    { moveName: '花鳥風月・改', moveNotation: '236236S' }
   ],
   'イノ': [
     { moveName: '5P', moveNotation: '5P' },
@@ -371,13 +339,13 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: '大木をさする手', moveNotation: '大木をさする手' },
-    { moveName: '狂言実行', moveNotation: '狂言実行' },
-    { moveName: '抗鬱音階', moveNotation: '抗鬱音階' },
-    { moveName: 'ケミカル愛情', moveNotation: 'ケミカル愛情' },
-    { moveName: '狂愛アジタート', moveNotation: '狂愛アジタート' },
-    { moveName: 'メガロマニア', moveNotation: 'メガロマニア' },
-    { moveName: '限界フォルテッシモ', moveNotation: '限界フォルテッシモ' }
+    { moveName: '大木をさする手', moveNotation: '236S' },
+    { moveName: '狂言実行', moveNotation: 'j.214P' },
+    { moveName: '抗鬱音階', moveNotation: '214P' },
+    { moveName: 'ケミカル愛情', moveNotation: '214K' },
+    { moveName: '狂愛アジタート', moveNotation: '236K' },
+    { moveName: 'メガロマニア', moveNotation: '632146H' },
+    { moveName: '限界フォルテッシモ', moveNotation: 'j.236236S' }
   ],
   'ゴールドルイス': [
     { moveName: '5P', moveNotation: '5P' },
@@ -390,14 +358,14 @@ const characterMovesData = {
     { moveName: '2S', moveNotation: '2S' },
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
-    { moveName: '6H', moveNotation: '6H' },
+    { moveName: '6K', moveNotation: '6K' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'ベヒモスタイフーン', moveNotation: 'ベヒモスタイフーン' },
-    { moveName: 'サンダーバード', moveNotation: 'サンダーバード' },
-    { moveName: 'スカイフィッシュ', moveNotation: 'スカイフィッシュ' },
-    { moveName: 'ダウン・ウィズ・ザ・システム', moveNotation: 'ダウン・ウィズ・ザ・システム' },
-    { moveName: 'バーン・イット・ダウン', moveNotation: 'バーン・イット・ダウン' }
+    { moveName: 'ベヒモスタイフーン', moveNotation: '半回転+H' },
+    { moveName: 'サンダーバード', moveNotation: '214P' },
+    { moveName: 'スカイフィッシュ', moveNotation: '214S' },
+    { moveName: 'ダウン・ウィズ・ザ・システム', moveNotation: '632146P' },
+    { moveName: 'バーン・イット・ダウン', moveNotation: '236236S' }
   ],
   'ジャック・オー': [
     { moveName: '5P', moveNotation: '5P' },
@@ -413,41 +381,14 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'サーヴァント召喚', moveNotation: 'サーヴァント召喚' },
-    { moveName: 'サーヴァントを投げる', moveNotation: 'サーヴァントを投げる' },
-    { moveName: '回収', moveNotation: '回収' },
-    { moveName: '攻撃指示', moveNotation: '攻撃指示' },
-    { moveName: '防御指示', moveNotation: '防御指示' },
-    { moveName: 'カウントダウン', moveNotation: 'カウントダウン' },
-    { moveName: 'サーヴァントシュート', moveNotation: 'サーヴァントシュート' },
-    { moveName: 'フォーエヴァーエリシオンドライバー', moveNotation: 'フォーエヴァーエリシオンドライバー' },
-    { moveName: 'サーヴァントを激励する', moveNotation: 'サーヴァントを激励する' }
+    { moveName: 'サーヴァント召喚', moveNotation: '214P' },
+    { moveName: '攻撃指示', moveNotation: '236P' },
+    { moveName: '防御指示', moveNotation: '236K' },
+    { moveName: 'カウントダウン', moveNotation: '236S' },
+    { moveName: 'サーヴァントシュート', moveNotation: '236H' },
+    { moveName: 'フォーエヴァーエリシオンドライバー', moveNotation: '632146H' }
   ],
   'ハッピーカオス': [
-    { moveName: '5P', moveNotation: '5P' },
-    { moveName: '5K', moveNotation: '5K' },
-    { moveName: '近S', moveNotation: '近S' },
-    { moveName: '遠S', moveNotation: '遠S' },
-    { moveName: '2P', moveNotation: '2P' },
-    { moveName: '2K', moveNotation: '2K' },
-    { moveName: '2S', moveNotation: '2S' },
-    { moveName: '6P', moveNotation: '6P' },
-    { moveName: '6K', moveNotation: '6K' },
-    { moveName: '6S', moveNotation: '6S' },
-    { moveName: '2D', moveNotation: '2D' },
-    { moveName: '5D', moveNotation: '5D' },
-    { moveName: '銃を構える', moveNotation: '銃を構える' },
-    { moveName: '射撃', moveNotation: '射撃' },
-    { moveName: 'しっかり狙う', moveNotation: 'しっかり狙う' },
-    { moveName: 'リロード', moveNotation: 'リロード' },
-    { moveName: 'フォーカス', moveNotation: 'フォーカス' },
-    { moveName: '前転', moveNotation: '前転' },
-    { moveName: 'スケープゴート', moveNotation: 'スケープゴート' },
-    { moveName: 'カース', moveNotation: 'カース' },
-    { moveName: 'デウス・エクス・マキナ', moveNotation: 'デウス・エクス・マキナ' },
-    { moveName: '超フォーカス', moveNotation: '超フォーカス' }
-  ],
-  'バイケン': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -458,16 +399,38 @@ const characterMovesData = {
     { moveName: '2S', moveNotation: '2S' },
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
-    { moveName: '6K', moveNotation: '6K' },
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: '畳返し', moveNotation: '畳返し' },
-    { moveName: '蚊鉤', moveNotation: '蚊鉤' },
-    { moveName: '妖斬扇', moveNotation: '妖斬扇' },
-    { moveName: '柊', moveNotation: '柊' },
-    { moveName: '連ね三途渡し', moveNotation: '連ね三途渡し' },
-    { moveName: '拳銃', moveNotation: '拳銃' }
+    { moveName: '銃を構える', moveNotation: '214S' },
+    { moveName: 'しっかり狙いを定める', moveNotation: '236S' },
+    { moveName: 'リロード', moveNotation: '22P' },
+    { moveName: 'フォーカス', moveNotation: '214P' },
+    { moveName: '前転', moveNotation: '236K' },
+    { moveName: 'スケープゴート', moveNotation: '214K' },
+    { moveName: 'カース', moveNotation: '236P' },
+    { moveName: 'デウス・エクス・マキナ', moveNotation: '632146H' }
+  ],
+  '梅喧': [
+    { moveName: '5P', moveNotation: '5P' },
+    { moveName: '5K', moveNotation: '5K' },
+    { moveName: '近S', moveNotation: '近S' },
+    { moveName: '遠S', moveNotation: '遠S' },
+    { moveName: '5H', moveNotation: '5H' },
+    { moveName: '2P', moveNotation: '2P' },
+    { moveName: '2K', moveNotation: '2K' },
+    { moveName: '2S', moveNotation: '2S' },
+    { moveName: '2H', moveNotation: '2H' },
+    { moveName: '6P', moveNotation: '6P' },
+    { moveName: '6H', moveNotation: '6H' },
+    { moveName: '2D', moveNotation: '2D' },
+    { moveName: '5D', moveNotation: '5D' },
+    { moveName: '畳返し', moveNotation: '236S' },
+    { moveName: '蚊鉤', moveNotation: '41236S' },
+    { moveName: '妖斬扇', moveNotation: 'j.236S' },
+    { moveName: '柊', moveNotation: '623P' },
+    { moveName: '連ね三途渡し', moveNotation: '632146H' },
+    { moveName: '拳銃', moveNotation: '236236S' }
   ],
   'テスタメント': [
     { moveName: '5P', moveNotation: '5P' },
@@ -483,12 +446,12 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'グレイブリーパー', moveNotation: 'グレイブリーパー' },
-    { moveName: 'アンホーリーダイバー', moveNotation: 'アンホーリーダイバー' },
-    { moveName: 'ポゼッション', moveNotation: 'ポゼッション' },
-    { moveName: 'アービターサイン', moveNotation: 'アービターサイン' },
-    { moveName: 'ノストロヴィア', moveNotation: 'ノストロヴィア' },
-    { moveName: 'カラミティ・ワン', moveNotation: 'カラミティ・ワン' }
+    { moveName: 'グレイブリーパー', moveNotation: '236S' },
+    { moveName: 'アンホーリーダイバー', moveNotation: '214P' },
+    { moveName: 'ポゼッション', moveNotation: '214S' },
+    { moveName: 'アービターサイン', moveNotation: '214H' },
+    { moveName: 'ノストロヴィア', moveNotation: '236236P' },
+    { moveName: 'カラミティ・ワン', moveNotation: '632146H' }
   ],
   'ブリジット': [
     { moveName: '5P', moveNotation: '5P' },
@@ -502,19 +465,18 @@ const characterMovesData = {
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
     { moveName: '6K', moveNotation: '6K' },
-    { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'ストップ&ダッシュ', moveNotation: 'ストップ&ダッシュ' },
-    { moveName: 'ローリング移動', moveNotation: 'ローリング移動' },
-    { moveName: 'スターシップ', moveNotation: 'スターシップ' },
-    { moveName: 'キックスタートマイハート', moveNotation: 'キックスタートマイハート' },
-    { moveName: 'ロジャーダイブ', moveNotation: 'ロジャーダイブ' },
-    { moveName: 'ロック ザ ベイビー', moveNotation: 'ロック ザ ベイビー' },
-    { moveName: 'ループ ザ ループ', moveNotation: 'ループ ザ ループ' },
-    { moveName: '帰ってきたキルマシーン', moveNotation: '帰ってきたキルマシーン' }
+    { moveName: 'ストップ＆ダッシュ', moveNotation: '236S' },
+    { moveName: 'ローリング移動', moveNotation: '214K' },
+    { moveName: 'スターシップ', moveNotation: '623S' },
+    { moveName: 'キックスタートマイハート', moveNotation: '236K' },
+    { moveName: 'ロジャーダイブ', moveNotation: 'j.214K' },
+    { moveName: 'ロック ザ ベイビー', moveNotation: '632146K' },
+    { moveName: 'ループ ザ ループ', moveNotation: '632146H' },
+    { moveName: '帰ってきたキルマシーン', moveNotation: '236236S' }
   ],
-  'シン・キスク': [
+  'シン=キスク': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -525,18 +487,15 @@ const characterMovesData = {
     { moveName: '2S', moveNotation: '2S' },
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
-    { moveName: '6K', moveNotation: '6K' },
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'ビークドライバー', moveNotation: 'ビークドライバー' },
-    { moveName: 'ホークベイカー', moveNotation: 'ホークベイカー' },
-    { moveName: 'フーフスタンプ', moveNotation: 'フーフスタンプ' },
-    { moveName: 'エルクハント', moveNotation: 'エルクハント' },
-    { moveName: 'ガゼルステップ', moveNotation: 'ガゼルステップ' },
-    { moveName: '育ち盛りだからな。', moveNotation: '育ち盛りだからな。' },
-    { moveName: 'R.T.L', moveNotation: 'R.T.L' },
-    { moveName: 'タイランバレル', moveNotation: 'タイランバレル' }
+    { moveName: 'ビークドライバー', moveNotation: '236H' },
+    { moveName: 'ホークベイカー', moveNotation: '623S' },
+    { moveName: 'フーフスタンプ', moveNotation: '214S' },
+    { moveName: 'エルクハント', moveNotation: '214K' },
+    { moveName: 'R.T.L', moveNotation: '632146H' },
+    { moveName: 'タイランバレル', moveNotation: '236236P' }
   ],
   'ベッドマン?': [
     { moveName: '5P', moveNotation: '5P' },
@@ -552,15 +511,15 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: '4BA', moveNotation: '4BA' },
-    { moveName: '4B3', moveNotation: '4B3' },
-    { moveName: '4B9', moveNotation: '4B9' },
-    { moveName: '0x$0.20', moveNotation: '0x$0.20' },
-    { moveName: '0x$1.00', moveNotation: '0x$1.00' },
-    { moveName: '13C', moveNotation: '13C' },
-    { moveName: '4CC', moveNotation: '4CC' }
+    { moveName: '4BA', moveNotation: '236S' },
+    { moveName: '4B3', moveNotation: '236K' },
+    { moveName: '4B9', moveNotation: '214H' },
+    { moveName: '0x$0.20', moveNotation: '214P' },
+    { moveName: '0x$1.00', moveNotation: '214K' },
+    { moveName: '13C', moveNotation: '236236S' },
+    { moveName: '4CC', moveNotation: '632146H' }
   ],
-  'アスカR#': [
+  'アスカ': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -571,25 +530,14 @@ const characterMovesData = {
     { moveName: '2S', moveNotation: '2S' },
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
-    { moveName: '6K', moveNotation: '6K' },
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: '詠唱', moveNotation: '詠唱' },
-    { moveName: 'ブックマーク', moveNotation: 'ブックマーク' },
-    { moveName: 'マナ回復', moveNotation: 'マナ回復' },
-    { moveName: 'テストケース変更', moveNotation: 'テストケース変更' },
-    { moveName: 'サブミクロン粒子高圧縮球', moveNotation: 'サブミクロン粒子高圧縮球' },
-    { moveName: 'ハウリングメトロン', moveNotation: 'ハウリングメトロン' },
-    { moveName: 'メトロンスクリーマー808', moveNotation: 'メトロンスクリーマー808' },
-    { moveName: 'メトロンアルペジオ', moveNotation: 'メトロンアルペジオ' },
-    { moveName: 'タルドゥスメトロンディレイ', moveNotation: 'タルドゥスメトロンディレイ' },
-    { moveName: 'テラメトロン', moveNotation: 'テラメトロン' },
-    { moveName: 'アキピテルメトロン', moveNotation: 'アキピテルメトロン' },
-    { moveName: 'アクィラメトロン', moveNotation: 'アクィラメトロン' },
-    { moveName: 'ビットシフトメトロン', moveNotation: 'ビットシフトメトロン' },
-    { moveName: 'RMSブーストメトロン', moveNotation: 'RMSブーストメトロン' },
-    { moveName: 'ゴートゥマーカー', moveNotation: 'ゴートゥマーカー' }
+    { moveName: '詠唱', moveNotation: '236P' },
+    { moveName: 'ブックマーク', moveNotation: '22P' },
+    { moveName: 'マナ回復', moveNotation: '214P' },
+    { moveName: 'テストケース変更', moveNotation: '214K' },
+    { moveName: 'サブミクロン粒子高圧縮球', moveNotation: '632146H' }
   ],
   'ジョニー': [
     { moveName: '5P', moveNotation: '5P' },
@@ -603,16 +551,14 @@ const characterMovesData = {
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
     { moveName: '6K', moveNotation: '6K' },
-    { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'ミストファイナー', moveNotation: 'ミストファイナー' },
-    { moveName: 'ターンアップ', moveNotation: 'ターンアップ' },
-    { moveName: 'ディール', moveNotation: 'ディール' },
-    { moveName: '跳躍', moveNotation: '跳躍' },
-    { moveName: '燕穿牙', moveNotation: '燕穿牙' },
-    { moveName: 'それが俺の名だ', moveNotation: 'それが俺の名だ' },
-    { moveName: 'ジョーカートリック', moveNotation: 'ジョーカートリック' }
+    { moveName: 'ミストファイナー', moveNotation: '236P' },
+    { moveName: 'ディール', moveNotation: '214P' },
+    { moveName: '跳躍', moveNotation: '623K' },
+    { moveName: '燕穿牙', moveNotation: 'j.214S' },
+    { moveName: 'それが俺の名だ', moveNotation: '632146H' },
+    { moveName: 'ジョーカートリック', moveNotation: '236236S' }
   ],
   'エルフェルト': [
     { moveName: '5P', moveNotation: '5P' },
@@ -628,12 +574,12 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'Missシャルロット', moveNotation: 'Missシャルロット' },
-    { moveName: 'ボンボン・ショコラ', moveNotation: 'ボンボン・ショコラ' },
-    { moveName: 'やります！', moveNotation: 'やります！' },
-    { moveName: '決めます！', moveNotation: '決めます！' },
-    { moveName: 'ジュガント ダ パルフェーオ', moveNotation: 'ジュガント ダ パルフェーオ' },
-    { moveName: 'ボンボニエール', moveNotation: 'ボンボニエール' }
+    { moveName: 'Missシャルロット', moveNotation: '236S' },
+    { moveName: 'ボンボン・ショコラ', moveNotation: '214S' },
+    { moveName: 'やります！', moveNotation: '214K' },
+    { moveName: '決めます！', moveNotation: '236P' },
+    { moveName: 'ジュガント ダ パルフェーオ', moveNotation: '236236S' },
+    { moveName: 'ボンボニエール', moveNotation: '632146H' }
   ],
   'A.B.A': [
     { moveName: '5P', moveNotation: '5P' },
@@ -649,16 +595,16 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: '結合と変性', moveNotation: '結合と変性' },
-    { moveName: '変転と感化', moveNotation: '変転と感化' },
-    { moveName: '牽引と髄順', moveNotation: '牽引と髄順' },
-    { moveName: '戮力と傾動', moveNotation: '戮力と傾動' },
-    { moveName: '威喝と嗚咽', moveNotation: '威喝と嗚咽' },
-    { moveName: '抑圧と束縛', moveNotation: '抑圧と束縛' },
-    { moveName: '逆上と驚愕', moveNotation: '逆上と驚愕' },
-    { moveName: '断罪と情動', moveNotation: '断罪と情動' },
-    { moveName: '鍵の支配者', moveNotation: '鍵の支配者' },
-    { moveName: '鍵の守護者', moveNotation: '鍵の守護者' }
+    { moveName: '結合と変性', moveNotation: '236P' },
+    { moveName: '変転と感化', moveNotation: '214P' },
+    { moveName: '牽引と随順', moveNotation: '236K' },
+    { moveName: '戮力と傾動', moveNotation: '214K' },
+    { moveName: '威喝と嗚咽', moveNotation: '236S' },
+    { moveName: '抑圧と束縛', moveNotation: '236H' },
+    { moveName: '逆上と驚愕', moveNotation: '214S' },
+    { moveName: '断罪と情動', moveNotation: '214H' },
+    { moveName: '鍵の支配者', moveNotation: '632146H' },
+    { moveName: '鍵の守護者', moveNotation: '236236S' }
   ],
   'スレイヤー': [
     { moveName: '5P', moveNotation: '5P' },
@@ -671,20 +617,15 @@ const characterMovesData = {
     { moveName: '2S', moveNotation: '2S' },
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
-    { moveName: '6K', moveNotation: '6K' },
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'マッパハンチ', moveNotation: 'マッパハンチ' },
-    { moveName: 'ダンディーステップ', moveNotation: 'ダンディーステップ' },
-    { moveName: 'パイルバンカー', moveNotation: 'パイルバンカー' },
-    { moveName: 'バンプアヘッド', moveNotation: 'バンプアヘッド' },
-    { moveName: 'イッツレイト', moveNotation: 'イッツレイト' },
-    { moveName: 'マスターズハンマー', moveNotation: 'マスターズハンマー' },
-    { moveName: '血を吸う宇宙', moveNotation: '血を吸う宇宙' },
-    { moveName: 'ハンドオブドゥーム', moveNotation: 'ハンドオブドゥーム' },
-    { moveName: 'スーパーマッパハンチ', moveNotation: 'スーパーマッパハンチ' },
-    { moveName: 'ラスト・ホライズン', moveNotation: 'ラスト・ホライズン' }
+    { moveName: 'マッパハンチ', moveNotation: '236P' },
+    { moveName: 'ダンディーステップ', moveNotation: '214P' },
+    { moveName: '血を吸う宇宙', moveNotation: '623K' },
+    { moveName: 'ハンドオブドゥーム', moveNotation: '214H' },
+    { moveName: 'スーパーマッパハンチ', moveNotation: '632146H' },
+    { moveName: 'ラスト・ホライズン', moveNotation: '236236P' }
   ],
   'ディズィー': [
     { moveName: '5P', moveNotation: '5P' },
@@ -700,14 +641,14 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: '魚を捕る時に使ってたんです', moveNotation: '魚を捕る時に使ってたんです' },
-    { moveName: '氷原', moveNotation: '氷原' },
-    { moveName: '焼き栗が欲しい時に使ってたんです', moveNotation: '焼き栗が欲しい時に使ってたんです' },
-    { moveName: 'よく話し相手になってくれました', moveNotation: 'よく話し相手になってくれました' },
-    { moveName: 'ミカエルソード', moveNotation: 'ミカエルソード' },
-    { moveName: '光の翼', moveNotation: '光の翼' },
-    { moveName: 'インペリアルレイ', moveNotation: 'インペリアルレイ' },
-    { moveName: 'ガンマレイ', moveNotation: 'ガンマレイ' }
+    { moveName: '魚を捕る時に使ってたんです', moveNotation: '236S' },
+    { moveName: '氷原', moveNotation: '214K' },
+    { moveName: '焼き栗が欲しい時に使ってたんです', moveNotation: '214S' },
+    { moveName: 'よく話し相手になってくれました', moveNotation: '214P' },
+    { moveName: 'ミカエルソード', moveNotation: '623S' },
+    { moveName: '光の翼', moveNotation: '214214P' },
+    { moveName: 'インペリアルレイ', moveNotation: '632146S' },
+    { moveName: 'ガンマレイ', moveNotation: '236236H' }
   ],
   'ヴェノム': [
     { moveName: '5P', moveNotation: '5P' },
@@ -720,18 +661,17 @@ const characterMovesData = {
     { moveName: '2S', moveNotation: '2S' },
     { moveName: '2H', moveNotation: '2H' },
     { moveName: '6P', moveNotation: '6P' },
-    { moveName: '6K', moveNotation: '6K' },
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'ボール', moveNotation: 'ボール' },
-    { moveName: 'ボール生成', moveNotation: 'ボール生成' },
-    { moveName: 'ＱＶ', moveNotation: 'ＱＶ' },
-    { moveName: 'スティンガー', moveNotation: 'スティンガー' },
-    { moveName: 'カーカス', moveNotation: 'カーカス' },
-    { moveName: 'トリアンバカ', moveNotation: 'トリアンバカ' },
-    { moveName: 'ダークエンジェル', moveNotation: 'ダークエンジェル' },
-    { moveName: 'ナヴァラートナ', moveNotation: 'ナヴァラートナ' }
+    { moveName: 'ボール', moveNotation: '236P' },
+    { moveName: 'ボール生成', moveNotation: '22P' },
+    { moveName: 'ＱＶ', moveNotation: '623P' },
+    { moveName: 'スティンガー', moveNotation: '41236S' },
+    { moveName: 'カーカス', moveNotation: '8S' },
+    { moveName: 'トリアンバカ', moveNotation: '632146P' },
+    { moveName: 'ダークエンジェル', moveNotation: '236236S' },
+    { moveName: 'ナヴァラートナ', moveNotation: '214214H' }
   ],
   'ユニカ': [
     { moveName: '5P', moveNotation: '5P' },
@@ -747,14 +687,14 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'ストリーク', moveNotation: 'ストリーク' },
-    { moveName: 'ペネ', moveNotation: 'ペネ' },
-    { moveName: 'トップ', moveNotation: 'トップ' },
-    { moveName: 'ブラスト', moveNotation: 'ブラスト' },
-    { moveName: 'ブレイズ', moveNotation: 'ブレイズ' },
-    { moveName: 'ブリッツ', moveNotation: 'ブリッツ' },
-    { moveName: 'メガデス', moveNotation: 'メガデス' },
-    { moveName: 'ウェポンズフリー', moveNotation: 'ウェポンズフリー' }
+    { moveName: 'ストリーク', moveNotation: '236S' },
+    { moveName: 'ペネ', moveNotation: '236K' },
+    { moveName: 'トップ', moveNotation: '214K' },
+    { moveName: 'ブラスト', moveNotation: '623S' },
+    { moveName: 'ブレイズ', moveNotation: '214H' },
+    { moveName: 'ブリッツ', moveNotation: '236P' },
+    { moveName: 'メガデス', moveNotation: '236236S' },
+    { moveName: 'ウェポンズフリー', moveNotation: '632146H' }
   ],
   'ルーシー': [
     { moveName: '5P', moveNotation: '5P' },
@@ -770,33 +710,38 @@ const characterMovesData = {
     { moveName: '6H', moveNotation: '6H' },
     { moveName: '2D', moveNotation: '2D' },
     { moveName: '5D', moveNotation: '5D' },
-    { moveName: 'モノワイヤー', moveNotation: 'モノワイヤー' },
-    { moveName: 'ユニティ', moveNotation: 'ユニティ' },
-    { moveName: 'スプリントアタック', moveNotation: 'スプリントアタック' },
-    { moveName: 'モノワイヤー・ブレイクアウト', moveNotation: 'モノワイヤー・ブレイクアウト' },
-    { moveName: 'ライブワイヤー', moveNotation: 'ライブワイヤー' },
-    { moveName: 'クイックハック', moveNotation: 'クイックハック' }
+    { moveName: 'モノワイヤー', moveNotation: '236S' },
+    { moveName: 'ユニティ', moveNotation: '214S' },
+    { moveName: 'スプリントアタック', moveNotation: '236K' },
+    { moveName: 'モノワイヤー・ブレイクアウト', moveNotation: '623S' },
+    { moveName: 'ライブワイヤー', moveNotation: '632146H' },
+    { moveName: 'クイックハック', moveNotation: '214214P' }
   ]
 };
 
-export async function seedCharacterMoves() {
-  console.log('Seeding character moves...');
-
-  let totalCreated = 0;
-
+async function seedCharacterMoves() {
   for (const [characterName, moves] of Object.entries(characterMovesData)) {
-    console.log(`  Seeding moves for ${characterName}...`);
+    console.log(`Seeding moves for ${characterName}...`);
 
-    try {
-      await CharacterMoveModel.bulkCreate(characterName, moves);
-      totalCreated += moves.length;
-      console.log(`    ✓ Created ${moves.length} moves`);
-    } catch (error) {
-      console.error(`    ✗ Error seeding ${characterName}:`, error);
+    for (const move of moves) {
+      try {
+        await CharacterMoveModel.create(
+          characterName,
+          move.moveName,
+          move.moveNotation
+        );
+      } catch (error: any) {
+        // UNIQUE制約エラー（すでに登録済み）は無視
+        if (error.message && error.message.includes('UNIQUE constraint failed')) {
+          console.log(`  Skipped (already exists): ${move.moveName}`);
+        } else {
+          throw error;
+        }
+      }
     }
-  }
 
-  console.log(`✓ Total moves created: ${totalCreated}`);
+    console.log(`  ✓ Completed ${characterName} (${moves.length} moves)`);
+  }
 }
 
 // スクリプトとして直接実行された場合
@@ -827,3 +772,5 @@ if (require.main === module) {
       process.exit(1);
     });
 }
+
+export { characterMovesData, seedCharacterMoves };

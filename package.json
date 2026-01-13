@@ -10,6 +10,7 @@
     "register-commands": "tsx src/commands/register.ts",
     "seed": "tsx seed/import-common-data.ts",
     "seed:moves": "tsx src/database/seed-character-moves.ts",
+    "reseed:moves": "tsx scripts/reseed-moves.ts",
     "migrate": "tsx src/database/migrate-add-my-character.ts",
     "migrate:v2": "tsx src/database/migrate-to-v2.ts"
   },
