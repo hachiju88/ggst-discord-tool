@@ -59,7 +59,7 @@ export const data = new SlashCommandBuilder()
       .addStringOption(option =>
         option
           .setName('note')
-          .setDescription('メモ（任意）')
+          .setDescription('コメント（任意）')
           .setRequired(false)
           .setMaxLength(500)
       )
@@ -125,7 +125,7 @@ export const data = new SlashCommandBuilder()
       .addStringOption(option =>
         option
           .setName('note')
-          .setDescription('新しいメモ')
+          .setDescription('新しいコメント')
           .setRequired(false)
           .setMaxLength(500)
       )
@@ -218,7 +218,7 @@ export const aliasData = new SlashCommandBuilder()
       .addStringOption(option =>
         option
           .setName('note')
-          .setDescription('メモ（任意）')
+          .setDescription('コメント（任意）')
           .setRequired(false)
           .setMaxLength(500)
       )
@@ -284,7 +284,7 @@ export const aliasData = new SlashCommandBuilder()
       .addStringOption(option =>
         option
           .setName('note')
-          .setDescription('新しいメモ')
+          .setDescription('新しいコメント')
           .setRequired(false)
           .setMaxLength(500)
       )
@@ -367,17 +367,23 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
       const parts = focusedValue.split('>').map(p => p.trim());
       const lastPart = parts[parts.length - 1];
 
+      // 既存の入力（最後の部分を除く）
+      const prefix = parts.slice(0, -1).join(' > ');
+      const prefixWithSeparator = prefix ? prefix + ' > ' : '';
+
       // 最後の部分に一致する技をフィルタ
       const filtered = moves.filter(move =>
         move.name.toLowerCase().includes(lastPart) ||
         move.value.toLowerCase().includes(lastPart)
       );
 
-      if (filtered.length === 0) {
-        return await interaction.respond(moves.slice(0, 25));
-      }
+      // 選択肢のvalueに既存入力 + 技名 + " > " を含める
+      const suggestions = (filtered.length > 0 ? filtered : moves).slice(0, 25).map(move => ({
+        name: move.name,
+        value: prefixWithSeparator + move.value + ' > '
+      }));
 
-      return await interaction.respond(filtered.slice(0, 25));
+      return await interaction.respond(suggestions);
     }
 
     await interaction.respond([]);
@@ -437,7 +443,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       response += `ダメージ: ${damage}\n`;
     }
     if (note) {
-      response += `メモ: ${note}\n`;
+      response += `コメント: ${note}\n`;
     }
 
     await interaction.reply({
@@ -506,18 +512,18 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     // コンボをフィールドに追加（最大10件）
     const displayCombos = combos.slice(0, 10);
     for (const combo of displayCombos) {
-      const locationEmoji = combo.location === 'center' ? '🔵' : '🔴';
-      const starterEmoji = combo.starter === 'counter' ? '⚡' : '⭕';
+      const locationText = combo.location === 'center' ? '画面中央' : '画面端';
+      const starterText = combo.starter === 'counter' ? 'カウンター' : '通常始動';
 
-      let fieldName = `ID:${combo.id} ${locationEmoji} ${starterEmoji} テンション${combo.tension_gauge}%`;
+      let fieldName = `ID:${combo.id} [${locationText}][${combo.tension_gauge}%][${starterText}]`;
+      if (combo.note) {
+        fieldName += `[${combo.note}]`;
+      }
       if (combo.damage) {
         fieldName += ` (${combo.damage}dmg)`;
       }
 
       let fieldValue = combo.combo_notation;
-      if (combo.note) {
-        fieldValue += `\n💭 ${combo.note}`;
-      }
 
       embed.addFields({
         name: fieldName,
@@ -586,7 +592,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       response += `ダメージ: ${updatedCombo.damage}\n`;
     }
     if (updatedCombo.note) {
-      response += `メモ: ${updatedCombo.note}\n`;
+      response += `コメント: ${updatedCombo.note}\n`;
     }
 
     await interaction.reply({
