@@ -208,10 +208,14 @@ async function migrate() {
     const seedPath = path.join(__dirname, 'seed-data.sql');
     const seedData = fs.readFileSync(seedPath, 'utf-8');
 
-    const seedStatements = seedData
+    // コメント行を削除してからsplitする
+    const lines = seedData.split('\n').filter(line => !line.trim().startsWith('--') && line.trim().length > 0);
+    const cleanedSql = lines.join('\n');
+
+    const seedStatements = cleanedSql
       .split(';')
       .map(s => s.trim())
-      .filter(s => s.length > 0 && !s.startsWith('--'));
+      .filter(s => s.length > 0);
 
     for (const statement of seedStatements) {
       await db.execute(statement);

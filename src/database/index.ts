@@ -47,6 +47,10 @@ export function getDatabase(): Client {
   return db;
 }
 
+export function setDatabase(client: Client): void {
+  db = client;
+}
+
 export async function closeDatabase(): Promise<void> {
   if (db) {
     db.close();

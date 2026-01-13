@@ -1,4 +1,6 @@
+import 'dotenv/config';
 import { CharacterMoveModel } from '../models/CharacterMove';
+import { createClient, Client } from '@libsql/client';
 
 // キャラクター技データのシード
 // ソースのフレーム表に基づく全キャラクターの技データ
@@ -183,7 +185,7 @@ const characterMovesData = {
     { moveName: 'エキサイティング骨折', moveNotation: 'エキサイティング骨折' },
     { moveName: 'な・な・な・なにがでるかな？', moveNotation: 'な・な・な・なにがでるかな？' }
   ],
-  'ミリア=レイジ': [
+  'ミリア・レイジ': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -330,7 +332,7 @@ const characterMovesData = {
     { moveName: 'ヴェンターニア', moveNotation: 'ヴェンターニア' },
     { moveName: 'テンペスターヂ', moveNotation: 'テンペスターヂ' }
   ],
-  '御津闇慈': [
+  'アンジー': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -445,7 +447,7 @@ const characterMovesData = {
     { moveName: 'デウス・エクス・マキナ', moveNotation: 'デウス・エクス・マキナ' },
     { moveName: '超フォーカス', moveNotation: '超フォーカス' }
   ],
-  '梅喧': [
+  'バイケン': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -512,7 +514,7 @@ const characterMovesData = {
     { moveName: 'ループ ザ ループ', moveNotation: 'ループ ザ ループ' },
     { moveName: '帰ってきたキルマシーン', moveNotation: '帰ってきたキルマシーン' }
   ],
-  'シン=キスク': [
+  'シン・キスク': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -558,7 +560,7 @@ const characterMovesData = {
     { moveName: '13C', moveNotation: '13C' },
     { moveName: '4CC', moveNotation: '4CC' }
   ],
-  'アスカ': [
+  'アスカR#': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -799,6 +801,22 @@ export async function seedCharacterMoves() {
 
 // スクリプトとして直接実行された場合
 if (require.main === module) {
+  const url = process.env.TURSO_DATABASE_URL;
+  const authToken = process.env.TURSO_AUTH_TOKEN;
+
+  if (!url || !authToken) {
+    console.error('TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set');
+    process.exit(1);
+  }
+
+  // データベース接続を作成
+  const db: Client = createClient({ url, authToken });
+  console.log('Connected to database');
+
+  // database/index.ts のdbをセット
+  const { setDatabase } = require('./index.ts');
+  setDatabase(db);
+
   seedCharacterMoves()
     .then(() => {
       console.log('Seed completed successfully');
