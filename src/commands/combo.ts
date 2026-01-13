@@ -403,7 +403,7 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
 
         return {
           name: displayName,
-          value: prefixWithSeparator + move.move_notation + ' > '
+          value: prefixWithSeparator + move.move_notation + ' >'
         };
       });
 
