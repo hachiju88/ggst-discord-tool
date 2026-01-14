@@ -14,9 +14,6 @@ async function migrate() {
   console.log('🔄 Starting migration: Remove UNIQUE constraint from character_moves');
 
   try {
-    // トランザクション開始
-    await db.execute('BEGIN TRANSACTION');
-
     // 1. 新しいテーブルを作成（UNIQUE制約なし）
     console.log('📝 Creating new character_moves table without UNIQUE constraint...');
     await db.execute(`
@@ -55,14 +52,9 @@ async function migrate() {
       ON character_moves(character_id)
     `);
 
-    // トランザクションコミット
-    await db.execute('COMMIT');
-
     console.log('✅ Migration completed successfully');
     console.log('ℹ️  character_moves table now allows duplicate move_notation per character');
   } catch (error: any) {
-    // ロールバック
-    await db.execute('ROLLBACK');
     console.error('❌ Migration failed:', error);
     process.exit(1);
   } finally {
