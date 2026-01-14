@@ -127,20 +127,9 @@ Discordサーバーで以下を実行：
 - [ ] `/gn defeat_reason:` で敗因候補が表示される
 - [ ] `/gc add combo:` で技名候補が表示される（キャラ選択後）
 
-#### 12. エイリアス確認
-- [ ] `/gs` = `/ggst-setmychar`
-- [ ] `/gm` = `/ggst-match`
-- [ ] `/gn` = `/ggst-addnote`
-- [ ] `/gh` = `/ggst-history`
-- [ ] `/gps` = `/ggst-strategy`
-- [ ] `/gcs` = `/ggst-common-strategy`
-- [ ] `/ge` = `/ggst-export`
-- [ ] `/gc` = `/ggst-combo`
-- [ ] `/gmv` = `/ggst-move`
-
 ### オプション設定
 
-#### 13. スリープ対策（推奨）
+#### 12. スリープ対策（推奨）
 
 [Uptime Robot](https://uptimerobot.com/)で監視設定：
 

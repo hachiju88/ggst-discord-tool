@@ -5,6 +5,7 @@ import { UserModel } from '../models/User';
 import { ComboModel } from '../models/Combo';
 import { CharacterModel } from '../models/Character';
 import { CharacterMoveModel } from '../models/CharacterMove';
+import { CommonMoveModel } from '../models/CommonMove';
 
 export const data = new SlashCommandBuilder()
   .setName('gc')
@@ -512,12 +513,27 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
         ]);
       }
 
-      // そのキャラの技の生データを取得
-      const movesData = await CharacterMoveModel.getByCharacter(characterName);
+      // キャラ固有の技と共通技を取得
+      const characterMoves = await CharacterMoveModel.getByCharacter(characterName);
+      const commonMoves = await CommonMoveModel.getAll();
+
+      // 共通技をCharacterMove形式に変換して統合
+      const commonMovesFormatted = commonMoves.map(cm => ({
+        id: cm.id,
+        character_id: 0, // 共通技はcharacter_idが不要
+        move_name: cm.move_name,
+        move_name_en: cm.move_name_en,
+        move_notation: cm.move_notation,
+        move_type: cm.move_type,
+        created_at: cm.created_at
+      }));
+
+      // 共通技を先に配置（よく使う技を上に）
+      const movesData = [...commonMovesFormatted, ...characterMoves];
 
       if (movesData.length === 0) {
         return await interaction.respond([
-          { name: '（このキャラの技データが未登録です）', value: focusedValue }
+          { name: '（技データが未登録です）', value: focusedValue }
         ]);
       }
 

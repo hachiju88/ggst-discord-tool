@@ -28,23 +28,15 @@ export function createClient(): Client {
       try {
         const { commandName } = interaction;
 
-        // コマンドモジュールのマッピング（エイリアスも含む）
+        // コマンドモジュールのマッピング
         const commandModules: Record<string, any> = {
-          'ggst-setmychar': setmychar,
           'gs': setmychar,
-          'ggst-addnote': addnote,
           'gn': addnote,
-          'ggst-history': history,
           'gh': history,
-          'ggst-strategy': strategy,
           'gps': strategy,
-          'ggst-common-strategy': commonStrategy,
           'gcs': commonStrategy,
-          'ggst-match': match,
           'gm': match,
-          'ggst-combo': combo,
           'gc': combo,
-          'ggst-move': move,
           'gmv': move
         };
 

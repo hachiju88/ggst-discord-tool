@@ -98,15 +98,17 @@ npm run register-commands
 成功すると以下のメッセージが表示されます:
 
 ```
-Successfully reloaded 7 application (/) commands.
+Successfully reloaded 9 application (/) commands.
 Commands registered:
-  - /ggst-setmychar
-  - /ggst-addnote
-  - /ggst-history
-  - /ggst-strategy
-  - /ggst-common-strategy
-  - /ggst-match
-  - /ggst-export
+  - /gs
+  - /gm
+  - /gn
+  - /gh
+  - /gps
+  - /gcs
+  - /ge
+  - /gc
+  - /gmv
 ```
 
 ### 3.4 Botの起動
@@ -226,26 +228,26 @@ Renderの無料プランは15分以上リクエストがない場合、自動的
 
 ### 6.1 基本的な流れ
 
-1. `/ggst-setmychar [キャラ名]` - 自分のメインキャラを設定
-2. `/ggst-match [相手キャラ]` - 対戦開始時に過去データを確認
-3. 対戦後に `/ggst-addnote [相手キャラ] [勝敗] [メモ]` - 記録を追加
-4. `/ggst-history` - 自分の対戦履歴を確認
-5. `/ggst-export` - NotebookLM用にデータをエクスポート
+1. `/gs [キャラ名]` - 自分のメインキャラを設定
+2. `/gm [相手キャラ]` - 対戦開始時に過去データを確認
+3. 対戦後に `/gn [相手キャラ] [勝敗] [メモ]` - 記録を追加
+4. `/gh` - 自分の対戦履歴を確認
+5. `/ge` - NotebookLM用にデータをエクスポート
 
 ### 6.2 戦略管理
 
-- `/ggst-strategy add [キャラ名] [内容]` - 個人専用の戦略を追加
-- `/ggst-strategy view [キャラ名]` - 個人戦略を表示
-- `/ggst-common-strategy add [キャラ名] [内容]` - 全員で共有する対策情報を追加
-- `/ggst-common-strategy view [キャラ名]` - 共通対策を表示
+- `/gps add [キャラ名] [内容]` - 個人専用の戦略を追加
+- `/gps view [キャラ名]` - 個人戦略を表示
+- `/gcs add [キャラ名] [内容]` - 全員で共有する対策情報を追加
+- `/gcs view [キャラ名]` - 共通対策を表示
 
 ### 6.3 NotebookLM連携
 
-1. `/ggst-export` でデータをダウンロード
+1. `/ge` でデータをダウンロード
 2. [NotebookLM](https://notebooklm.google.com/)にアクセス
 3. ダウンロードしたMarkdownファイルをアップロード
 4. AIに質問して戦略を立てる
-5. 得た戦略を `/ggst-strategy add` または `/ggst-common-strategy add` で登録
+5. 得た戦略を `/gps add` または `/gcs add` で登録
 
 ## トラブルシューティング
 

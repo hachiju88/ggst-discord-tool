@@ -75,7 +75,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     await StrategyModel.create(userId, character, content, 'user');
 
     await interaction.reply({
-      content: `💡 個人戦略を登録しました\n\n対象キャラ: ${character}\n内容: ${content}\n\nこの情報は次回の \`/ggst-match\` コマンドで自動表示されます。`,
+      content: `💡 個人戦略を登録しました\n\n対象キャラ: ${character}\n内容: ${content}\n\nこの情報は次回の \`/gm\` コマンドで自動表示されます。`,
       flags: MessageFlags.Ephemeral
     });
   } else if (subcommand === 'view') {
@@ -86,7 +86,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     if (strategies.length === 0) {
       await interaction.reply({
-        content: `${character}への個人戦略はまだ登録されていません。\n\`/ggst-strategy add\` で追加してください。`,
+        content: `${character}への個人戦略はまだ登録されていません。\n\`/gps add\` で追加してください。`,
         flags: MessageFlags.Ephemeral
       });
       return;

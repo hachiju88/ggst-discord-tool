@@ -56,6 +56,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   await UserModel.setMainCharacter(userId, character);
 
   await interaction.reply({
-    content: `✅ メインキャラクターを「${character}」に設定しました！`
+    content: `✅ メインキャラクターを「${character}」に設定しました！`,
+    flags: MessageFlags.Ephemeral
   });
 }

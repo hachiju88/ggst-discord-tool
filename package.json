@@ -11,10 +11,13 @@
     "seed": "tsx seed/import-common-data.ts",
     "seed:moves": "tsx src/database/seed-character-moves.ts",
     "seed:character-info": "node src/database/seed-character-info.js",
+    "seed:common-moves": "tsx src/database/seed-common-moves.ts",
+    "clean:common-moves": "tsx src/database/clean-common-moves.ts",
     "reseed:moves": "tsx scripts/reseed-moves.ts",
     "migrate": "tsx src/database/migrate-add-my-character.ts",
     "migrate:v2": "tsx src/database/migrate-to-v2.ts",
-    "migrate:move-en": "tsx src/database/migrate-add-move-name-en.ts"
+    "migrate:move-en": "tsx src/database/migrate-add-move-name-en.ts",
+    "migrate:common-moves": "tsx src/database/migrate-add-common-moves.ts"
   },
   "keywords": [
     "discord",

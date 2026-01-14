@@ -75,7 +75,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     await CommonStrategyModel.create(character, content, userId);
 
     await interaction.reply({
-      content: `🌐 共通対策情報を登録しました\n\n対象キャラ: ${character}\n内容: ${content}\n\nこの情報は全ユーザーの \`/ggst-match\` コマンドで表示されます。`
+      content: `🌐 共通対策情報を登録しました\n\n対象キャラ: ${character}\n内容: ${content}\n\nこの情報は全ユーザーの \`/gm\` コマンドで表示されます。`,
+      flags: MessageFlags.Ephemeral
     });
   } else if (subcommand === 'view') {
     const character = interaction.options.getString('character', true);
@@ -85,7 +86,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     if (strategies.length === 0) {
       await interaction.reply({
-        content: `${character}への共通対策情報はまだ登録されていません。\n\`/ggst-common-strategy add\` で追加してください。`,
+        content: `${character}への共通対策情報はまだ登録されていません。\n\`/gcs add\` で追加してください。`,
         flags: MessageFlags.Ephemeral
       });
       return;
@@ -103,6 +104,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     embed.setDescription(strategiesText);
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
 }

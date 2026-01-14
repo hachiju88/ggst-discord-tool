@@ -62,7 +62,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (!myCharacter) {
     await interaction.editReply({
-      content: 'まず `/ggst-setmychar` コマンドでメインキャラクターを設定してください。'
+      content: 'まず `/gs` コマンドでメインキャラクターを設定してください。'
     });
     return;
   }

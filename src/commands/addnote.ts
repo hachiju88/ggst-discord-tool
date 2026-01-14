@@ -178,6 +178,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   await interaction.reply({
     content: response,
-    ephemeral: false
+    ephemeral: true
   });
 }

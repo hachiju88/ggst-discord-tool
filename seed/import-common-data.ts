@@ -116,7 +116,7 @@ async function importCommonData() {
     console.log(`   - 登録した戦略数: ${totalStrategies}`);
     console.log('');
     console.log('💡 使い方:');
-    console.log('   Discordで `/ggst-common-strategy view [キャラ名]` を実行して確認してください');
+    console.log('   Discordで `/gcs view [キャラ名]` を実行して確認してください');
 
   } catch (error) {
     console.error('❌ エラーが発生しました:', error);

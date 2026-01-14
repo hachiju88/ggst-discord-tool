@@ -69,7 +69,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   );
 
   if (matches.length === 0) {
-    let noDataMessage = '対戦記録がありません。`/ggst-addnote`コマンドで記録を追加してください。';
+    let noDataMessage = '対戦記録がありません。`/gn`コマンドで記録を追加してください。';
     if (opponentFilter || myCharacterFilter) {
       const filters = [];
       if (myCharacterFilter) filters.push(`使用キャラ: ${myCharacterFilter}`);
@@ -151,5 +151,5 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     inline: false
   });
 
-  await interaction.reply({ embeds: [embed] });
+  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
