@@ -17,7 +17,8 @@
     "migrate": "tsx src/database/migrate-add-my-character.ts",
     "migrate:v2": "tsx src/database/migrate-to-v2.ts",
     "migrate:move-en": "tsx src/database/migrate-add-move-name-en.ts",
-    "migrate:common-moves": "tsx src/database/migrate-add-common-moves.ts"
+    "migrate:common-moves": "tsx src/database/migrate-add-common-moves.ts",
+    "migrate:remove-unique": "tsx src/database/migrate-remove-unique-constraint.ts"
   },
   "keywords": [
     "discord",

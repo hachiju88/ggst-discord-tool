@@ -90,7 +90,6 @@ CREATE TABLE IF NOT EXISTS character_moves (
     move_notation TEXT NOT NULL,
     move_type TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(character_id, move_notation),
     FOREIGN KEY (character_id) REFERENCES characters(id)
 );
 
