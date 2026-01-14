@@ -529,6 +529,9 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
       }));
 
       // 共通技を先に配置（よく使う技を上に）
+      // 注意: Discordのオートコンプリートは最大25件まで表示されるため、
+      // 共通技が多い場合、キャラクター専用技が初期表示に含まれないことがあります。
+      // その場合は技名やコマンド表記を入力して絞り込んでください。
       const movesData = [...commonMovesFormatted, ...characterMoves];
 
       if (movesData.length === 0) {
