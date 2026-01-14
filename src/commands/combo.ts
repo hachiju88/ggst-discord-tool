@@ -588,7 +588,7 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
           ? `${move.move_name} / ${move.move_name_en} (${move.move_notation})`
           : `${move.move_name} (${move.move_notation})`;
 
-        // 入力フィールド表示用（日本語名 (コマンド)）
+        // 入力フィールド表示用（日本語名（コマンド）形式）
         const inputValue = `${move.move_name} (${move.move_notation})`;
 
         return {
