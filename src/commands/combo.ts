@@ -43,9 +43,16 @@ export const data = new SlashCommandBuilder()
       )
       .addStringOption(option =>
         option
+          .setName('note')
+          .setDescription('コメント（任意）')
+          .setRequired(false)
+          .setMaxLength(500)
+      )
+      .addStringOption(option =>
+        option
           .setName('combo1')
           .setDescription('技1（例: 5K）')
-          .setRequired(true)
+          .setRequired(false)
           .setMaxLength(50)
           .setAutocomplete(true)
       )
@@ -201,13 +208,6 @@ export const data = new SlashCommandBuilder()
           .setMaxLength(50)
           .setAutocomplete(true)
       )
-      .addStringOption(option =>
-        option
-          .setName('note')
-          .setDescription('コメント（任意）')
-          .setRequired(false)
-          .setMaxLength(500)
-      )
   )
   .addSubcommand(subcommand =>
     subcommand
@@ -259,6 +259,34 @@ export const data = new SlashCommandBuilder()
           .setDescription('コンボID（/gc viewで確認）')
           .setRequired(true)
           .setMinValue(1)
+      )
+      .addStringOption(option =>
+        option
+          .setName('location')
+          .setDescription('新しい位置')
+          .setRequired(false)
+          .addChoices(...LOCATION_CHOICES)
+      )
+      .addIntegerOption(option =>
+        option
+          .setName('tension')
+          .setDescription('新しいテンションゲージ')
+          .setRequired(false)
+          .addChoices(...TENSION_GAUGE_CHOICES)
+      )
+      .addStringOption(option =>
+        option
+          .setName('starter')
+          .setDescription('新しい始動')
+          .setRequired(false)
+          .addChoices(...STARTER_CHOICES)
+      )
+      .addStringOption(option =>
+        option
+          .setName('note')
+          .setDescription('新しいコメント')
+          .setRequired(false)
+          .setMaxLength(500)
       )
       .addStringOption(option =>
         option
@@ -420,34 +448,6 @@ export const data = new SlashCommandBuilder()
           .setMaxLength(50)
           .setAutocomplete(true)
       )
-      .addStringOption(option =>
-        option
-          .setName('note')
-          .setDescription('新しいコメント')
-          .setRequired(false)
-          .setMaxLength(500)
-      )
-      .addStringOption(option =>
-        option
-          .setName('location')
-          .setDescription('新しい位置')
-          .setRequired(false)
-          .addChoices(...LOCATION_CHOICES)
-      )
-      .addIntegerOption(option =>
-        option
-          .setName('tension')
-          .setDescription('新しいテンションゲージ')
-          .setRequired(false)
-          .addChoices(...TENSION_GAUGE_CHOICES)
-      )
-      .addStringOption(option =>
-        option
-          .setName('starter')
-          .setDescription('新しい始動')
-          .setRequired(false)
-          .addChoices(...STARTER_CHOICES)
-      )
   )
   .addSubcommand(subcommand =>
     subcommand
@@ -545,8 +545,8 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
             ? `${move.move_name} / ${move.move_name_en} (${move.move_notation})`
             : `${move.move_name} (${move.move_notation})`;
 
-          // 入力フィールド表示用（moveNotationのみ）
-          const inputValue = prefixWithSeparator + move.move_notation + ' >';
+          // 入力フィールド表示用（日本語名 (コマンド)）
+          const inputValue = prefixWithSeparator + `${move.move_name} (${move.move_notation})` + ' >';
 
           return {
             name: dropdownName,
@@ -572,9 +572,12 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
           ? `${move.move_name} / ${move.move_name_en} (${move.move_notation})`
           : `${move.move_name} (${move.move_notation})`;
 
+        // 入力フィールド表示用（日本語名 (コマンド)）
+        const inputValue = `${move.move_name} (${move.move_notation})`;
+
         return {
           name: dropdownName,
-          value: move.move_notation
+          value: inputValue
         };
       });
 
@@ -610,6 +613,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       }
     }
     const combo = comboParts.join(' > ');
+
+    // コンボが1つも入力されていない場合はエラー
+    if (comboParts.length === 0) {
+      await interaction.reply({
+        content: '❌ 少なくとも1つのコンボ技を入力してください。',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
 
     // キャラクターの存在確認
     const characterData = await CharacterModel.getByName(character);
