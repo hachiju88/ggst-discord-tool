@@ -84,6 +84,42 @@ export class StrategyModel {
     return result.rows as unknown as Strategy[];
   }
 
+  // IDで個人戦略を取得
+  static async getById(id: number, userDiscordId: string): Promise<Strategy | null> {
+    const db = getDatabase();
+
+    const result = await db.execute({
+      sql: 'SELECT * FROM strategies WHERE id = ? AND user_discord_id = ?',
+      args: [id, userDiscordId]
+    });
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return result.rows[0] as unknown as Strategy;
+  }
+
+  // 個人戦略を更新
+  static async update(id: number, userDiscordId: string, strategyContent: string): Promise<Strategy | null> {
+    const db = getDatabase();
+
+    const result = await db.execute({
+      sql: `
+        UPDATE strategies
+        SET strategy_content = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND user_discord_id = ?
+      `,
+      args: [strategyContent, id, userDiscordId]
+    });
+
+    if (result.rowsAffected === 0) {
+      return null;
+    }
+
+    return await this.getById(id, userDiscordId);
+  }
+
   // 個人戦略を削除
   static async delete(id: number, userDiscordId: string): Promise<boolean> {
     const db = getDatabase();

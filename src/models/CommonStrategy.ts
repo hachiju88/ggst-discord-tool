@@ -82,6 +82,42 @@ export class CommonStrategyModel {
     return result.rows as unknown as CommonStrategy[];
   }
 
+  // IDで共通戦略を取得
+  static async getById(id: number): Promise<CommonStrategy | null> {
+    const db = getDatabase();
+
+    const result = await db.execute({
+      sql: 'SELECT * FROM common_strategies WHERE id = ?',
+      args: [id]
+    });
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return result.rows[0] as unknown as CommonStrategy;
+  }
+
+  // 共通戦略を更新
+  static async update(id: number, strategyContent: string): Promise<CommonStrategy | null> {
+    const db = getDatabase();
+
+    const result = await db.execute({
+      sql: `
+        UPDATE common_strategies
+        SET strategy_content = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [strategyContent, id]
+    });
+
+    if (result.rowsAffected === 0) {
+      return null;
+    }
+
+    return await this.getById(id);
+  }
+
   // 共通戦略を削除
   static async delete(id: number): Promise<boolean> {
     const db = getDatabase();

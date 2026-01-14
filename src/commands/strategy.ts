@@ -37,6 +37,37 @@ export const data = new SlashCommandBuilder()
           .setRequired(true)
           .setAutocomplete(true)
       )
+  )
+  .addSubcommand(subcommand =>
+    subcommand
+      .setName('edit')
+      .setDescription('個人戦略を編集します')
+      .addIntegerOption(option =>
+        option
+          .setName('id')
+          .setDescription('戦略ID（/gps view で確認）')
+          .setRequired(true)
+          .setMinValue(1)
+      )
+      .addStringOption(option =>
+        option
+          .setName('content')
+          .setDescription('新しい戦略内容')
+          .setRequired(true)
+          .setMaxLength(2000)
+      )
+  )
+  .addSubcommand(subcommand =>
+    subcommand
+      .setName('delete')
+      .setDescription('個人戦略を削除します')
+      .addIntegerOption(option =>
+        option
+          .setName('id')
+          .setDescription('戦略ID（/gps view で確認）')
+          .setRequired(true)
+          .setMinValue(1)
+      )
   );
 
 export async function autocomplete(interaction: AutocompleteInteraction) {
@@ -99,11 +130,54 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     const strategiesText = strategies.map((strat, index) => {
       const date = new Date(strat.created_at).toLocaleDateString('ja-JP');
-      return `${index + 1}. [${date}]\n${strat.strategy_content}`;
+      return `**ID:${strat.id}** [${date}]\n${strat.strategy_content}`;
     }).join('\n\n');
 
     embed.setDescription(strategiesText);
 
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+
+  } else if (subcommand === 'edit') {
+    const id = interaction.options.getInteger('id', true);
+    const content = interaction.options.getString('content', true);
+
+    // 個人戦略を更新
+    const updated = await StrategyModel.update(id, userId, content);
+
+    if (!updated) {
+      await interaction.reply({
+        content: '❌ 戦略が見つからないか、編集権限がありません。',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    // キャラクター名を取得
+    const character = await CharacterModel.getById(updated.target_character_id);
+    const characterName = character?.name || updated.target_character || '不明';
+
+    await interaction.reply({
+      content: `✅ 個人戦略を更新しました (ID: ${id})\n\n対象キャラ: ${characterName}\n内容: ${content}`,
+      flags: MessageFlags.Ephemeral
+    });
+
+  } else if (subcommand === 'delete') {
+    const id = interaction.options.getInteger('id', true);
+
+    // 個人戦略を削除
+    const deleted = await StrategyModel.delete(id, userId);
+
+    if (!deleted) {
+      await interaction.reply({
+        content: '❌ 戦略が見つからないか、削除権限がありません。',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    await interaction.reply({
+      content: `✅ 個人戦略を削除しました (ID: ${id})`,
+      flags: MessageFlags.Ephemeral
+    });
   }
 }
