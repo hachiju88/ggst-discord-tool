@@ -125,7 +125,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   // 優先度別コメント - Critical
   if (criticalComments.length > 0) {
-    const criticalTexts = criticalComments.slice(0, 3).map(match => {
+    const criticalTexts = criticalComments.slice(0, 10).map(match => {
       const note = match.note || '（メモなし）';
       return `🔴 ${note}`;
     });
@@ -139,7 +139,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   // 優先度別コメント - Important
   if (importantComments.length > 0) {
-    const importantTexts = importantComments.slice(0, 3).map(match => {
+    const importantTexts = importantComments.slice(0, 10).map(match => {
       const note = match.note || '（メモなし）';
       return `🟡 ${note}`;
     });
@@ -153,7 +153,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   // 優先度別コメント - Recommended
   if (recommendedComments.length > 0) {
-    const recommendedTexts = recommendedComments.slice(0, 3).map(match => {
+    const recommendedTexts = recommendedComments.slice(0, 10).map(match => {
       const note = match.note || '（メモなし）';
       return `🟢 ${note}`;
     });
@@ -167,8 +167,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   // 共通対策情報
   if (commonStrategies.length > 0) {
-    const commonText = commonStrategies.slice(0, 3).map((strat, i) =>
-      `${i + 1}. ${strat.strategy_content}`
+    const commonText = commonStrategies.slice(0, 10).map(strat =>
+      strat.strategy_content
     ).join('\n');
 
     embed.addFields({
@@ -180,8 +180,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   // 個人戦略
   if (personalStrategies.length > 0) {
-    const personalText = personalStrategies.slice(0, 3).map((strat, i) =>
-      `${i + 1}. ${strat.strategy_content}`
+    const personalText = personalStrategies.slice(0, 10).map(strat =>
+      strat.strategy_content
     ).join('\n');
 
     embed.addFields({
@@ -217,13 +217,4 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   embed.setFooter({ text: '頑張ってください！🔥' });
 
   await interaction.editReply({ embeds: [embed] });
-
-  // 共通対策情報をテキストで送信（読み上げ用）
-  if (commonStrategies.length > 0) {
-    const commonText = commonStrategies.map(strat =>
-      strat.strategy_content
-    ).join(' ');
-
-    await interaction.followUp({ content: commonText });
-  }
 }
