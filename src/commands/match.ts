@@ -23,6 +23,18 @@ export const data = new SlashCommandBuilder()
       .setDescription('使用キャラクター（未指定の場合はメインキャラ）')
       .setRequired(false)
       .setAutocomplete(true)
+  )
+  .addStringOption(option =>
+    option
+      .setName('period')
+      .setDescription('統計期間（デフォルト: 無期限）')
+      .setRequired(false)
+      .addChoices(
+        { name: '1日', value: '1day' },
+        { name: '1週間', value: '1week' },
+        { name: '1ヶ月', value: '1month' },
+        { name: '無期限', value: 'all' }
+      )
   );
 
 export async function autocomplete(interaction: AutocompleteInteraction) {
@@ -53,6 +65,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const userId = interaction.user.id;
   const opponent = interaction.options.getString('opponent', true);
   const myCharacterInput = interaction.options.getString('mycharacter');
+  const period = (interaction.options.getString('period') || 'all') as '1day' | '1week' | '1month' | 'all';
 
   // ユーザーを取得または作成
   const user = await UserModel.findOrCreate(userId);
@@ -67,12 +80,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  // 対戦成績を取得（使用キャラでフィルタリング）
-  const stats = await MatchModel.getStats(userId, opponent, myCharacter);
+  // 対戦成績を取得（使用キャラ・期間でフィルタリング）
+  const stats = await MatchModel.getStats(userId, opponent, myCharacter, period);
   const winRate = stats.total > 0 ? ((stats.wins / stats.total) * 100).toFixed(1) : '0.0';
 
-  // 敗因トップ3を取得
-  const defeatReasonStats = await MatchModel.getDefeatReasonStats(userId, opponent, myCharacter);
+  // 敗因トップ3を取得（期間フィルター適用）
+  const defeatReasonStats = await MatchModel.getDefeatReasonStats(userId, opponent, myCharacter, period);
 
   // 優先度別のコメントを取得
   const criticalComments = await MatchModel.getByUserWithPriority(userId, opponent, myCharacter, 'critical');
@@ -85,13 +98,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   // 共通戦略を取得
   const commonStrategies = await CommonStrategyModel.getByCharacter(opponent);
 
-  // 直近の対戦記録を取得（最大5件、使用キャラでフィルタリング）
-  const recentMatches = await MatchModel.getByUser(userId, 5, opponent, myCharacter);
+  // 直近の対戦記録を取得（最大5件、使用キャラ・期間でフィルタリング）
+  const recentMatches = await MatchModel.getByUser(userId, 5, opponent, myCharacter, period);
 
   // Embed作成
+  const periodMap = { '1day': '過去1日', '1week': '過去1週間', '1month': '過去1ヶ月', 'all': '全期間' };
+  const periodText = period !== 'all' ? ` (${periodMap[period]})` : '';
   const embed = new EmbedBuilder()
     .setColor(0xff4500)
-    .setTitle(`⚔️ ${myCharacter} vs ${opponent}`)
+    .setTitle(`⚔️ ${myCharacter} vs ${opponent}${periodText}`)
     .setTimestamp();
 
   // 過去の戦績
@@ -109,11 +124,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (defeatReasonStats.length > 0) {
     const defeatReasonTexts: string[] = [];
     for (const stat of defeatReasonStats) {
-      // 共通敗因またはユーザー独自敗因から名前を取得
-      const commonReason = await DefeatReasonModel.getCommonById(stat.defeat_reason_id);
-      const userReason = commonReason ? null : await DefeatReasonModel.getById(stat.defeat_reason_id);
-      const reasonName = commonReason?.reason || userReason?.reason || '不明';
-      defeatReasonTexts.push(`${reasonName}（${stat.count}回）`);
+      // defeat_reason_typeを使って直接正しい敗因を取得（効率化）
+      const reasonName = await DefeatReasonModel.getReasonDisplayNameById(
+        stat.defeat_reason_id,
+        stat.defeat_reason_type
+      );
+      defeatReasonTexts.push(`${reasonName || '不明'}（${stat.count}回）`);
     }
 
     embed.addFields({

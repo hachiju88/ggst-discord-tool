@@ -245,19 +245,28 @@ export class MatchModel {
   static async getDefeatReasonStats(
     userDiscordId: string,
     opponentCharacterName?: string,
-    myCharacterName?: string
+    myCharacterName?: string,
+    period?: '1day' | '1week' | '1month' | 'all'
   ): Promise<Array<{
     defeat_reason_id: number;
+    defeat_reason_type: 'common' | 'user';
     count: number;
   }>> {
     const db = getDatabase();
 
     let query = `
-      SELECT defeat_reason_id, COUNT(*) as count
+      SELECT defeat_reason_id, defeat_reason_type, COUNT(*) as count
       FROM matches
       WHERE user_discord_id = ? AND result = 'loss' AND defeat_reason_id IS NOT NULL
     `;
     const params: any[] = [userDiscordId];
+
+    // 期間フィルター
+    if (period && period !== 'all') {
+      const daysMap = { '1day': 1, '1week': 7, '1month': 30 };
+      const days = daysMap[period];
+      query += ` AND match_date >= datetime('now', '-${days} days')`;
+    }
 
     if (opponentCharacterName) {
       const opponentChar = await CharacterModel.getByName(opponentCharacterName);
@@ -281,7 +290,7 @@ export class MatchModel {
       }
     }
 
-    query += ' GROUP BY defeat_reason_id ORDER BY count DESC LIMIT 3';
+    query += ' GROUP BY defeat_reason_id, defeat_reason_type ORDER BY count DESC LIMIT 3';
 
     const result = await db.execute({
       sql: query,
@@ -290,6 +299,7 @@ export class MatchModel {
 
     return result.rows as unknown as Array<{
       defeat_reason_id: number;
+      defeat_reason_type: 'common' | 'user';
       count: number;
     }>;
   }
