@@ -8,22 +8,30 @@ dotenv.config();
 
 async function main() {
   try {
+    console.log('Starting GGST Discord Bot...');
+
     // 環境変数のチェック
     if (!process.env.DISCORD_TOKEN) {
       throw new Error('DISCORD_TOKEN is not set in environment variables');
     }
+    console.log('Environment variables loaded');
 
     // データベース初期化
+    console.log('Initializing database...');
     await initDatabase();
+    console.log('Database initialized');
 
     // Botクライアント作成・ログイン
-    console.log('Starting bot...');
+    console.log('Starting Discord bot client...');
     const client = createClient();
     await client.login(process.env.DISCORD_TOKEN);
+    console.log('Discord bot logged in successfully');
 
     // Expressサーバーの起動（スリープ対策）
+    console.log('Starting web server...');
     const app = express();
-    const port = process.env.PORT || 3000;
+    const port = parseInt(process.env.PORT || '3000', 10);
+    console.log(`Port configured: ${port}`);
 
     app.get('/', (req, res) => {
       res.send('GGST Discord Bot is running!');
@@ -37,7 +45,7 @@ async function main() {
       });
     });
 
-    const server = app.listen(port, () => {
+    const server = app.listen(port, '0.0.0.0', () => {
       console.log(`Web server listening on port ${port}`);
     });
 
