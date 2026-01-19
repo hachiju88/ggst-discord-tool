@@ -113,16 +113,21 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const priority: 'critical' | 'important' | 'recommended' | null =
     priorityInput ? (priorityInput as 'critical' | 'important' | 'recommended') : null;
 
-  // defeat_reasonをIDに変換
+  // defeat_reasonをIDとタイプに変換
   let defeatReasonId: number | null = null;
+  let defeatReasonType: 'common' | 'user' | null = null;
+
   if (defeatReasonInput) {
     const parsed = DefeatReasonModel.parseReasonValue(defeatReasonInput);
     if (parsed) {
-      // "common:1" or "user:5" の形式なので、IDを取得
-      // MatchModelのdefeat_reason_idカラムには実際のID値を格納
-      // 共通敗因と独自敗因を区別する必要がある場合は、別のロジックが必要
-      // ここでは単純にIDを使用
+      // オートコンプリートから選択された場合
       defeatReasonId = parsed.id;
+      defeatReasonType = parsed.type;
+    } else {
+      // 直接入力された場合：自動的に独自敗因として登録
+      const newReason = await DefeatReasonModel.create(userId, defeatReasonInput);
+      defeatReasonId = newReason.id;
+      defeatReasonType = 'user';
     }
   }
 
@@ -134,7 +139,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     result,
     note || undefined,
     defeatReasonId,
-    priority
+    priority,
+    defeatReasonType
   );
 
   // 通算成績を取得
@@ -160,8 +166,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     response += `メモ: ${note}\n`;
   }
 
-  if (defeatReasonInput) {
-    const reasonName = await DefeatReasonModel.getReasonDisplayName(defeatReasonInput);
+  if (defeatReasonId && defeatReasonType) {
+    const reasonName = await DefeatReasonModel.getReasonDisplayNameById(defeatReasonId, defeatReasonType);
     if (reasonName) {
       response += `敗因: ${reasonName}\n`;
     }

@@ -11,7 +11,8 @@ export class MatchModel {
     result: 'win' | 'loss' | null,
     note?: string,
     defeatReasonId?: number | null,
-    priority?: 'critical' | 'important' | 'recommended' | null
+    priority?: 'critical' | 'important' | 'recommended' | null,
+    defeatReasonType?: 'common' | 'user' | null
   ): Promise<Match> {
     const db = getDatabase();
 
@@ -38,10 +39,11 @@ export class MatchModel {
           opponent_character, opponent_character_id,
           result,
           defeat_reason_id,
+          defeat_reason_type,
           priority,
           note
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         userDiscordId,
@@ -49,6 +51,7 @@ export class MatchModel {
         opponentCharacterName, opponentChar.id,
         result,
         defeatReasonId || null,
+        defeatReasonType || null,
         priority || null,
         note || null
       ]

@@ -87,26 +87,26 @@ export class DefeatReasonModel {
   // オートコンプリート用
   // ===================================
 
-  // ユーザー用の敗因リスト（共通 + 独自）
+  // ユーザー用の敗因リスト（独自 + 共通）
   static async getReasonsForAutocomplete(userDiscordId: string): Promise<Array<{ name: string; value: string }>> {
     const commonReasons = await this.getAllCommon();
     const userReasons = await this.getByUser(userDiscordId);
 
     const result: Array<{ name: string; value: string }> = [];
 
-    // 共通敗因
-    for (const reason of commonReasons) {
-      result.push({
-        name: `[共通] ${reason.reason}`,
-        value: `common:${reason.id}`
-      });
-    }
-
-    // ユーザー独自敗因
+    // ユーザー独自敗因を先に表示
     for (const reason of userReasons) {
       result.push({
         name: `[自分] ${reason.reason}`,
         value: `user:${reason.id}`
+      });
+    }
+
+    // 共通敗因は後に表示
+    for (const reason of commonReasons) {
+      result.push({
+        name: `[共通] ${reason.reason}`,
+        value: `common:${reason.id}`
       });
     }
 
@@ -138,6 +138,17 @@ export class DefeatReasonModel {
       return reason ? reason.reason : null;
     } else {
       const reason = await this.getById(parsed.id);
+      return reason ? reason.reason : null;
+    }
+  }
+
+  // IDとタイプから表示名を取得
+  static async getReasonDisplayNameById(id: number, type: 'common' | 'user'): Promise<string | null> {
+    if (type === 'common') {
+      const reason = await this.getCommonById(id);
+      return reason ? reason.reason : null;
+    } else {
+      const reason = await this.getById(id);
       return reason ? reason.reason : null;
     }
   }
