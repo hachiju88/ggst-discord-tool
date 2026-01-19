@@ -591,8 +591,14 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
           ? `${move.move_name} / ${move.move_name_en} (${move.move_notation})`
           : `${move.move_name} (${move.move_notation})`;
 
-        // 入力フィールド表示用（日本語名（コマンド）形式）
-        const inputValue = `${move.move_name} (${move.move_notation})`;
+        // 入力フィールド表示用
+        // - 技名 = コマンド表記: 省略 (例: 2K)
+        // - 技名がコマンド表記で始まる: 省略 (例: 2S（1HIT）)
+        // - それ以外: カッコ付き (例: S竜巻ヨーヨー (214S))
+        const inputValue =
+          move.move_name === move.move_notation || move.move_name.startsWith(move.move_notation)
+            ? move.move_name
+            : `${move.move_name} (${move.move_notation})`;
 
         return {
           name: dropdownName,
