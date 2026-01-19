@@ -21,13 +21,7 @@ async function main() {
     await initDatabase();
     console.log('Database initialized');
 
-    // Botクライアント作成・ログイン
-    console.log('Starting Discord bot client...');
-    const client = createClient();
-    await client.login(process.env.DISCORD_TOKEN);
-    console.log('Discord bot logged in successfully');
-
-    // Expressサーバーの起動（スリープ対策）
+    // Expressサーバーを先に起動（Renderのポートスキャン対応）
     console.log('Starting web server...');
     const app = express();
     const port = parseInt(process.env.PORT || '3000', 10);
@@ -49,21 +43,28 @@ async function main() {
       console.log(`Web server listening on port ${port}`);
     });
 
-    // Graceful shutdown
-    process.on('SIGINT', async () => {
-      console.log('Shutting down...');
-      server.close();
-      client.destroy();
-      await closeDatabase();
-      process.exit(0);
-    });
+    // Webサーバー起動後にDiscord Botをログイン
+    console.log('Starting Discord bot client...');
+    const client = createClient();
 
-    process.on('SIGTERM', async () => {
+    // Graceful shutdown handlers
+    const shutdown = async () => {
       console.log('Shutting down...');
       server.close();
       client.destroy();
       await closeDatabase();
       process.exit(0);
+    };
+
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+
+    // Discord botログイン（非同期）
+    client.login(process.env.DISCORD_TOKEN).then(() => {
+      console.log('Discord bot logged in successfully');
+    }).catch((error) => {
+      console.error('Failed to login to Discord:', error);
+      process.exit(1);
     });
 
   } catch (error) {
