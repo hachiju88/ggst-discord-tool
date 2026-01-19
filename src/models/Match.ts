@@ -67,12 +67,20 @@ export class MatchModel {
     userDiscordId: string,
     limit?: number,
     opponentCharacterFilter?: string,
-    myCharacterFilter?: string
+    myCharacterFilter?: string,
+    period?: '1day' | '1week' | '1month' | 'all'
   ): Promise<Match[]> {
     const db = getDatabase();
 
     let query = 'SELECT * FROM matches WHERE user_discord_id = ?';
     const params: any[] = [userDiscordId];
+
+    // 期間フィルター
+    if (period && period !== 'all') {
+      const daysMap = { '1day': 1, '1week': 7, '1month': 30 };
+      const days = daysMap[period];
+      query += ` AND match_date >= datetime('now', '-${days} days')`;
+    }
 
     // フィルタがある場合は、まずキャラ名からIDを取得してID列でフィルタ（高速化）
     if (opponentCharacterFilter) {
@@ -118,7 +126,8 @@ export class MatchModel {
   static async getStats(
     userDiscordId: string,
     opponentCharacterName?: string,
-    myCharacterName?: string
+    myCharacterName?: string,
+    period?: '1day' | '1week' | '1month' | 'all'
   ): Promise<{
     total: number;
     wins: number;
@@ -135,6 +144,13 @@ export class MatchModel {
       WHERE user_discord_id = ?
     `;
     const params: any[] = [userDiscordId];
+
+    // 期間フィルター
+    if (period && period !== 'all') {
+      const daysMap = { '1day': 1, '1week': 7, '1month': 30 };
+      const days = daysMap[period];
+      query += ` AND match_date >= datetime('now', '-${days} days')`;
+    }
 
     // キャラ名からIDに変換してフィルタ
     if (opponentCharacterName) {
@@ -172,7 +188,10 @@ export class MatchModel {
   }
 
   // キャラクター別の成績を取得
-  static async getStatsByCharacter(userDiscordId: string): Promise<Array<{
+  static async getStatsByCharacter(
+    userDiscordId: string,
+    period?: '1day' | '1week' | '1month' | 'all'
+  ): Promise<Array<{
     character: string;
     total: number;
     wins: number;
@@ -180,6 +199,14 @@ export class MatchModel {
     winRate: number;
   }>> {
     const db = getDatabase();
+
+    // 期間フィルターの条件を構築
+    let whereClause = 'WHERE m.user_discord_id = ?';
+    if (period && period !== 'all') {
+      const daysMap = { '1day': 1, '1week': 7, '1month': 30 };
+      const days = daysMap[period];
+      whereClause += ` AND m.match_date >= datetime('now', '-${days} days')`;
+    }
 
     // キャラクターIDでグループ化し、charactersテーブルとJOIN
     const result = await db.execute({
@@ -191,7 +218,7 @@ export class MatchModel {
           SUM(CASE WHEN m.result = 'loss' THEN 1 ELSE 0 END) as losses
         FROM matches m
         LEFT JOIN characters c ON m.opponent_character_id = c.id
-        WHERE m.user_discord_id = ?
+        ${whereClause}
         GROUP BY COALESCE(m.opponent_character_id, m.opponent_character)
         ORDER BY total DESC
       `,

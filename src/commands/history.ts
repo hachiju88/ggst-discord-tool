@@ -9,6 +9,18 @@ export const data = new SlashCommandBuilder()
   .setDescription('[GGST] 対戦履歴を表示します')
   .addStringOption(option =>
     option
+      .setName('period')
+      .setDescription('検索期間（デフォルト: 1日）')
+      .setRequired(false)
+      .addChoices(
+        { name: '1日', value: '1day' },
+        { name: '1週間', value: '1week' },
+        { name: '1ヶ月', value: '1month' },
+        { name: '無期限', value: 'all' }
+      )
+  )
+  .addStringOption(option =>
+    option
       .setName('opponent')
       .setDescription('対戦相手のキャラクターで絞り込み（任意）')
       .setRequired(false)
@@ -53,6 +65,7 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const userId = interaction.user.id;
+  const period = (interaction.options.getString('period') || '1day') as '1day' | '1week' | '1month' | 'all';
   const opponentFilter = interaction.options.getString('opponent');
   const myCharacterFilter = interaction.options.getString('mycharacter');
   const limit = interaction.options.getInteger('limit') || 10;
@@ -65,13 +78,16 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     userId,
     limit,
     opponentFilter || undefined,
-    myCharacterFilter || undefined
+    myCharacterFilter || undefined,
+    period
   );
 
   if (matches.length === 0) {
+    const periodMap = { '1day': '過去1日', '1week': '過去1週間', '1month': '過去1ヶ月', 'all': '全期間' };
     let noDataMessage = '対戦記録がありません。`/gn`コマンドで記録を追加してください。';
-    if (opponentFilter || myCharacterFilter) {
+    if (opponentFilter || myCharacterFilter || period !== '1day') {
       const filters = [];
+      filters.push(periodMap[period]);
       if (myCharacterFilter) filters.push(`使用キャラ: ${myCharacterFilter}`);
       if (opponentFilter) filters.push(`vs ${opponentFilter}`);
       noDataMessage = `${filters.join(', ')}の対戦記録がありません。`;
@@ -84,18 +100,20 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   // 全体統計を取得
-  const overallStats = await MatchModel.getStats(userId);
+  const overallStats = await MatchModel.getStats(userId, undefined, undefined, period);
   const overallWinRate = overallStats.total > 0
     ? ((overallStats.wins / overallStats.total) * 100).toFixed(1)
     : '0.0';
 
   // キャラクター別成績を取得
-  const charStats = await MatchModel.getStatsByCharacter(userId);
+  const charStats = await MatchModel.getStatsByCharacter(userId, period);
 
   // Embed作成
+  const periodMap = { '1day': '過去1日', '1week': '過去1週間', '1month': '過去1ヶ月', 'all': '全期間' };
+  const periodText = ` (${periodMap[period]})`;
   const embed = new EmbedBuilder()
     .setColor(0x0099ff)
-    .setTitle(`📊 ${interaction.user.username}の対戦履歴`)
+    .setTitle(`📊 ${interaction.user.username}の対戦履歴${periodText}`)
     .setTimestamp();
 
   // 全体統計
