@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import express from 'express';
 import { createClient } from './bot';
 import { initDatabase, closeDatabase } from './database';
+import { autoMigrate } from './database/auto-migrate';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -20,6 +21,9 @@ async function main() {
     console.log('Initializing database...');
     await initDatabase();
     console.log('Database initialized');
+
+    // 自動マイグレーション実行
+    await autoMigrate();
 
     // Expressサーバーを先に起動（Renderのポートスキャン対応）
     console.log('Starting web server...');
