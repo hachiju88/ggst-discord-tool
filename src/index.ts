@@ -65,11 +65,24 @@ async function main() {
 
     // Discord botログイン（非同期、詳細ログ付き）
     console.log('Attempting to login to Discord...');
+
+    // タイムアウト設定（30秒）
+    const loginTimeout = setTimeout(() => {
+      console.error('❌ Discord login timeout after 30 seconds');
+      console.error('Please check:');
+      console.error('1. DISCORD_TOKEN is valid');
+      console.error('2. Network connectivity to Discord API');
+      console.error('3. Bot is not banned or restricted');
+      process.exit(1);
+    }, 30000);
+
     client.login(process.env.DISCORD_TOKEN)
       .then(() => {
+        clearTimeout(loginTimeout);
         console.log('✅ Discord bot login successful');
       })
       .catch((error) => {
+        clearTimeout(loginTimeout);
         console.error('❌ Failed to login to Discord:', error);
         console.error('Error details:', JSON.stringify(error, null, 2));
         if (error.code) {
