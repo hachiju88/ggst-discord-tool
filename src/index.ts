@@ -63,13 +63,23 @@ async function main() {
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
 
-    // Discord botログイン（非同期）
-    client.login(process.env.DISCORD_TOKEN).then(() => {
-      console.log('Discord bot logged in successfully');
-    }).catch((error) => {
-      console.error('Failed to login to Discord:', error);
-      process.exit(1);
-    });
+    // Discord botログイン（非同期、詳細ログ付き）
+    console.log('Attempting to login to Discord...');
+    client.login(process.env.DISCORD_TOKEN)
+      .then(() => {
+        console.log('✅ Discord bot login successful');
+      })
+      .catch((error) => {
+        console.error('❌ Failed to login to Discord:', error);
+        console.error('Error details:', JSON.stringify(error, null, 2));
+        if (error.code) {
+          console.error('Error code:', error.code);
+        }
+        if (error.message) {
+          console.error('Error message:', error.message);
+        }
+        process.exit(1);
+      });
 
   } catch (error) {
     console.error('Fatal error:', error);
