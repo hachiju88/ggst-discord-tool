@@ -65,8 +65,14 @@ async function main() {
 
     // Discord botログイン（非同期、詳細ログ付き）
     console.log('Attempting to login to Discord...');
+    console.log('DISCORD_TOKEN is set:', process.env.DISCORD_TOKEN ? 'YES' : 'NO');
+    if (process.env.DISCORD_TOKEN) {
+      console.log('Token length:', process.env.DISCORD_TOKEN.length);
+      console.log('Token prefix:', process.env.DISCORD_TOKEN.substring(0, 10) + '...');
+    }
 
     // タイムアウト設定（30秒）
+    console.log('Setting 30-second login timeout...');
     const loginTimeout = setTimeout(() => {
       console.error('❌ Discord login timeout after 30 seconds');
       console.error('Please check:');
@@ -75,7 +81,9 @@ async function main() {
       console.error('3. Bot is not banned or restricted');
       process.exit(1);
     }, 30000);
+    console.log('Timeout set, timer ID:', loginTimeout);
 
+    console.log('Calling client.login()...');
     client.login(process.env.DISCORD_TOKEN)
       .then(() => {
         clearTimeout(loginTimeout);

@@ -18,6 +18,7 @@ export function createClient(): Client {
 
   // Ready イベント
   client.once('ready', () => {
+    console.log('Discord bot logged in successfully');
     console.log(`Logged in as ${client.user?.tag}`);
   });
 
@@ -90,6 +91,19 @@ export function createClient(): Client {
   // エラーハンドリング
   client.on('error', (error) => {
     console.error('Discord client error:', error);
+  });
+
+  // 警告ハンドリング
+  client.on('warn', (warning) => {
+    console.warn('Discord client warning:', warning);
+  });
+
+  // デバッグハンドリング（詳細ログ）
+  client.on('debug', (info) => {
+    // Gateway接続関連のログのみ出力
+    if (info.includes('Session') || info.includes('Gateway') || info.includes('Heartbeat')) {
+      console.log('[Discord Debug]', info);
+    }
   });
 
   return client;
