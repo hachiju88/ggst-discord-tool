@@ -69,18 +69,32 @@ async function main() {
     if (process.env.DISCORD_TOKEN) {
       console.log('Token length:', process.env.DISCORD_TOKEN.length);
       console.log('Token prefix:', process.env.DISCORD_TOKEN.substring(0, 10) + '...');
+
+      // トークン形式の検証
+      const token = process.env.DISCORD_TOKEN;
+      const tokenParts = token.split('.');
+      console.log('Token has correct format (3 parts):', tokenParts.length === 3 ? 'YES' : `NO (${tokenParts.length} parts)`);
+
+      // Base64デコードして最初の部分がBot IDか確認
+      try {
+        const botId = Buffer.from(tokenParts[0], 'base64').toString();
+        console.log('Bot ID from token:', botId);
+      } catch (e) {
+        console.error('Failed to decode token first part:', e);
+      }
     }
 
-    // タイムアウト設定（30秒）
-    console.log('Setting 30-second login timeout...');
+    // タイムアウト設定（60秒、警告のみ）
+    console.log('Setting 60-second login timeout warning...');
     const loginTimeout = setTimeout(() => {
-      console.error('❌ Discord login timeout after 30 seconds');
+      console.error('⚠️ Discord login taking longer than 60 seconds');
+      console.error('Waiting for error details from Discord.js...');
       console.error('Please check:');
       console.error('1. DISCORD_TOKEN is valid');
       console.error('2. Network connectivity to Discord API');
       console.error('3. Bot is not banned or restricted');
-      process.exit(1);
-    }, 30000);
+      // process.exit(1) を削除 - エラー詳細を待つ
+    }, 60000);
     console.log('Timeout set, timer ID:', loginTimeout);
 
     console.log('Calling client.login()...');

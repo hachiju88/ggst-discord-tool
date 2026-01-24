@@ -100,10 +100,25 @@ export function createClient(): Client {
 
   // デバッグハンドリング（詳細ログ）
   client.on('debug', (info) => {
-    // Gateway接続関連のログのみ出力
-    if (info.includes('Session') || info.includes('Gateway') || info.includes('Heartbeat')) {
-      console.log('[Discord Debug]', info);
-    }
+    // すべてのデバッグログを出力
+    console.log('[Discord Debug]', info);
+  });
+
+  // Shard（WebSocket接続）のイベント追跡
+  client.on('shardError', (error, shardId) => {
+    console.error(`[Shard ${shardId}] WebSocket error:`, error);
+  });
+
+  client.on('shardDisconnect', (event, shardId) => {
+    console.warn(`[Shard ${shardId}] Disconnected:`, event);
+  });
+
+  client.on('shardReconnecting', (shardId) => {
+    console.log(`[Shard ${shardId}] Reconnecting...`);
+  });
+
+  client.on('shardResume', (shardId, replayedEvents) => {
+    console.log(`[Shard ${shardId}] Resumed (replayed ${replayedEvents} events)`);
   });
 
   return client;
