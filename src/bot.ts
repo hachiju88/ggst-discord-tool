@@ -14,6 +14,10 @@ export function createClient(): Client {
     intents: [
       GatewayIntentBits.Guilds,
     ],
+    // REST APIのタイムアウトを延長
+    rest: {
+      timeout: 30000, // デフォルト: 15秒
+    },
   });
 
   // Ready イベント

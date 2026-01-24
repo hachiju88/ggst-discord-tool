@@ -97,6 +97,29 @@ async function main() {
     }, 60000);
     console.log('Timeout set, timer ID:', loginTimeout);
 
+    // Discord Gateway接続テスト（WebSocket）
+    console.log('Testing Discord Gateway connectivity...');
+    try {
+      const https = await import('https');
+      const testReq = https.get('https://discord.com/api/gateway', (res) => {
+        console.log('Discord API Gateway endpoint response:', res.statusCode);
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          console.log('Gateway URL from API:', data);
+        });
+      });
+      testReq.on('error', (err) => {
+        console.error('Failed to reach Discord API Gateway endpoint:', err.message);
+      });
+      testReq.setTimeout(10000, () => {
+        console.error('Discord API Gateway endpoint timeout after 10 seconds');
+        testReq.destroy();
+      });
+    } catch (e) {
+      console.error('Gateway connectivity test failed:', e);
+    }
+
     console.log('Calling client.login()...');
     client.login(process.env.DISCORD_TOKEN)
       .then(() => {
