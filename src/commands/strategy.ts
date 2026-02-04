@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
-import type { ChatInputCommandInteraction, AutocompleteInteraction } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } from 'discord.js';
+import type { ChatInputCommandInteraction, AutocompleteInteraction, ModalSubmitInteraction } from 'discord.js';
 import { UserModel } from '../models/User';
 import { StrategyModel } from '../models/Strategy';
 import { CharacterModel } from '../models/Character';
@@ -17,13 +17,6 @@ export const data = new SlashCommandBuilder()
           .setDescription('対策対象キャラクター')
           .setRequired(true)
           .setAutocomplete(true)
-      )
-      .addStringOption(option =>
-        option
-          .setName('content')
-          .setDescription('戦略内容')
-          .setRequired(true)
-          .setMaxLength(2000)
       )
   )
   .addSubcommand(subcommand =>
@@ -100,15 +93,24 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (subcommand === 'add') {
     const character = interaction.options.getString('character', true);
-    const content = interaction.options.getString('content', true);
 
-    // 個人戦略を追加
-    await StrategyModel.create(userId, character, content, 'user');
+    // モーダルを作成
+    const modal = new ModalBuilder()
+      .setCustomId(`gps-add:${character}`)
+      .setTitle(`${character}への個人戦略を追加`);
 
-    await interaction.reply({
-      content: `💡 個人戦略を登録しました\n\n対象キャラ: ${character}\n内容: ${content}\n\nこの情報は次回の \`/gm\` コマンドで自動表示されます。`,
-      flags: MessageFlags.Ephemeral
-    });
+    const contentInput = new TextInputBuilder()
+      .setCustomId('content')
+      .setLabel('戦略内容（複数行OK）')
+      .setStyle(TextInputStyle.Paragraph)
+      .setMaxLength(2000)
+      .setRequired(true)
+      .setPlaceholder('対策内容を入力してください...');
+
+    const actionRow = new ActionRowBuilder<TextInputBuilder>().addComponents(contentInput);
+    modal.addComponents(actionRow);
+
+    await interaction.showModal(modal);
   } else if (subcommand === 'view') {
     const character = interaction.options.getString('character', true);
 
@@ -180,4 +182,26 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       flags: MessageFlags.Ephemeral
     });
   }
+}
+
+export async function handleModalSubmit(interaction: ModalSubmitInteraction) {
+  const [action, character] = interaction.customId.split(':');
+
+  if (action !== 'gps-add') return false;
+
+  const userId = interaction.user.id;
+  const content = interaction.fields.getTextInputValue('content');
+
+  // ユーザーを取得または作成
+  await UserModel.findOrCreate(userId);
+
+  // 個人戦略を追加
+  await StrategyModel.create(userId, character, content, 'user');
+
+  await interaction.reply({
+    content: `💡 個人戦略を登録しました\n\n対象キャラ: ${character}\n内容:\n${content}\n\nこの情報は次回の \`/gm\` コマンドで自動表示されます。`,
+    flags: MessageFlags.Ephemeral
+  });
+
+  return true;
 }

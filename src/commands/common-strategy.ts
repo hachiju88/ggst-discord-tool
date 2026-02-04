@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
-import type { ChatInputCommandInteraction, AutocompleteInteraction } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } from 'discord.js';
+import type { ChatInputCommandInteraction, AutocompleteInteraction, ModalSubmitInteraction } from 'discord.js';
 import { UserModel } from '../models/User';
 import { CommonStrategyModel } from '../models/CommonStrategy';
 import { CharacterModel } from '../models/Character';
@@ -17,13 +17,6 @@ export const data = new SlashCommandBuilder()
           .setDescription('対策対象キャラクター')
           .setRequired(true)
           .setAutocomplete(true)
-      )
-      .addStringOption(option =>
-        option
-          .setName('content')
-          .setDescription('対策内容')
-          .setRequired(true)
-          .setMaxLength(2000)
       )
   )
   .addSubcommand(subcommand =>
@@ -100,15 +93,24 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (subcommand === 'add') {
     const character = interaction.options.getString('character', true);
-    const content = interaction.options.getString('content', true);
 
-    // 共通戦略を追加
-    await CommonStrategyModel.create(character, content, userId);
+    // モーダルを作成
+    const modal = new ModalBuilder()
+      .setCustomId(`gcs-add:${character}`)
+      .setTitle(`${character}への共通対策を追加`);
 
-    await interaction.reply({
-      content: `🌐 共通対策情報を登録しました\n\n対象キャラ: ${character}\n内容: ${content}\n\nこの情報は全ユーザーの \`/gm\` コマンドで表示されます。`,
-      flags: MessageFlags.Ephemeral
-    });
+    const contentInput = new TextInputBuilder()
+      .setCustomId('content')
+      .setLabel('対策内容（複数行OK）')
+      .setStyle(TextInputStyle.Paragraph)
+      .setMaxLength(2000)
+      .setRequired(true)
+      .setPlaceholder('対策内容を入力してください...');
+
+    const actionRow = new ActionRowBuilder<TextInputBuilder>().addComponents(contentInput);
+    modal.addComponents(actionRow);
+
+    await interaction.showModal(modal);
   } else if (subcommand === 'view') {
     const character = interaction.options.getString('character', true);
 
@@ -180,4 +182,26 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       flags: MessageFlags.Ephemeral
     });
   }
+}
+
+export async function handleModalSubmit(interaction: ModalSubmitInteraction) {
+  const [action, character] = interaction.customId.split(':');
+
+  if (action !== 'gcs-add') return false;
+
+  const userId = interaction.user.id;
+  const content = interaction.fields.getTextInputValue('content');
+
+  // ユーザーを取得または作成
+  await UserModel.findOrCreate(userId);
+
+  // 共通戦略を追加
+  await CommonStrategyModel.create(character, content, userId);
+
+  await interaction.reply({
+    content: `🌐 共通対策情報を登録しました\n\n対象キャラ: ${character}\n内容:\n${content}\n\nこの情報は全ユーザーの \`/gm\` コマンドで表示されます。`,
+    flags: MessageFlags.Ephemeral
+  });
+
+  return true;
 }

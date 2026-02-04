@@ -97,37 +97,31 @@ async function main() {
     }, 60000);
     console.log('Timeout set, timer ID:', loginTimeout);
 
-    // Discord Gateway接続テスト（WebSocket）
-    console.log('Testing Discord Gateway connectivity...');
-    try {
-      const https = await import('https');
-      const testReq = https.get('https://discord.com/api/gateway', (res) => {
-        console.log('Discord API Gateway endpoint response:', res.statusCode);
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          console.log('Gateway URL from API:', data);
-        });
-      });
-      testReq.on('error', (err) => {
-        console.error('Failed to reach Discord API Gateway endpoint:', err.message);
-      });
-      testReq.setTimeout(10000, () => {
-        console.error('Discord API Gateway endpoint timeout after 10 seconds');
-        testReq.destroy();
-      });
-    } catch (e) {
-      console.error('Gateway connectivity test failed:', e);
-    }
-
     console.log('Calling client.login()...');
-    client.login(process.env.DISCORD_TOKEN)
-      .then(() => {
+
+    // 指数バックオフでリトライ（レート制限対策）
+    let retryCount = 0;
+    const maxRetries = 5;
+
+    const attemptLogin = async () => {
+      try {
+        await client.login(process.env.DISCORD_TOKEN);
         clearTimeout(loginTimeout);
         console.log('✅ Discord bot login successful');
-      })
-      .catch((error) => {
+      } catch (error: any) {
         clearTimeout(loginTimeout);
+
+        // レート制限エラーの場合
+        if (error.code === 'RATE_LIMITED' || error.httpStatus === 429) {
+          retryCount++;
+          if (retryCount <= maxRetries) {
+            const waitTime = Math.min(2 ** retryCount * 5000, 300000); // 最大5分
+            console.warn(`⚠️ Rate limited. Retrying in ${waitTime/1000} seconds... (${retryCount}/${maxRetries})`);
+            setTimeout(attemptLogin, waitTime);
+            return;
+          }
+        }
+
         console.error('❌ Failed to login to Discord:', error);
         console.error('Error details:', JSON.stringify(error, null, 2));
         if (error.code) {
@@ -136,8 +130,26 @@ async function main() {
         if (error.message) {
           console.error('Error message:', error.message);
         }
-        process.exit(1);
-      });
+        if (error.httpStatus === 429) {
+          console.error('');
+          console.error('🚨 Discord API Rate Limit detected!');
+          console.error('This is likely caused by Render Free Tier\'s shared IP address.');
+          console.error('Multiple bots on the same IP may be causing rate limits.');
+          console.error('');
+          console.error('Possible solutions:');
+          console.error('1. Wait a few hours for the rate limit to reset');
+          console.error('2. Upgrade to Render paid plan for dedicated IP');
+          console.error('3. Use a different hosting service (Railway, Fly.io, etc.)');
+          console.error('');
+        }
+        // レート制限の場合は終了せず待機
+        if (error.httpStatus !== 429) {
+          process.exit(1);
+        }
+      }
+    };
+
+    attemptLogin();
 
   } catch (error) {
     console.error('Fatal error:', error);

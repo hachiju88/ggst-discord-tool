@@ -35,6 +35,30 @@ export async function initDatabase(): Promise<Client> {
     await db.execute(statement);
   }
 
+  console.log('Schema applied successfully');
+
+  // シードデータの適用
+  const seedPath = path.join(__dirname, 'seed-data.sql');
+  const seedData = fs.readFileSync(seedPath, 'utf-8');
+
+  // シードデータを個別のステートメントに分割して実行
+  const seedStatements = seedData
+    .split(';')
+    .map(s => s.trim())
+    .filter(s => s.length > 0 && !s.startsWith('--')); // コメント行を除外
+
+  for (const statement of seedStatements) {
+    try {
+      await db.execute(statement);
+    } catch (error: any) {
+      // INSERT OR IGNORE で重複エラーは無視
+      if (!error.message?.includes('UNIQUE constraint')) {
+        console.error('Seed data execution error:', error);
+      }
+    }
+  }
+
+  console.log('Seed data applied successfully');
   console.log('Database initialized successfully');
 
   return db;

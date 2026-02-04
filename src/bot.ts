@@ -28,6 +28,34 @@ export function createClient(): Client {
 
   // Interaction イベント（スラッシュコマンド処理）
   client.on('interactionCreate', async (interaction) => {
+    // モーダル送信処理
+    if (interaction.isModalSubmit()) {
+      try {
+        const customId = interaction.customId;
+
+        // gps-add: で始まる場合
+        if (customId.startsWith('gps-add:')) {
+          await strategy.handleModalSubmit(interaction);
+          return;
+        }
+
+        // gcs-add: で始まる場合
+        if (customId.startsWith('gcs-add:')) {
+          await commonStrategy.handleModalSubmit(interaction);
+          return;
+        }
+      } catch (error) {
+        console.error('[ModalSubmit] Error handling modal:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({
+            content: 'モーダルの処理中にエラーが発生しました。',
+            ephemeral: true
+          });
+        }
+      }
+      return;
+    }
+
     // Autocomplete処理
     if (interaction.isAutocomplete()) {
       try {
