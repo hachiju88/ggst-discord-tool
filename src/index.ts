@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import express from 'express';
-import { createClient } from './bot';
+import { createClient, registerCommands } from './bot';
 import { initDatabase, closeDatabase } from './database';
 import { autoMigrate } from './database/auto-migrate';
 
@@ -108,6 +108,11 @@ async function main() {
         await client.login(process.env.DISCORD_TOKEN);
         clearTimeout(loginTimeout);
         console.log('✅ Discord bot login successful');
+
+        // コマンド登録
+        console.log('Registering slash commands...');
+        await registerCommands();
+        console.log('✅ Slash commands registered');
       } catch (error: any) {
         clearTimeout(loginTimeout);
 
