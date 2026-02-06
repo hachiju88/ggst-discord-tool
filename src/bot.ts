@@ -20,8 +20,8 @@ export function createClient(): Client {
     },
   });
 
-  // Ready イベント
-  client.once('ready', () => {
+  // Ready イベント（v15対応: clientReady）
+  client.once('clientReady', () => {
     console.log('Discord bot logged in successfully');
     console.log(`Logged in as ${client.user?.tag}`);
   });
