@@ -136,6 +136,19 @@ export function createClient(): Client {
     console.log('[Discord Debug]', info);
   });
 
+  // REST APIのイベント追跡
+  client.rest.on('rateLimited', (info) => {
+    console.warn('[REST] Rate limited:', JSON.stringify(info, null, 2));
+  });
+
+  client.rest.on('invalidRequestWarning', (info) => {
+    console.warn('[REST] Invalid request warning:', JSON.stringify(info, null, 2));
+  });
+
+  client.rest.on('restDebug', (info) => {
+    console.log('[REST Debug]', info);
+  });
+
   // Shard（WebSocket接続）のイベント追跡
   client.on('shardError', (error, shardId) => {
     console.error(`[Shard ${shardId}] WebSocket error:`, error);
