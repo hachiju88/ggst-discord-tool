@@ -22,7 +22,7 @@ export async function initDatabase(): Promise<Client> {
   });
 
   // スキーマの適用
-  const schemaPath = path.join(__dirname, 'schema.sql');
+  const schemaPath = path.join(__dirname, 'schema-v2.sql');
   const schema = fs.readFileSync(schemaPath, 'utf-8');
 
   // スキーマを個別のステートメントに分割して実行
