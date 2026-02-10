@@ -239,7 +239,7 @@ const characterMovesData: Record<string, Array<{ moveName: string; moveNotation:
     { moveName: 'カルヴァドス', moveNotation: '632146H' },
     { moveName: 'モルトバート', moveNotation: '236236S' }
   ],
-  'レオ・ホワイトファング': [
+  'レオ=ホワイトファング': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -262,7 +262,7 @@ const characterMovesData: Record<string, Array<{ moveName: string; moveNotation:
     { moveName: 'シュタイルヴァービル', moveNotation: '236236H' },
     { moveName: 'ライデンシャフトディリガント', moveNotation: '632146H' }
   ],
-  'ナゴリユキ': [
+  '名残雪': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -305,7 +305,7 @@ const characterMovesData: Record<string, Array<{ moveName: string; moveNotation:
     { moveName: 'ヴェンターニア', moveNotation: '632146H' },
     { moveName: 'テンペスターヂ', moveNotation: 'j.236236H' }
   ],
-  '御津闇慈': [
+  '闇慈': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },
@@ -388,7 +388,7 @@ const characterMovesData: Record<string, Array<{ moveName: string; moveNotation:
     { moveName: 'サーヴァントシュート', moveNotation: '236H' },
     { moveName: 'フォーエヴァーエリシオンドライバー', moveNotation: '632146H' }
   ],
-  'ハッピーカオス': [
+  'ハッピーケイオス': [
     { moveName: '5P', moveNotation: '5P' },
     { moveName: '5K', moveNotation: '5K' },
     { moveName: '近S', moveNotation: '近S' },

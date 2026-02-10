@@ -8,56 +8,64 @@ import * as match from './match';
 import * as exportCmd from './export';
 import * as combo from './combo';
 import * as move from './move';
+import * as admin from './admin';
+
+// コマンドモジュールの型定義
+interface CommandModule {
+  data: any;
+  execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
+  autocomplete?: (interaction: any) => Promise<void>;
+  handleModalSubmit?: (interaction: any) => Promise<any>;
+}
+
+// コマンドレジストリ（一元管理）
+const commandRegistry = new Map<string, CommandModule>([
+  ['gs', setmychar],
+  ['gn', addnote],
+  ['gh', history],
+  ['gps', strategy],
+  ['gcs', commonStrategy],
+  ['gm', match],
+  ['ge', exportCmd],
+  ['gc', combo],
+  ['gmv', move],
+  ['admin', admin],
+]);
 
 // コマンドハンドラー
 export async function commandHandler(interaction: ChatInputCommandInteraction) {
   const { commandName } = interaction;
+  const module = commandRegistry.get(commandName);
 
-  switch (commandName) {
-    case 'gs':
-      await setmychar.execute(interaction);
-      break;
-    case 'gn':
-      await addnote.execute(interaction);
-      break;
-    case 'gh':
-      await history.execute(interaction);
-      break;
-    case 'gps':
-      await strategy.execute(interaction);
-      break;
-    case 'gcs':
-      await commonStrategy.execute(interaction);
-      break;
-    case 'gm':
-      await match.execute(interaction);
-      break;
-    case 'ge':
-      await exportCmd.execute(interaction);
-      break;
-    case 'gc':
-      await combo.execute(interaction);
-      break;
-    case 'gmv':
-      await move.execute(interaction);
-      break;
-    default:
-      await interaction.reply({
-        content: 'このコマンドはまだ実装されていません。',
-        flags: MessageFlags.Ephemeral as any
-      });
+  if (module) {
+    await module.execute(interaction);
+  } else {
+    await interaction.reply({
+      content: 'このコマンドはまだ実装されていません。',
+      flags: MessageFlags.Ephemeral
+    });
   }
 }
 
+// Autocompleteハンドラー
+export function getAutocompleteHandler(commandName: string) {
+  return commandRegistry.get(commandName)?.autocomplete;
+}
+
+// ModalSubmitハンドラー
+export function getModalSubmitHandler(customId: string): ((interaction: any) => Promise<any>) | undefined {
+  // customId の prefix からコマンドを特定
+  const prefix = customId.split(':')[0];
+  const prefixToCommand: Record<string, string> = {
+    'gps-add': 'gps',
+    'gcs-add': 'gcs',
+  };
+  const commandName = prefixToCommand[prefix];
+  if (commandName) {
+    return commandRegistry.get(commandName)?.handleModalSubmit;
+  }
+  return undefined;
+}
+
 // コマンド定義をエクスポート
-export const commands = [
-  setmychar.data,
-  addnote.data,
-  history.data,
-  strategy.data,
-  commonStrategy.data,
-  match.data,
-  exportCmd.data,
-  combo.data,
-  move.data
-];
+export const commands = Array.from(commandRegistry.values()).map(m => m.data);

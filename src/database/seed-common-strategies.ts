@@ -119,7 +119,7 @@ async function seedCommonStrategies() {
       ]
     },
     {
-      character: 'ナゴリユキ',
+      character: '名残雪',
       strategies: [
         '【基本方針】ブラッドゲージが溜まるまで逃げ回り、必殺技が撃てなくなってから攻め込む。',
         '【冠雪】ガードするだけでゲージを消費させられる。ガード後は立ちガード安定。',
@@ -137,7 +137,7 @@ async function seedCommonStrategies() {
       ]
     },
     {
-      character: '御津闇慈',
+      character: '闇慈',
       strategies: [
         '【基本方針】「ガンダッシュ投げ」を多用する。当身（水月）や風神に噛み合って通りやすい。',
         '【水月のハコビ】走って投げる。技を当ててしまったら遅らせ紫RCで後出しジャンケンをする。',
@@ -170,7 +170,7 @@ async function seedCommonStrategies() {
       ]
     },
     {
-      character: 'ハッピーカオス',
+      character: 'ハッピーケイオス',
       strategies: [
         '【射撃連携】しっかり狙う→リロード等の合間にダッシュガードで近づかない（撃たれる）。集中のモーションで走る。',
         '【カース】最も警戒。付与されたら効果が切れるまで動かない。立ち回りカースを上いれっぱで避ける。'

@@ -184,6 +184,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   await interaction.reply({
     content: response,
-    flags: MessageFlags.Ephemeral as any
+    flags: MessageFlags.Ephemeral
   });
 }

@@ -55,7 +55,28 @@ reason             TEXT NOT NULL
 created_at         DATETIME
 ```
 
-### 既存テーブルの変更
+52: id                 INTEGER PRIMARY KEY
+53: user_discord_id    TEXT NOT NULL
+54: reason             TEXT NOT NULL
+55: created_at         DATETIME
+56: ```
+57: 
+58: ### system_settings (New!)
+59: ```sql
+60: key                TEXT PRIMARY KEY        -- 例: "admin_role_id"
+61: value              TEXT NOT NULL
+62: updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP
+63: ```
+64: 
+65: ### backups (New!)
+66: ```sql
+67: id                 INTEGER PRIMARY KEY AUTOINCREMENT
+68: data               TEXT NOT NULL           -- JSONデータ
+69: created_by         TEXT NOT NULL           -- 作成者名
+70: created_at         DATETIME DEFAULT CURRENT_TIMESTAMP
+71: ```
+72: 
+73: ### 既存テーブルの変更
 
 #### users
 - **追加**: `main_character_id INTEGER` (FK → characters)
@@ -141,14 +162,14 @@ npm run migrate:v2
 9. ザトー=ONE
 10. ラムレザル=ヴァレンタイン
 11. レオ・ホワイトファング
-12. ナゴリユキ
+12. 名残雪
 13. ジオヴァーナ
-14. アンジー
+14. 闇慈
 15. イノ
 16. ゴールドルイス
 17. ジャック・オー
-18. ハッピーカオス
-19. バイケン
+18. ハッピーケイオス
+19. 梅喧
 20. テスタメント
 21. ブリジット
 22. シン・キスク

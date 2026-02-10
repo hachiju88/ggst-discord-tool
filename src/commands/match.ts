@@ -60,7 +60,7 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   // 重い処理のため、先に応答を延期
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral as any });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const userId = interaction.user.id;
   const opponent = interaction.options.getString('opponent', true);

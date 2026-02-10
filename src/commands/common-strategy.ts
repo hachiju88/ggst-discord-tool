@@ -3,6 +3,10 @@ import type { ChatInputCommandInteraction, AutocompleteInteraction, ModalSubmitI
 import { UserModel } from '../models/User';
 import { CommonStrategyModel } from '../models/CommonStrategy';
 import { CharacterModel } from '../models/Character';
+import { checkPermission, PermissionLevel } from '../utils/permissions';
+
+
+
 
 export const data = new SlashCommandBuilder()
   .setName('gcs')
@@ -91,6 +95,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   // ユーザーを取得または作成
   await UserModel.findOrCreate(userId);
 
+  // 権限チェック (add/edit/delete)
+  if (['add', 'edit', 'delete'].includes(subcommand)) {
+    // 編集権限(EDITOR)が必要
+    const hasPermission = await checkPermission(interaction, PermissionLevel.EDITOR);
+    if (!hasPermission) return;
+  }
+
   if (subcommand === 'add') {
     const character = interaction.options.getString('character', true);
 
@@ -137,6 +148,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     embed.setDescription(strategiesText);
 
+    // ViewコマンドはEphemeralに戻す
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 
   } else if (subcommand === 'edit') {
@@ -160,7 +172,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     await interaction.reply({
       content: `✅ 共通対策情報を更新しました (ID: ${id})\n\n対象キャラ: ${characterName}\n内容: ${content}`,
-      flags: MessageFlags.Ephemeral
+      // Publicにするためフラグ削除
     });
 
   } else if (subcommand === 'delete') {
@@ -179,7 +191,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     await interaction.reply({
       content: `✅ 共通対策情報を削除しました (ID: ${id})`,
-      flags: MessageFlags.Ephemeral
+      // Publicにするためフラグ削除
     });
   }
 }
@@ -200,7 +212,7 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction) {
 
   await interaction.reply({
     content: `🌐 共通対策情報を登録しました\n\n対象キャラ: ${character}\n内容:\n${content}\n\nこの情報は全ユーザーの \`/gm\` コマンドで表示されます。`,
-    flags: MessageFlags.Ephemeral
+    // Publicにするためフラグ削除
   });
 
   return true;

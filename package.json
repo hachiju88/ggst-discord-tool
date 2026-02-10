@@ -12,13 +12,11 @@
     "seed:moves": "tsx src/database/seed-character-moves.ts",
     "seed:character-info": "node src/database/seed-character-info.js",
     "seed:common-moves": "tsx src/database/seed-common-moves.ts",
-    "clean:common-moves": "tsx src/database/clean-common-moves.ts",
-    "reseed:moves": "tsx scripts/reseed-moves.ts",
-    "migrate": "tsx src/database/migrate-add-my-character.ts",
+    "seed:strategies": "tsx src/database/seed-common-strategies.ts",
     "migrate:v2": "tsx src/database/migrate-to-v2.ts",
-    "migrate:move-en": "tsx src/database/migrate-add-move-name-en.ts",
-    "migrate:common-moves": "tsx src/database/migrate-add-common-moves.ts",
-    "migrate:remove-unique": "tsx src/database/migrate-remove-unique-constraint.ts"
+    "migrate:settings": "tsx src/database/migrate-add-settings-table.ts",
+    "migrate:backups": "tsx src/database/migrate-add-backups-table.ts",
+    "migrate:fix-names": "tsx src/database/migrate-fix-character-names.ts"
   },
   "keywords": [
     "discord",
@@ -30,17 +28,15 @@
   "license": "MIT",
   "dependencies": {
     "@libsql/client": "^0.17.0",
-    "better-sqlite3": "^12.5.0",
     "discord.js": "^14.14.1",
     "dotenv": "^16.3.1",
-    "express": "^5.2.1",
-    "@types/express": "^5.0.6",
-    "@types/node": "^20.10.6",
-    "typescript": "^5.3.3"
+    "express": "^5.2.1"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.8",
-    "tsx": "^4.7.0"
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.10.6",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
   },
   "engines": {
     "node": ">=18.0.0"
