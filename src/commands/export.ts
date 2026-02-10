@@ -22,7 +22,7 @@ export const data = new SlashCommandBuilder()
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral as any });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const userId = interaction.user.id;
   const period = (interaction.options.getString('period') || '1day') as '1day' | '1week' | '1month' | 'all';

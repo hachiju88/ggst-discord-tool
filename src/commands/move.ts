@@ -2,6 +2,7 @@ import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import type { ChatInputCommandInteraction, AutocompleteInteraction } from 'discord.js';
 import { CharacterModel } from '../models/Character';
 import { CharacterMoveModel } from '../models/CharacterMove';
+import { checkPermission, PermissionLevel } from '../utils/permissions';
 
 export const data = new SlashCommandBuilder()
   .setName('gmv')
@@ -127,6 +128,14 @@ export async function autocomplete(interaction: AutocompleteInteraction) {
 export async function execute(interaction: ChatInputCommandInteraction) {
   const subcommand = interaction.options.getSubcommand();
 
+  // 権限チェック (add/edit/delete)
+  // 権限チェック (add/edit/delete)
+  if (['add', 'edit', 'delete'].includes(subcommand)) {
+    // 編集権限(EDITOR)が必要
+    const hasPermission = await checkPermission(interaction, PermissionLevel.EDITOR);
+    if (!hasPermission) return;
+  }
+
   if (subcommand === 'add') {
     const character = interaction.options.getString('character', true);
     const moveName = interaction.options.getString('move_name', true);
@@ -157,7 +166,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
       await interaction.reply({
         content: response,
-        flags: MessageFlags.Ephemeral
+        // Publicにするためフラグ削除
       });
     } catch (error) {
       console.error('[move] Error creating move:', error);
@@ -186,7 +195,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     if (moves.length === 0) {
       await interaction.reply({
         content: `${character}の技はまだ登録されていません。`,
-        flags: MessageFlags.Ephemeral
+        // 登録がない場合はEphemeralにするかPublicにするか。
+        // リクエスト準拠でPublicにしておく。
       });
       return;
     }
@@ -217,6 +227,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       embed.setFooter({ text: `他${moves.length - 25}件の技があります` });
     }
 
+    // ViewコマンドはEphemeralに戻す
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 
   } else if (subcommand === 'edit') {
@@ -261,7 +272,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
       await interaction.reply({
         content: response,
-        flags: MessageFlags.Ephemeral
+        // Publicにするためフラグ削除
       });
     } catch (error) {
       console.error('[move] Error updating move:', error);
@@ -291,7 +302,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       if (deleted) {
         await interaction.reply({
           content: `✅ 技を削除しました（ID: ${moveId}, 技名: ${existingMove.move_name}）`,
-          flags: MessageFlags.Ephemeral
+          // Publicにするためフラグ削除
         });
       } else {
         await interaction.reply({

@@ -1,29 +1,19 @@
-import { Client, GatewayIntentBits, Collection, REST, Routes, MessageFlags } from 'discord.js';
-import { commandHandler } from './commands';
-import * as setmychar from './commands/setmychar';
-import * as addnote from './commands/addnote';
-import * as history from './commands/history';
-import * as strategy from './commands/strategy';
-import * as commonStrategy from './commands/common-strategy';
-import * as match from './commands/match';
-import * as combo from './commands/combo';
-import * as move from './commands/move';
+import { Client, GatewayIntentBits, REST, Routes, MessageFlags } from 'discord.js';
+import { commandHandler, getAutocompleteHandler, getModalSubmitHandler } from './commands';
 
 export function createClient(): Client {
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
     ],
-    // REST APIのタイムアウトを延長
     rest: {
-      timeout: 30000, // デフォルト: 15秒
+      timeout: 30000,
     },
   });
 
-  // Ready イベント（v15対応: clientReady）
+  // Ready イベント
   client.once('clientReady', () => {
-    console.log('Discord bot logged in successfully');
-    console.log(`Logged in as ${client.user?.tag}`);
+    console.log(`Discord bot logged in as ${client.user?.tag}`);
   });
 
   // Interaction イベント（スラッシュコマンド処理）
@@ -31,25 +21,16 @@ export function createClient(): Client {
     // モーダル送信処理
     if (interaction.isModalSubmit()) {
       try {
-        const customId = interaction.customId;
-
-        // gps-add: で始まる場合
-        if (customId.startsWith('gps-add:')) {
-          await strategy.handleModalSubmit(interaction);
-          return;
-        }
-
-        // gcs-add: で始まる場合
-        if (customId.startsWith('gcs-add:')) {
-          await commonStrategy.handleModalSubmit(interaction);
-          return;
+        const handler = getModalSubmitHandler(interaction.customId);
+        if (handler) {
+          await handler(interaction);
         }
       } catch (error) {
-        console.error('[ModalSubmit] Error handling modal:', error);
+        console.error('[ModalSubmit] Error:', error);
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({
             content: 'モーダルの処理中にエラーが発生しました。',
-            flags: MessageFlags.Ephemeral as any
+            flags: MessageFlags.Ephemeral
           });
         }
       }
@@ -59,43 +40,18 @@ export function createClient(): Client {
     // Autocomplete処理
     if (interaction.isAutocomplete()) {
       try {
-        const { commandName } = interaction;
-
-        // コマンドモジュールのマッピング
-        const commandModules: Record<string, any> = {
-          'gs': setmychar,
-          'gn': addnote,
-          'gh': history,
-          'gps': strategy,
-          'gcs': commonStrategy,
-          'gm': match,
-          'gc': combo,
-          'gmv': move
-        };
-
-        const commandModule = commandModules[commandName];
-
-        if (!commandModule) {
-          console.error(`[Autocomplete] Unknown command: ${commandName}`);
-          return;
-        }
-
-        if (commandModule.autocomplete) {
-          await commandModule.autocomplete(interaction);
-        } else {
-          console.warn(`[Autocomplete] No autocomplete handler for: ${commandName}`);
+        const handler = getAutocompleteHandler(interaction.commandName);
+        if (handler) {
+          await handler(interaction);
         }
       } catch (error) {
-        console.error('[Autocomplete] Error handling autocomplete:', error);
-        // Discordのタイムアウトを避けるため、空の配列を返すことを試みる
-        // ただし、レート制限時やネットワークエラー時は何もしない
+        console.error('[Autocomplete] Error:', error);
         try {
           if (!interaction.responded) {
             await interaction.respond([]);
           }
-        } catch (respondError) {
-          // ここでのエラーは無視する（レート制限やUnknown Interactionの可能性があるため）
-          console.warn('[Autocomplete] Failed to respond with empty array (ignored):', respondError);
+        } catch {
+          // タイムアウトやUnknown Interactionは無視
         }
       }
       return;
@@ -109,63 +65,33 @@ export function createClient(): Client {
     } catch (error) {
       console.error('Error handling command:', error);
 
-      const errorMessage = {
-        content: 'コマンドの実行中にエラーが発生しました。',
-        flags: MessageFlags.Ephemeral as any
-      };
+      const errorContent = 'コマンドの実行中にエラーが発生しました。';
 
       if (interaction.replied || interaction.deferred) {
-        await interaction.followUp(errorMessage);
+        await interaction.followUp({ content: errorContent, flags: MessageFlags.Ephemeral });
       } else {
-        await interaction.reply(errorMessage);
+        await interaction.reply({ content: errorContent, flags: MessageFlags.Ephemeral });
       }
     }
   });
 
-  // エラーハンドリング
+  // エラー・警告ハンドリング
   client.on('error', (error) => {
     console.error('Discord client error:', error);
   });
 
-  // 警告ハンドリング
   client.on('warn', (warning) => {
     console.warn('Discord client warning:', warning);
   });
 
-  // デバッグハンドリング（詳細ログ）
-  client.on('debug', (info) => {
-    // すべてのデバッグログを出力
-    console.log('[Discord Debug]', info);
-  });
-
-  // REST APIのイベント追跡
+  // レート制限ハンドリング
   client.rest.on('rateLimited', (info) => {
-    console.warn('[REST] Rate limited:', JSON.stringify(info, null, 2));
+    console.warn('[REST] Rate limited:', JSON.stringify(info));
   });
 
-  client.rest.on('invalidRequestWarning', (info) => {
-    console.warn('[REST] Invalid request warning:', JSON.stringify(info, null, 2));
-  });
-
-  client.rest.on('restDebug', (info) => {
-    console.log('[REST Debug]', info);
-  });
-
-  // Shard（WebSocket接続）のイベント追跡
+  // Shard（WebSocket接続）のエラー追跡
   client.on('shardError', (error, shardId) => {
     console.error(`[Shard ${shardId}] WebSocket error:`, error);
-  });
-
-  client.on('shardDisconnect', (event, shardId) => {
-    console.warn(`[Shard ${shardId}] Disconnected:`, event);
-  });
-
-  client.on('shardReconnecting', (shardId) => {
-    console.log(`[Shard ${shardId}] Reconnecting...`);
-  });
-
-  client.on('shardResume', (shardId, replayedEvents) => {
-    console.log(`[Shard ${shardId}] Resumed (replayed ${replayedEvents} events)`);
   });
 
   return client;
@@ -183,19 +109,12 @@ export async function registerCommands() {
   const { commands: commandsData } = await import('./commands');
   const rest = new REST({ version: '10' }).setToken(token);
 
-  try {
-    console.log('Started refreshing application (/) commands.');
+  const commandsJson = commandsData.map((cmd: any) => cmd.toJSON());
 
-    const commandsJson = commandsData.map((cmd: any) => cmd.toJSON());
+  await rest.put(
+    Routes.applicationCommands(applicationId),
+    { body: commandsJson },
+  );
 
-    await rest.put(
-      Routes.applicationCommands(applicationId),
-      { body: commandsJson },
-    );
-
-    console.log(`Successfully reloaded ${commandsJson.length} application (/) commands.`);
-  } catch (error) {
-    console.error('Error registering commands:', error);
-    throw error;
-  }
+  console.log(`Registered ${commandsJson.length} application commands.`);
 }
