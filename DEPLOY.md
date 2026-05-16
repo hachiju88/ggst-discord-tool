@@ -1,103 +1,147 @@
-# Google Cloud Run デプロイガイド
+# AWS EC2 デプロイガイド
 
-Discord BotをGoogle Cloud Run（スケーラブルなコンテナ基盤）にデプロイする手順です。
+Discord Bot を AWS EC2 t3.micro (無料枠) で運用する手順です。
 
 ## 前提条件
 
-- Google Cloud Projectが作成済みであること
-- `gcloud` CLIがインストールされ、ログイン済みであること (`gcloud auth login`)
-- Dockerがローカルで動作していること（ビルド確認用）
+- AWS アカウントが作成済みであること
+- ローカルに Docker がインストールされていること（動作確認用）
+- SSH クライアントが使えること
 
-## 0. Google Cloud Projectの作成
+---
 
-まだプロジェクトがない場合は、以下の手順で作成します。
+## Step 1: EC2 インスタンスを作成する
 
-1. [Google Cloud Console](https://console.cloud.google.com/) にアクセス
-2. 画面上部のプロジェクト選択プルダウンをクリック
-3. 「新しいプロジェクト」をクリック
-4. プロジェクト名を入力（例: `ggst-discord-bot`）
-   - **場所（組織）**: 「組織なし」のままでOKです
-5. 「作成」をクリック
-6. 作成完了まで数秒待ち、通知から「プロジェクトを選択」をクリック
+[AWS マネジメントコンソール](https://console.aws.amazon.com/ec2/) → EC2 → 「インスタンスを起動」
 
-これでプロジェクトが有効になります。
+| 項目 | 設定値 |
+|------|--------|
+| AMI | Amazon Linux 2023 (無料枠対象) |
+| インスタンスタイプ | t3.micro (無料枠: 750時間/月 × 12ヶ月) |
+| リージョン | ap-northeast-1 (東京) |
+| ストレージ | gp3 8GB (無料枠: 30GB まで) |
+| キーペア | 新規作成 → `.pem` ファイルを保存 |
 
-## 1. APIの有効化
+**セキュリティグループの設定:**
 
-Cloud RunとContainer Registry（またはArtifact Registry）を使用するためにAPIを有効化します。
+| タイプ | ポート | ソース |
+|--------|--------|--------|
+| SSH | 22 | 自分の IP のみ (「マイ IP」を選択) |
+| カスタム TCP | 8080 | 0.0.0.0/0 |
+
+**推奨:** Elastic IP を作成してインスタンスに割り当てると、再起動しても IP が変わりません（割り当て中は無料）。
+
+---
+
+## Step 2: EC2 に SSH 接続して Docker をインストール
 
 ```bash
-gcloud services enable run.googleapis.com \
-    artifactregistry.googleapis.com \
-    cloudbuild.googleapis.com
+# ローカルで実行
+chmod 400 /path/to/my-key.pem
+ssh -i /path/to/my-key.pem ec2-user@<EC2のパブリックIP>
 ```
 
-## 2. デプロイ手順
-
-### 方法A: ソースから直接デプロイ（推奨・簡単）
-
-Google Cloud Buildが自動でコンテナをビルドしてデプロイしてくれます。
+EC2 にログインしたら Docker をインストール:
 
 ```bash
-# 1. プロジェクトIDを設定（自分のプロジェクトIDに置き換えてください）
-export PROJECT_ID=your-project-id
-gcloud config set project $PROJECT_ID
-
-# 2. デプロイ実行
-gcloud run deploy ggst-discord-bot \
-  --source . \
-  --platform managed \
-  --region asia-northeast1 \
-  --allow-unauthenticated \
-  --set-env-vars="NODE_ENV=production"
+sudo dnf update -y
+sudo dnf install -y docker
+sudo systemctl enable --now docker
+sudo usermod -aG docker ec2-user
+exit  # 一度ログアウトして権限を反映
 ```
 
-※初回のデプロイ時に、Artifact Registryのリポジトリ作成を求められる場合があります。「y」を押して作成してください。
+再度 SSH ログイン後、`docker ps` が動けば OK。
 
-### 方法B: 環境変数の設定
+---
 
-デプロイコマンドで `--set-env-vars` を使って設定するか、デプロイ後にコンソールから設定します。
-Botを動かすには以下の変数が必須です：
+## Step 3: コードを EC2 に転送
 
-- `DISCORD_TOKEN`: (Bot Token)
-- `DISCORD_APPLICATION_ID`: (App ID)
-- `TURSO_DATABASE_URL`: (Turso URL)
-- `TURSO_AUTH_TOKEN`: (Turso Token)
-
-**コマンドで一括設定する例:**
+**方法A: scp で転送（プライベートリポジトリの場合）**
 
 ```bash
-gcloud run deploy ggst-discord-bot \
-  --region asia-northeast1 \
-  --update-env-vars="DISCORD_TOKEN=xxx,DISCORD_APPLICATION_ID=yyy,TURSO_DATABASE_URL=libsql://...,TURSO_AUTH_TOKEN=..."
+# ローカルで実行
+scp -i /path/to/my-key.pem -r ./ggst-discord-tool ec2-user@<EC2のIP>:~/
 ```
 
-## 3. 動作確認
-
-デプロイが完了すると Service URL が表示されます（例: `https://ggst-discord-bot-xxxxx-an.a.run.app`）。
-
-1. ブラウザでそのURLにアクセスし、「GGST Discord Bot is running!」と表示されればOK。
-2. `/health` にアクセスしてステータスを確認。
-
-## 4. スラッシュコマンドの登録
-
-Cloud Run上のBotには、ローカルから登録コマンドを実行すれば反映されます（Discord APIを叩くだけなので）。
+**方法B: git clone（パブリックリポジトリの場合）**
 
 ```bash
+# EC2 上で実行
+git clone https://github.com/hachiju88/ggst-discord-tool.git
+```
+
+---
+
+## Step 4: 環境変数を設定してデプロイ
+
+```bash
+# EC2 上で実行
+cd ggst-discord-tool
+
+# .env ファイルを作成
+cp .env.example .env
+nano .env  # 各値を入力して保存 (Ctrl+X → Y → Enter)
+```
+
+`.env` に設定が必要な値:
+
+```
+DISCORD_TOKEN=your_bot_token
+DISCORD_APPLICATION_ID=your_app_id
+TURSO_DATABASE_URL=libsql://your-db.turso.io
+TURSO_AUTH_TOKEN=your_turso_token
+NODE_ENV=production
+```
+
+docker compose でビルド＆バックグラウンド起動:
+
+```bash
+docker compose up -d --build
+
+# ログ確認
+docker compose logs -f
+```
+
+`✅ Discord bot logged in` が表示されれば成功。
+
+---
+
+## Step 5: スラッシュコマンドを登録（初回のみ）
+
+```bash
+# ローカルで実行（.env の値が設定された状態で）
 npm run register-commands
 ```
 
-## 補足: 常時起動について
+---
 
-Cloud Runもデフォルトではリクエストがないとインスタンス数が0になります（コールドスタート発生）。
-Discord Botは即応性が求められるため、**最小インスタンス数を1にする**ことを強く推奨します。
+## 運用コマンド
 
 ```bash
-gcloud run deploy ggst-discord-bot \
-  --region asia-northeast1 \
-  --min-instances 1 \
-  --no-cpu-throttling
+# コンテナの状態確認
+docker compose ps
+
+# ログ確認
+docker compose logs -f
+
+# 再起動
+docker compose restart
+
+# コード更新後の再デプロイ
+docker compose up -d --build
 ```
 
-※ **重要**: `no-cpu-throttling` は、HTTPリクエスト処理中以外もCPUを割り当てる設定です。Discord Gateway（WebSocket）接続を維持するためにこの設定が推奨されます。
-※最小インスタンス1にすると、その分の料金（月額数百円〜）が発生します。無料枠内である程度収まる場合もありますが、課金状況を確認してください。
+`restart: always` の設定により、EC2 を再起動してもコンテナが自動的に起動します。
+
+---
+
+## コスト見込み
+
+| 項目 | 無料枠期間 (12ヶ月) | 無料枠終了後 |
+|------|-------------------|------------|
+| EC2 t3.micro | $0 (750時間/月無料) | $9.93/月 |
+| EBS gp3 8GB | $0 (30GB/月無料) | $0.64/月 |
+| Elastic IP | $0 (割り当て中は無料) | $0 (割り当て中は無料) |
+| データ転送 | $0 (100GB/月まで無料) | $0 (ほぼ転送なし) |
+| **合計** | **~$0/月** | **~$10.57/月** |
