@@ -57,6 +57,12 @@ exit  # 一度ログアウトして権限を反映
 
 ## Step 3: コードを EC2 に転送
 
+まず git をインストール:
+
+```bash
+sudo dnf install -y git
+```
+
 **方法A: scp で転送（プライベートリポジトリの場合）**
 
 ```bash
@@ -92,15 +98,17 @@ DISCORD_APPLICATION_ID=your_app_id
 TURSO_DATABASE_URL=libsql://your-db.turso.io
 TURSO_AUTH_TOKEN=your_turso_token
 NODE_ENV=production
+PORT=8080
 ```
 
-docker compose でビルド＆バックグラウンド起動:
+Docker でビルド＆バックグラウンド起動:
 
 ```bash
-docker compose up -d --build
+docker build -t ggst-bot .
+docker run -d --restart=always --env-file .env -p 8080:8080 --name ggst-bot ggst-bot
 
 # ログ確認
-docker compose logs -f
+docker logs ggst-bot
 ```
 
 `✅ Discord bot logged in` が表示されれば成功。
@@ -120,19 +128,22 @@ npm run register-commands
 
 ```bash
 # コンテナの状態確認
-docker compose ps
+docker ps
 
 # ログ確認
-docker compose logs -f
+docker logs ggst-bot
 
 # 再起動
-docker compose restart
+docker restart ggst-bot
 
 # コード更新後の再デプロイ
-docker compose up -d --build
+docker stop ggst-bot
+docker rm ggst-bot
+docker build -t ggst-bot .
+docker run -d --restart=always --env-file .env -p 8080:8080 --name ggst-bot ggst-bot
 ```
 
-`restart: always` の設定により、EC2 を再起動してもコンテナが自動的に起動します。
+`--restart=always` の設定により、EC2 を再起動してもコンテナが自動的に起動します。
 
 ---
 
