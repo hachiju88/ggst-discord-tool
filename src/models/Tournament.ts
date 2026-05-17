@@ -31,6 +31,7 @@ export class TournamentModel {
   static async create(data: {
     guild_id: string
     name: string
+    format: string
     max_participants: number | null
     regulation: TournamentRegulation
     created_by: string
@@ -38,11 +39,12 @@ export class TournamentModel {
   }): Promise<Tournament> {
     const db = getDatabase()
     const result = await db.execute({
-      sql: `INSERT INTO tournaments (guild_id, name, max_participants, regulation, created_by, channel_id)
-            VALUES (?, ?, ?, ?, ?, ?)`,
+      sql: `INSERT INTO tournaments (guild_id, name, format, max_participants, regulation, created_by, channel_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
       args: [
         data.guild_id,
         data.name,
+        data.format,
         data.max_participants,
         JSON.stringify(data.regulation),
         data.created_by,

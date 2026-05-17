@@ -167,6 +167,8 @@ CREATE TABLE IF NOT EXISTS tournament_matches (
   winner_id INTEGER REFERENCES tournament_participants(id),
   handicap_participant_id INTEGER REFERENCES tournament_participants(id),
   handicap_rounds INTEGER NOT NULL DEFAULT 0,
+  p1_games_won INTEGER NOT NULL DEFAULT 0,
+  p2_games_won INTEGER NOT NULL DEFAULT 0,
   vc_channel_id TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
   message_id TEXT,

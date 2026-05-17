@@ -24,13 +24,26 @@ import { TournamentModel, TournamentRegulation, HandicapRule } from '../models/T
 import { TournamentParticipantModel } from '../models/TournamentParticipant'
 import { TournamentMatchModel } from '../models/TournamentMatch'
 import { BracketService } from '../services/BracketService'
+import { LeagueService } from '../services/LeagueService'
 import { RANKS } from '../constants/ranks'
 import { CHARACTERS } from '../constants/characters'
 
 export const data = new SlashCommandBuilder()
   .setName('tnm')
   .setDescription('大会（トーナメント）を管理します')
-  .addSubcommand(s => s.setName('create').setDescription('大会を作成します'))
+  .addSubcommand(s =>
+    s.setName('create')
+      .setDescription('大会を作成します')
+      .addStringOption(o =>
+        o.setName('format')
+          .setDescription('大会形式')
+          .setRequired(false)
+          .addChoices(
+            { name: 'シングルエリミネーション（デフォルト）', value: 'single_elim' },
+            { name: 'リーグ戦（総当たり）', value: 'league' }
+          )
+      )
+  )
   .addSubcommand(s => s.setName('start').setDescription('参加受付を終了してブラケットを生成します'))
   .addSubcommand(s => s.setName('bracket').setDescription('現在のブラケットを表示します'))
   .addSubcommand(s => s.setName('status').setDescription('参加者一覧と進行状況を表示します'))
@@ -76,9 +89,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 // ─── Subcommand handlers ──────────────────────────────────────────────────────
 
 async function handleCreate(interaction: ChatInputCommandInteraction) {
+  const format = interaction.options.getString('format') ?? 'single_elim'
+  const formatLabel = format === 'league' ? 'リーグ戦' : 'シングルエリミネーション'
+
   const modal = new ModalBuilder()
-    .setCustomId('tnm-create:modal')
-    .setTitle('大会を作成する')
+    .setCustomId(`tnm-create:modal:${format}`)
+    .setTitle(`大会を作成する（${formatLabel}）`)
 
   const nameInput = new TextInputBuilder()
     .setCustomId('name')
@@ -148,8 +164,29 @@ async function handleStart(interaction: ChatInputCommandInteraction) {
   }
 
   const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+  const channel = interaction.channel
+  if (!channel || !channel.isTextBased() || channel.isDMBased()) return
 
-  // Collect voice channels from the guild
+  if (tournament.format === 'league') {
+    const matchIds = await LeagueService.generateLeague(tournament.id, participants, regulation)
+    await TournamentModel.setStatus(tournament.id, 'in_progress')
+
+    const leagueEmbed = await LeagueService.formatLeagueEmbed(tournament.id)
+    await interaction.editReply({ embeds: [leagueEmbed] })
+
+    for (const matchId of matchIds) {
+      try {
+        const { content, components } = await LeagueService.formatMatchContent(matchId, regulation)
+        const msg = await channel.send({ content, components })
+        await TournamentMatchModel.setMessageId(matchId, msg.id)
+      } catch (err) {
+        console.error(`[tnm] Failed to post league match ${matchId}:`, err)
+      }
+    }
+    return
+  }
+
+  // single_elim
   const guild = interaction.guild!
   const voiceChannels = guild.channels.cache
     .filter(c => c.type === ChannelType.GuildVoice)
@@ -165,13 +202,8 @@ async function handleStart(interaction: ChatInputCommandInteraction) {
 
   await TournamentModel.setStatus(tournament.id, 'in_progress')
 
-  // Post bracket overview
   const bracketEmbed = await BracketService.formatBracketEmbed(tournament.id)
   await interaction.editReply({ embeds: [bracketEmbed] })
-
-  // Post individual match messages (includes any round-2 matches that became playable via byes)
-  const channel = interaction.channel
-  if (!channel || !channel.isTextBased() || channel.isDMBased()) return
 
   for (const matchId of playableMatchIds) {
     try {
@@ -194,7 +226,9 @@ async function handleBracket(interaction: ChatInputCommandInteraction) {
     return
   }
 
-  const embed = await BracketService.formatBracketEmbed(tournament.id)
+  const embed = tournament.format === 'league'
+    ? await LeagueService.formatLeagueEmbed(tournament.id)
+    : await BracketService.formatBracketEmbed(tournament.id)
   await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral })
 }
 
@@ -444,7 +478,8 @@ async function handleDelete(interaction: ChatInputCommandInteraction) {
 // ─── Modal submit ─────────────────────────────────────────────────────────────
 
 export async function handleModalSubmit(interaction: ModalSubmitInteraction): Promise<boolean> {
-  if (interaction.customId !== 'tnm-create:modal') return false
+  if (!interaction.customId.startsWith('tnm-create:modal')) return false
+  const format = interaction.customId.split(':')[2] ?? 'single_elim'
 
   const name = interaction.fields.getTextInputValue('name').trim()
   const maxRaw = interaction.fields.getTextInputValue('max_participants').trim()
@@ -497,6 +532,7 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   const tournament = await TournamentModel.create({
     guild_id: interaction.guildId!,
     name,
+    format,
     max_participants: maxParticipants,
     regulation,
     created_by: interaction.user.id,
@@ -504,7 +540,11 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   })
 
   // Build announcement embed
-  const regLines: string[] = [`先取数: **${winsRequired}先** / ラウンド数: **${roundsRequired}**`]
+  const formatLabel = format === 'league' ? 'リーグ戦（総当たり）' : 'シングルエリミネーション'
+  const regLines: string[] = [
+    `形式: **${formatLabel}**`,
+    `先取数: **${winsRequired}先** / ラウンド数: **${roundsRequired}**`,
+  ]
   if (handicapRules.length > 0) {
     regLines.push(
       'ハンデ: ' +
@@ -575,6 +615,13 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
     return handleWinButton(interaction, matchId, participantId)
   }
 
+  if (prefix === 'tnm-league-score') {
+    const matchId = parseInt(parts[1])
+    const winnerId = parseInt(parts[2])
+    const loserGames = parseInt(parts[3])
+    return handleLeagueScoreButton(interaction, matchId, winnerId, loserGames)
+  }
+
   if (prefix === 'tnm-edit') {
     const tournamentId = parseInt(parts[1])
     return handleEditButton(interaction, tournamentId)
@@ -586,6 +633,57 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
   }
 
   return false
+}
+
+async function handleLeagueScoreButton(
+  interaction: ButtonInteraction,
+  matchId: number,
+  winnerId: number,
+  loserGames: number
+): Promise<boolean> {
+  const match = await TournamentMatchModel.getById(matchId)
+  if (!match || match.status === 'completed') {
+    await interaction.reply({ content: 'この試合はすでに終了しています。', flags: MessageFlags.Ephemeral })
+    return true
+  }
+
+  await interaction.deferUpdate()
+
+  const tournament = await TournamentModel.getById(match.tournament_id)
+  if (!tournament) return true
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+
+  const p1IsWinner = Number(match.participant1_id) === winnerId
+  const p1Games = p1IsWinner ? regulation.winsRequired : loserGames
+  const p2Games = p1IsWinner ? loserGames : regulation.winsRequired
+
+  await TournamentMatchModel.setScore(matchId, winnerId, p1Games, p2Games)
+
+  const matchData = await TournamentMatchModel.getWithParticipants(matchId)
+  const winnerName = p1IsWinner ? matchData?.p1_name : matchData?.p2_name
+
+  // Edit match message to show final score
+  const baseContent = interaction.message.content.split('\n\n')[0]
+  await interaction.editReply({
+    content: `${baseContent}\n\n✅ **${winnerName}** の勝利 (${p1Games}-${p2Games})`,
+    components: [],
+  })
+
+  // Check if all league matches complete
+  const allDone = await LeagueService.checkAllComplete(tournament.id)
+  if (allDone) {
+    await TournamentModel.setStatus(tournament.id, 'completed')
+    const standings = await LeagueService.getStandings(tournament.id)
+    const champion = standings[0]?.participant
+    const channel = interaction.channel
+    if (channel && channel.isTextBased() && !channel.isDMBased() && champion) {
+      await channel.send(
+        `🏆 **${tournament.name}** 全試合終了！\n優勝: <@${champion.discord_id}> **${champion.discord_name}** さん！おめでとうございます！`
+      )
+    }
+  }
+
+  return true
 }
 
 async function handleEditButton(interaction: ButtonInteraction, tournamentId: number): Promise<boolean> {
@@ -743,13 +841,32 @@ async function handleWinButton(
 
   const matchData = await TournamentMatchModel.getWithParticipants(matchId)
   const p1IdNum = matchData?.participant1_id != null ? Number(matchData.participant1_id) : null
+  const loserName = p1IdNum === participantId ? matchData?.p2_name : matchData?.p1_name
   const winnerName = p1IdNum === participantId ? matchData?.p1_name : matchData?.p2_name
   const winnerLabel = winnerName ?? `参加者#${participantId}`
 
-  // Mark winner, advance bracket
+  // League format: show loser game count input before recording
+  if (tournament.format === 'league') {
+    const winsRequired = regulation.winsRequired
+    const scoreRow = new ActionRowBuilder<ButtonBuilder>()
+    for (let g = 0; g < winsRequired; g++) {
+      scoreRow.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`tnm-league-score:${matchId}:${participantId}:${g}`)
+          .setLabel(`${g}ゲーム`)
+          .setStyle(ButtonStyle.Secondary)
+      )
+    }
+    await interaction.editReply({
+      content: `${interaction.message.content}\n\n**${winnerLabel}** の勝利が報告されました。\n**${loserName ?? '相手'}** は何ゲーム取りましたか？`,
+      components: [scoreRow],
+    })
+    return true
+  }
+
+  // single_elim: record winner immediately and advance bracket
   const result = await BracketService.advanceWinner(matchId, participantId, regulation)
 
-  // Edit the original match message: remove buttons, append winner report
   await interaction.editReply({
     content: `${interaction.message.content}\n\n✅ **${winnerLabel}** の勝利が報告されました。`,
     components: [],
@@ -767,10 +884,7 @@ async function handleWinButton(
     }
   } else if (result.nextMatchId && result.nextMatchReady) {
     try {
-      const { content, components } = await BracketService.formatMatchContent(
-        result.nextMatchId,
-        regulation
-      )
+      const { content, components } = await BracketService.formatMatchContent(result.nextMatchId, regulation)
       const msg = await channel.send({ content, components })
       await TournamentMatchModel.setMessageId(result.nextMatchId, msg.id)
     } catch (err) {

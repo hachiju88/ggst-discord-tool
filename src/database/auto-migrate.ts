@@ -69,6 +69,17 @@ export async function autoMigrate() {
       console.log('✅ "コンボミス" already exists');
     }
 
+    // tournament_matches のゲーム数カラム確認
+    const matchInfo = await db.execute({ sql: 'PRAGMA table_info(tournament_matches)' })
+    const hasP1Games = matchInfo.rows.some((row: any) => row.name === 'p1_games_won')
+    if (!hasP1Games) {
+      await db.execute({ sql: 'ALTER TABLE tournament_matches ADD COLUMN p1_games_won INTEGER NOT NULL DEFAULT 0' })
+      await db.execute({ sql: 'ALTER TABLE tournament_matches ADD COLUMN p2_games_won INTEGER NOT NULL DEFAULT 0' })
+      console.log('✅ p1_games_won, p2_games_won added to tournament_matches')
+    } else {
+      console.log('✅ tournament_matches.p1/p2_games_won already exists')
+    }
+
     // tournament_participants.character カラムの存在確認
     const participantInfo = await db.execute({
       sql: 'PRAGMA table_info(tournament_participants)',

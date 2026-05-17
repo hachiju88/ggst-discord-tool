@@ -11,6 +11,8 @@ export interface TournamentMatch {
   winner_id: number | null
   handicap_participant_id: number | null
   handicap_rounds: number
+  p1_games_won: number
+  p2_games_won: number
   vc_channel_id: string | null
   status: 'pending' | 'in_progress' | 'completed' | 'bye'
   message_id: string | null
@@ -133,6 +135,19 @@ export class TournamentMatchModel {
     await db.execute({
       sql: `UPDATE tournament_matches SET winner_id = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       args: [winnerId, id],
+    })
+  }
+
+  static async setScore(
+    id: number,
+    winnerId: number,
+    p1GamesWon: number,
+    p2GamesWon: number
+  ): Promise<void> {
+    const db = getDatabase()
+    await db.execute({
+      sql: `UPDATE tournament_matches SET winner_id = ?, p1_games_won = ?, p2_games_won = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      args: [winnerId, p1GamesWon, p2GamesWon, id],
     })
   }
 
