@@ -93,6 +93,14 @@ async function handleCreate(interaction: ChatInputCommandInteraction) {
     .setPlaceholder('2')
     .setValue('2')
 
+  const roundsInput = new TextInputBuilder()
+    .setCustomId('rounds_required')
+    .setLabel('ラウンド数（1ゲームを取るのに必要なラウンド）')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false)
+    .setPlaceholder('2')
+    .setValue('2')
+
   const handicapInput = new TextInputBuilder()
     .setCustomId('handicap_rules')
     .setLabel('ハンデルール（空白=なし）')
@@ -104,6 +112,7 @@ async function handleCreate(interaction: ChatInputCommandInteraction) {
     new ActionRowBuilder<TextInputBuilder>().addComponents(nameInput),
     new ActionRowBuilder<TextInputBuilder>().addComponents(maxInput),
     new ActionRowBuilder<TextInputBuilder>().addComponents(winsInput),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(roundsInput),
     new ActionRowBuilder<TextInputBuilder>().addComponents(handicapInput),
   )
 
@@ -431,6 +440,7 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   const name = interaction.fields.getTextInputValue('name').trim()
   const maxRaw = interaction.fields.getTextInputValue('max_participants').trim()
   const winsRaw = interaction.fields.getTextInputValue('wins_required').trim()
+  const roundsRaw = interaction.fields.getTextInputValue('rounds_required').trim()
   const handicapRaw = interaction.fields.getTextInputValue('handicap_rules').trim()
 
   const maxParticipants = maxRaw ? parseInt(maxRaw) : null
@@ -451,6 +461,15 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
     return true
   }
 
+  const roundsRequired = roundsRaw ? parseInt(roundsRaw) : 2
+  if (isNaN(roundsRequired) || roundsRequired < 1 || roundsRequired > 5) {
+    await interaction.reply({
+      content: '❌ ラウンド数は1〜5の整数を入力してください。',
+      flags: MessageFlags.Ephemeral,
+    })
+    return true
+  }
+
   let handicapRules: HandicapRule[] = []
   if (handicapRaw) {
     try {
@@ -464,7 +483,7 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
     }
   }
 
-  const regulation: TournamentRegulation = { winsRequired, handicapRules }
+  const regulation: TournamentRegulation = { winsRequired, roundsRequired, handicapRules }
 
   const tournament = await TournamentModel.create({
     guild_id: interaction.guildId!,
@@ -476,7 +495,7 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   })
 
   // Build announcement embed
-  const regLines: string[] = [`先取数: **${winsRequired}先**`]
+  const regLines: string[] = [`先取数: **${winsRequired}先** / ラウンド数: **${roundsRequired}**`]
   if (handicapRules.length > 0) {
     regLines.push(
       'ハンデ: ' +

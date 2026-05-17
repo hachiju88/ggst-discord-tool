@@ -232,7 +232,8 @@ export class BracketService {
     const match = await TournamentMatchModel.getWithParticipants(matchId)
     if (!match) throw new Error(`Match ${matchId} not found`)
 
-    const winsLabel = `${regulation.winsRequired}先`
+    const rounds = regulation.roundsRequired ?? 2
+    const winsLabel = `${regulation.winsRequired}先 / ${rounds}ラウンド`
     const p1Display = match.p1_discord_id
       ? `<@${match.p1_discord_id}>${match.p1_rank ? ` [${match.p1_rank}]` : ''}`
       : 'TBD'
@@ -341,7 +342,7 @@ export class BracketService {
     const active = matches.filter(m => m.status !== 'bye')
     const completed = active.filter(m => m.status === 'completed')
     embed.setFooter({
-      text: `進行状況: ${completed.length}/${active.length} 試合完了 | ${regulation.winsRequired}先`,
+      text: `進行状況: ${completed.length}/${active.length} 試合完了 | ${regulation.winsRequired}先 / ${regulation.roundsRequired ?? 2}ラウンド`,
     })
 
     return embed

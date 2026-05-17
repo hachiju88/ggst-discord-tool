@@ -7,6 +7,7 @@ export interface HandicapRule {
 
 export interface TournamentRegulation {
   winsRequired: number
+  roundsRequired: number
   handicapRules: HandicapRule[]
 }
 
