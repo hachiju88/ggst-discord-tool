@@ -1,4 +1,5 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import type { ButtonInteraction, StringSelectMenuInteraction } from 'discord.js';
 import * as setmychar from './setmychar';
 import * as addnote from './addnote';
 import * as history from './history';
@@ -9,6 +10,7 @@ import * as exportCmd from './export';
 import * as combo from './combo';
 import * as move from './move';
 import * as admin from './admin';
+import * as tnm from './tnm';
 
 // コマンドモジュールの型定義
 interface CommandModule {
@@ -30,6 +32,7 @@ const commandRegistry = new Map<string, CommandModule>([
   ['gc', combo],
   ['gmv', move],
   ['admin', admin],
+  ['tnm', tnm],
 ]);
 
 // コマンドハンドラー
@@ -59,12 +62,29 @@ export function getModalSubmitHandler(customId: string): ((interaction: any) => 
   const prefixToCommand: Record<string, string> = {
     'gps-add': 'gps',
     'gcs-add': 'gcs',
+    'tnm-create': 'tnm',
   };
   const commandName = prefixToCommand[prefix];
   if (commandName) {
     return commandRegistry.get(commandName)?.handleModalSubmit;
   }
   return undefined;
+}
+
+// Buttonハンドラー
+export async function buttonHandler(interaction: ButtonInteraction): Promise<void> {
+  const customId = interaction.customId;
+  if (customId.startsWith('tnm-')) {
+    await tnm.handleButtonInteract(interaction);
+  }
+}
+
+// SelectMenuハンドラー
+export async function selectMenuHandler(interaction: StringSelectMenuInteraction): Promise<void> {
+  const customId = interaction.customId;
+  if (customId.startsWith('tnm-')) {
+    await tnm.handleSelectMenu(interaction);
+  }
 }
 
 // コマンド定義をエクスポート
