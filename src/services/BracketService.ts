@@ -63,7 +63,7 @@ export class BracketService {
     return { handicapParticipantId: strongerId, rounds: rule.rounds }
   }
 
-  // Creates all DB match records for the bracket. Returns round-1 match IDs (non-bye).
+  // Creates all DB match records for the bracket. Returns IDs of all immediately-playable matches.
   static async generateBracket(
     tournamentId: number,
     participants: TournamentParticipant[],
@@ -73,20 +73,28 @@ export class BracketService {
     const shuffled = shuffle(participants)
     const size = nextPowerOf2(shuffled.length)
     const numRounds = Math.log2(size)
+    const numByes = size - shuffled.length
 
-    // Pad with nulls for byes
-    const padded: (TournamentParticipant | null)[] = [...shuffled]
-    while (padded.length < size) padded.push(null)
+    // Place participants so byes are never paired with byes.
+    // First `numByes` real players are placed in even slots (paired with null);
+    // the rest fill consecutive slots.
+    const slots: (TournamentParticipant | null)[] = new Array(size).fill(null)
+    for (let i = 0; i < numByes; i++) {
+      slots[i * 2] = shuffled[i]
+    }
+    let idx = numByes
+    for (let i = numByes * 2; i < size && idx < shuffled.length; i++) {
+      slots[i] = shuffled[idx++]
+    }
 
-    const round1MatchIds: number[] = []
-
-    // Create round 1 matches
+    // Round 1 matches. Assign VC only to real (non-bye) matches.
+    let vcIdx = 0
     for (let i = 0; i < size / 2; i++) {
-      const p1 = padded[i * 2]
-      const p2 = padded[i * 2 + 1]
+      const p1 = slots[i * 2]
+      const p2 = slots[i * 2 + 1]
       const matchNumber = i + 1
-      const vcId = voiceChannelIds[i] ?? null
       const isBye = !p1 || !p2
+      const vcId = isBye ? null : (voiceChannelIds[vcIdx++] ?? null)
       const matchCode = isBye ? null : generateMatchCode()
 
       let handicap: HandicapResult = { handicapParticipantId: null, rounds: 0 }
@@ -94,7 +102,7 @@ export class BracketService {
         handicap = this.calcHandicap(p1, p2, regulation.handicapRules)
       }
 
-      const match = await TournamentMatchModel.create({
+      await TournamentMatchModel.create({
         tournament_id: tournamentId,
         round: 1,
         match_number: matchNumber,
@@ -107,11 +115,9 @@ export class BracketService {
         vc_channel_id: vcId,
         status: isBye ? 'bye' : 'pending',
       })
-
-      if (!isBye) round1MatchIds.push(match.id)
     }
 
-    // Create skeleton matches for rounds 2+
+    // Skeleton matches for rounds 2+
     let prevCount = size / 2
     for (let r = 2; r <= numRounds; r++) {
       const matchCount = prevCount / 2
@@ -133,7 +139,50 @@ export class BracketService {
       prevCount = matchCount
     }
 
-    return round1MatchIds
+    // Propagate round-1 byes into round 2
+    if (numRounds >= 2) {
+      const round1 = await TournamentMatchModel.getByRound(tournamentId, 1)
+      const round2 = await TournamentMatchModel.getByRound(tournamentId, 2)
+      for (const m of round1) {
+        if (m.status !== 'bye' || !m.winner_id) continue
+        const nextMatchNumber = Math.ceil(m.match_number / 2)
+        const slot: 'p1' | 'p2' = m.match_number % 2 === 1 ? 'p1' : 'p2'
+        const target = round2.find(r => r.match_number === nextMatchNumber)
+        if (target) {
+          await TournamentMatchModel.setParticipant(target.id, m.winner_id, slot)
+        }
+      }
+      // Finalize any round-2 matches that are now both-ready, and assign spare VCs
+      const refreshedR2 = await TournamentMatchModel.getByRound(tournamentId, 2)
+      for (const m of refreshedR2) {
+        if (m.participant1_id && m.participant2_id && !m.match_code) {
+          await this.finalizeMatchIfReady(m.id, regulation)
+          if (vcIdx < voiceChannelIds.length) {
+            await TournamentMatchModel.setVcChannel(m.id, voiceChannelIds[vcIdx++])
+          }
+        }
+      }
+    }
+
+    // Return IDs of all matches that are immediately playable
+    const allMatches = await TournamentMatchModel.getByTournament(tournamentId)
+    return allMatches
+      .filter(m => m.status === 'pending' && m.participant1_id && m.participant2_id)
+      .map(m => m.id)
+  }
+
+  // Compute handicap and assign match code for a pending match whose participants are both known.
+  static async finalizeMatchIfReady(matchId: number, regulation: TournamentRegulation): Promise<boolean> {
+    const m = await TournamentMatchModel.getById(matchId)
+    if (!m || !m.participant1_id || !m.participant2_id) return false
+    if (m.match_code) return true
+    const p1 = await TournamentParticipantModel.getById(m.participant1_id)
+    const p2 = await TournamentParticipantModel.getById(m.participant2_id)
+    if (!p1 || !p2) return false
+    const h = this.calcHandicap(p1, p2, regulation.handicapRules)
+    await TournamentMatchModel.setHandicap(m.id, h.handicapParticipantId, h.rounds)
+    await TournamentMatchModel.setMatchCode(m.id, generateMatchCode())
+    return true
   }
 
   static async advanceWinner(
@@ -146,8 +195,10 @@ export class BracketService {
 
     await TournamentMatchModel.setWinner(matchId, winnerId)
 
-    // Eliminate the loser
-    const loserId = match.participant1_id === winnerId ? match.participant2_id : match.participant1_id
+    // Eliminate the loser (defensive Number() to handle bigint/number coercion edge cases)
+    const p1Id = match.participant1_id != null ? Number(match.participant1_id) : null
+    const p2Id = match.participant2_id != null ? Number(match.participant2_id) : null
+    const loserId = p1Id === winnerId ? p2Id : p1Id
     if (loserId) await TournamentParticipantModel.eliminate(loserId)
 
     const allMatches = await TournamentMatchModel.getByTournament(match.tournament_id)
@@ -167,25 +218,13 @@ export class BracketService {
 
     await TournamentMatchModel.setParticipant(nextMatch.id, winnerId, slot)
 
-    // Check if the next match now has both participants
-    const updatedNext = await TournamentMatchModel.getById(nextMatch.id)
-    const bothReady = !!(updatedNext?.participant1_id && updatedNext?.participant2_id)
-
-    if (bothReady && updatedNext) {
-      const p1 = await TournamentParticipantModel.getById(updatedNext.participant1_id!)
-      const p2 = await TournamentParticipantModel.getById(updatedNext.participant2_id!)
-      if (p1 && p2) {
-        const handicap = this.calcHandicap(p1, p2, regulation.handicapRules)
-        await TournamentMatchModel.setHandicap(updatedNext.id, handicap.handicapParticipantId, handicap.rounds)
-        await TournamentMatchModel.setMatchCode(updatedNext.id, generateMatchCode())
-      }
-    }
+    const finalized = await this.finalizeMatchIfReady(nextMatch.id, regulation)
 
     return {
       isChampion: false,
       championId: null,
       nextMatchId: nextMatch.id,
-      nextMatchReady: bothReady,
+      nextMatchReady: finalized,
     }
   }
 

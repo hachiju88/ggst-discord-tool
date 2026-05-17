@@ -167,6 +167,14 @@ export class TournamentMatchModel {
     })
   }
 
+  static async setVcChannel(id: number, vcChannelId: string): Promise<void> {
+    const db = getDatabase()
+    await db.execute({
+      sql: `UPDATE tournament_matches SET vc_channel_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      args: [vcChannelId, id],
+    })
+  }
+
   static async setMessageId(id: number, messageId: string): Promise<void> {
     const db = getDatabase()
     await db.execute({

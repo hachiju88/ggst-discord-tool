@@ -138,7 +138,7 @@ async function handleStart(interaction: ChatInputCommandInteraction) {
     .sort((a, b) => (a.rawPosition ?? 0) - (b.rawPosition ?? 0))
     .map(c => c.id)
 
-  const round1MatchIds = await BracketService.generateBracket(
+  const playableMatchIds = await BracketService.generateBracket(
     tournament.id,
     participants,
     regulation,
@@ -151,14 +151,18 @@ async function handleStart(interaction: ChatInputCommandInteraction) {
   const bracketEmbed = await BracketService.formatBracketEmbed(tournament.id)
   await interaction.editReply({ embeds: [bracketEmbed] })
 
-  // Post individual match messages
+  // Post individual match messages (includes any round-2 matches that became playable via byes)
   const channel = interaction.channel
   if (!channel || !channel.isTextBased() || channel.isDMBased()) return
 
-  for (const matchId of round1MatchIds) {
-    const { content, components } = await BracketService.formatMatchContent(matchId, regulation)
-    const msg = await channel.send({ content, components })
-    await TournamentMatchModel.setMessageId(matchId, msg.id)
+  for (const matchId of playableMatchIds) {
+    try {
+      const { content, components } = await BracketService.formatMatchContent(matchId, regulation)
+      const msg = await channel.send({ content, components })
+      await TournamentMatchModel.setMessageId(matchId, msg.id)
+    } catch (err) {
+      console.error(`[tnm] Failed to post match ${matchId}:`, err)
+    }
   }
 }
 
@@ -286,20 +290,29 @@ async function handleLeave(interaction: ChatInputCommandInteraction) {
 }
 
 async function handleFix(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply({ ephemeral: true })
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
 
   const matchCode = interaction.options.getString('match_code', true).trim()
   const newWinnerUser = interaction.options.getUser('winner', true)
 
-  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
-  if (!tournament) {
-    await interaction.editReply('アクティブな大会が見つかりません。')
-    return
+  // 完了済みの大会も含めて、マッチコードから対象大会と試合を特定する
+  const tournaments = await TournamentModel.getByGuild(interaction.guildId!)
+  let tournament: typeof tournaments[number] | null = null
+  let match: Awaited<ReturnType<typeof TournamentMatchModel.getById>> = null
+  let allMatches: Awaited<ReturnType<typeof TournamentMatchModel.getByTournament>> = []
+
+  for (const t of tournaments) {
+    const ms = await TournamentMatchModel.getByTournament(t.id)
+    const found = ms.find(m => m.match_code === matchCode)
+    if (found) {
+      tournament = t
+      match = found
+      allMatches = ms
+      break
+    }
   }
 
-  const allMatches = await TournamentMatchModel.getByTournament(tournament.id)
-  const match = allMatches.find(m => m.match_code === matchCode)
-  if (!match) {
+  if (!tournament || !match) {
     await interaction.editReply(`マッチコード \`${matchCode}\` が見つかりません。`)
     return
   }
@@ -316,7 +329,7 @@ async function handleFix(interaction: ChatInputCommandInteraction) {
     await interaction.editReply('指定したユーザーはこの試合の参加者ではありません。')
     return
   }
-  if (match.winner_id === newWinnerParticipant.id) {
+  if (Number(match.winner_id) === Number(newWinnerParticipant.id)) {
     await interaction.editReply('そのユーザーはすでに勝者として記録されています。')
     return
   }
@@ -332,41 +345,57 @@ async function handleFix(interaction: ChatInputCommandInteraction) {
     return
   }
 
-  const oldWinnerId = match.winner_id!
+  const oldWinnerId = Number(match.winner_id)
   const newWinnerId = newWinnerParticipant.id
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
 
   // DB 更新
   await TournamentMatchModel.changeWinner(match.id, newWinnerId)
-  await TournamentParticipantModel.restore(newWinnerId)   // 元の敗者を復活
-  await TournamentParticipantModel.eliminate(oldWinnerId) // 元の勝者を敗退
+  await TournamentParticipantModel.restore(newWinnerId)
+  await TournamentParticipantModel.eliminate(oldWinnerId)
 
-  // 次ラウンド試合のスロット更新
+  // 元の試合メッセージに修正注記を追加
+  if (match.message_id && tournament.channel_id && interaction.guild) {
+    try {
+      const ch = await interaction.guild.channels.fetch(tournament.channel_id)
+      if (ch && ch.isTextBased() && !ch.isDMBased()) {
+        const origMsg = await ch.messages.fetch(match.message_id)
+        if (origMsg.editable) {
+          await origMsg.edit({
+            content: `${origMsg.content}\n🔧 修正: 勝者は <@${newWinnerUser.id}> に変更されました`,
+            components: [],
+          })
+        }
+      }
+    } catch {
+      // best effort
+    }
+  }
+
+  // 次ラウンド試合の更新（決勝戦修正の場合は nextMatch なし）
   if (nextMatch) {
     const slot: 'p1' | 'p2' = match.match_number % 2 === 1 ? 'p1' : 'p2'
     await TournamentMatchModel.setParticipant(nextMatch.id, newWinnerId, slot)
 
-    // 両参加者が確定していればハンデ再計算
-    const updatedNext = await TournamentMatchModel.getById(nextMatch.id)
-    if (updatedNext?.participant1_id && updatedNext?.participant2_id) {
-      const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
-      const np1 = await TournamentParticipantModel.getById(updatedNext.participant1_id)
-      const np2 = await TournamentParticipantModel.getById(updatedNext.participant2_id)
-      if (np1 && np2) {
-        const h = BracketService.calcHandicap(np1, np2, regulation.handicapRules)
-        await TournamentMatchModel.setHandicap(updatedNext.id, h.handicapParticipantId, h.rounds)
-      }
-    }
+    // ハンデ再計算 + match_code 確定（必要なら）
+    const finalized = await BracketService.finalizeMatchIfReady(nextMatch.id, regulation)
 
-    // 次ラウンドのDiscordメッセージを編集
-    if (nextMatch.message_id && tournament.channel_id && interaction.guild) {
+    if (interaction.guild && tournament.channel_id) {
       try {
         const ch = await interaction.guild.channels.fetch(tournament.channel_id)
         if (ch && ch.isTextBased() && !ch.isDMBased()) {
-          const msg = await ch.messages.fetch(nextMatch.message_id)
-          if (msg.editable) {
-            const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+          if (nextMatch.message_id) {
+            // 既存メッセージを上書き
+            const msg = await ch.messages.fetch(nextMatch.message_id)
+            if (msg.editable) {
+              const { content, components } = await BracketService.formatMatchContent(nextMatch.id, regulation)
+              await msg.edit({ content, components })
+            }
+          } else if (finalized) {
+            // 修正をきっかけに次の試合が両方の参加者揃った → 新規投稿
             const { content, components } = await BracketService.formatMatchContent(nextMatch.id, regulation)
-            await msg.edit({ content, components })
+            const newMsg = await ch.send({ content, components })
+            await TournamentMatchModel.setMessageId(nextMatch.id, newMsg.id)
           }
         }
       } catch {
@@ -604,20 +633,24 @@ async function handleWinButton(
     return true
   }
 
+  // Defer immediately so multi-step DB work doesn't exceed Discord's 3s interaction window
+  await interaction.deferUpdate()
+
   const tournament = await TournamentModel.getById(match.tournament_id)
   if (!tournament) return true
   const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
 
   const matchData = await TournamentMatchModel.getWithParticipants(matchId)
-  const winnerName =
-    matchData?.participant1_id === participantId ? matchData.p1_name : matchData?.p2_name
+  const p1IdNum = matchData?.participant1_id != null ? Number(matchData.participant1_id) : null
+  const winnerName = p1IdNum === participantId ? matchData?.p1_name : matchData?.p2_name
+  const winnerLabel = winnerName ?? `参加者#${participantId}`
 
   // Mark winner, advance bracket
   const result = await BracketService.advanceWinner(matchId, participantId, regulation)
 
-  // Disable buttons on the original message
-  await interaction.update({
-    content: `${interaction.message.content}\n\n✅ **${winnerName}** の勝利が報告されました。`,
+  // Edit the original match message: remove buttons, append winner report
+  await interaction.editReply({
+    content: `${interaction.message.content}\n\n✅ **${winnerLabel}** の勝利が報告されました。`,
     components: [],
   })
 
@@ -626,16 +659,22 @@ async function handleWinButton(
 
   if (result.isChampion) {
     const winner = await TournamentParticipantModel.getById(participantId)
-    await channel.send(
-      `🏆 **${tournament.name}** 終了！\n優勝: <@${winner?.discord_id}> **${winner?.discord_name}** さん！おめでとうございます！`
-    )
+    if (winner) {
+      await channel.send(
+        `🏆 **${tournament.name}** 終了！\n優勝: <@${winner.discord_id}> **${winner.discord_name}** さん！おめでとうございます！`
+      )
+    }
   } else if (result.nextMatchId && result.nextMatchReady) {
-    const { content, components } = await BracketService.formatMatchContent(
-      result.nextMatchId,
-      regulation
-    )
-    const msg = await channel.send({ content, components })
-    await TournamentMatchModel.setMessageId(result.nextMatchId, msg.id)
+    try {
+      const { content, components } = await BracketService.formatMatchContent(
+        result.nextMatchId,
+        regulation
+      )
+      const msg = await channel.send({ content, components })
+      await TournamentMatchModel.setMessageId(result.nextMatchId, msg.id)
+    } catch (err) {
+      console.error(`[tnm] Failed to post next match ${result.nextMatchId}:`, err)
+    }
   }
 
   return true
@@ -649,6 +688,12 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
 
   const tournamentId = parseInt(parts[1])
   const rank = interaction.values[0]
+
+  // サーバーサイドでランク値を検証（クライアントの細工対策）
+  if (!RANKS.includes(rank as typeof RANKS[number])) {
+    await interaction.update({ content: '❌ 無効なランクです。', components: [] })
+    return true
+  }
 
   const tournament = await TournamentModel.getById(tournamentId)
   if (!tournament || tournament.status !== 'registration') {
