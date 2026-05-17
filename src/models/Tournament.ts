@@ -8,6 +8,7 @@ export interface HandicapRule {
 export interface TournamentRegulation {
   winsRequired: number
   roundsRequired: number
+  totalRounds?: number  // Swiss draw: number of rounds to play
   handicapRules: HandicapRule[]
 }
 

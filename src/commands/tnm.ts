@@ -25,6 +25,7 @@ import { TournamentParticipantModel } from '../models/TournamentParticipant'
 import { TournamentMatchModel } from '../models/TournamentMatch'
 import { BracketService } from '../services/BracketService'
 import { LeagueService } from '../services/LeagueService'
+import { SwissService } from '../services/SwissService'
 import { RANKS } from '../constants/ranks'
 import { CHARACTERS } from '../constants/characters'
 
@@ -40,8 +41,16 @@ export const data = new SlashCommandBuilder()
           .setRequired(false)
           .addChoices(
             { name: 'シングルエリミネーション（デフォルト）', value: 'single_elim' },
-            { name: 'リーグ戦（総当たり）', value: 'league' }
+            { name: 'リーグ戦（総当たり）', value: 'league' },
+            { name: 'スイスドロー', value: 'swiss' }
           )
+      )
+      .addIntegerOption(o =>
+        o.setName('total_rounds')
+          .setDescription('スイスドローの総ラウンド数（スイスドロー形式のみ）')
+          .setRequired(false)
+          .setMinValue(1)
+          .setMaxValue(10)
       )
   )
   .addSubcommand(s => s.setName('start').setDescription('参加受付を終了してブラケットを生成します'))
@@ -90,10 +99,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
 async function handleCreate(interaction: ChatInputCommandInteraction) {
   const format = interaction.options.getString('format') ?? 'single_elim'
-  const formatLabel = format === 'league' ? 'リーグ戦' : 'シングルエリミネーション'
+  const totalRoundsArg = interaction.options.getInteger('total_rounds') ?? ''
+  const formatLabel = format === 'league' ? 'リーグ戦' : format === 'swiss' ? 'スイスドロー' : 'シングルエリミネーション'
 
   const modal = new ModalBuilder()
-    .setCustomId(`tnm-create:modal:${format}`)
+    .setCustomId(`tnm-create:modal:${format}:${totalRoundsArg}`)
     .setTitle(`大会を作成する（${formatLabel}）`)
 
   const nameInput = new TextInputBuilder()
@@ -167,6 +177,30 @@ async function handleStart(interaction: ChatInputCommandInteraction) {
   const channel = interaction.channel
   if (!channel || !channel.isTextBased() || channel.isDMBased()) return
 
+  if (tournament.format === 'swiss') {
+    const totalRounds = regulation.totalRounds
+    if (!totalRounds) {
+      await interaction.editReply('❌ スイスドローの総ラウンド数が設定されていません。大会を作り直してください。')
+      return
+    }
+    const matchIds = await SwissService.generateRound(tournament.id, 1, participants, regulation, [])
+    await TournamentModel.setStatus(tournament.id, 'in_progress')
+
+    const embed = await SwissService.formatSwissEmbed(tournament.id)
+    await interaction.editReply({ embeds: [embed] })
+
+    for (const matchId of matchIds) {
+      try {
+        const { content, components } = await SwissService.formatMatchContent(matchId, regulation, 1, totalRounds)
+        const msg = await channel.send({ content, components })
+        await TournamentMatchModel.setMessageId(matchId, msg.id)
+      } catch (err) {
+        console.error(`[tnm] Failed to post swiss match ${matchId}:`, err)
+      }
+    }
+    return
+  }
+
   if (tournament.format === 'league') {
     const matchIds = await LeagueService.generateLeague(tournament.id, participants, regulation)
     await TournamentModel.setStatus(tournament.id, 'in_progress')
@@ -228,6 +262,8 @@ async function handleBracket(interaction: ChatInputCommandInteraction) {
 
   const embed = tournament.format === 'league'
     ? await LeagueService.formatLeagueEmbed(tournament.id)
+    : tournament.format === 'swiss'
+    ? await SwissService.formatSwissEmbed(tournament.id)
     : await BracketService.formatBracketEmbed(tournament.id)
   await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral })
 }
@@ -479,7 +515,9 @@ async function handleDelete(interaction: ChatInputCommandInteraction) {
 
 export async function handleModalSubmit(interaction: ModalSubmitInteraction): Promise<boolean> {
   if (!interaction.customId.startsWith('tnm-create:modal')) return false
-  const format = interaction.customId.split(':')[2] ?? 'single_elim'
+  const idParts = interaction.customId.split(':')
+  const format = idParts[2] ?? 'single_elim'
+  const totalRounds = idParts[3] ? parseInt(idParts[3]) : undefined
 
   const name = interaction.fields.getTextInputValue('name').trim()
   const maxRaw = interaction.fields.getTextInputValue('max_participants').trim()
@@ -527,7 +565,7 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
     }
   }
 
-  const regulation: TournamentRegulation = { winsRequired, roundsRequired, handicapRules }
+  const regulation: TournamentRegulation = { winsRequired, roundsRequired, handicapRules, ...(totalRounds ? { totalRounds } : {}) }
 
   const tournament = await TournamentModel.create({
     guild_id: interaction.guildId!,
@@ -540,7 +578,11 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   })
 
   // Build announcement embed
-  const formatLabel = format === 'league' ? 'リーグ戦（総当たり）' : 'シングルエリミネーション'
+  const formatLabel = format === 'league'
+    ? 'リーグ戦（総当たり）'
+    : format === 'swiss'
+    ? `スイスドロー（${totalRounds ?? '?'}ラウンド）`
+    : 'シングルエリミネーション'
   const regLines: string[] = [
     `形式: **${formatLabel}**`,
     `先取数: **${winsRequired}先** / ラウンド数: **${roundsRequired}**`,
@@ -615,11 +657,11 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
     return handleWinButton(interaction, matchId, participantId)
   }
 
-  if (prefix === 'tnm-league-score') {
+  if (prefix === 'tnm-score') {
     const matchId = parseInt(parts[1])
     const winnerId = parseInt(parts[2])
     const loserGames = parseInt(parts[3])
-    return handleLeagueScoreButton(interaction, matchId, winnerId, loserGames)
+    return handleScoreButton(interaction, matchId, winnerId, loserGames)
   }
 
   if (prefix === 'tnm-edit') {
@@ -635,7 +677,7 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
   return false
 }
 
-async function handleLeagueScoreButton(
+async function handleScoreButton(
   interaction: ButtonInteraction,
   matchId: number,
   winnerId: number,
@@ -662,24 +704,70 @@ async function handleLeagueScoreButton(
   const matchData = await TournamentMatchModel.getWithParticipants(matchId)
   const winnerName = p1IsWinner ? matchData?.p1_name : matchData?.p2_name
 
-  // Edit match message to show final score
   const baseContent = interaction.message.content.split('\n\n')[0]
   await interaction.editReply({
     content: `${baseContent}\n\n✅ **${winnerName}** の勝利 (${p1Games}-${p2Games})`,
     components: [],
   })
 
-  // Check if all league matches complete
-  const allDone = await LeagueService.checkAllComplete(tournament.id)
-  if (allDone) {
-    await TournamentModel.setStatus(tournament.id, 'completed')
-    const standings = await LeagueService.getStandings(tournament.id)
-    const champion = standings[0]?.participant
-    const channel = interaction.channel
-    if (channel && channel.isTextBased() && !channel.isDMBased() && champion) {
-      await channel.send(
-        `🏆 **${tournament.name}** 全試合終了！\n優勝: <@${champion.discord_id}> **${champion.discord_name}** さん！おめでとうございます！`
-      )
+  const channel = interaction.channel
+  const isTextChannel = channel && channel.isTextBased() && !channel.isDMBased()
+
+  if (tournament.format === 'league') {
+    const allDone = await LeagueService.checkAllComplete(tournament.id)
+    if (allDone) {
+      await TournamentModel.setStatus(tournament.id, 'completed')
+      const standings = await LeagueService.getStandings(tournament.id)
+      const champion = standings[0]?.participant
+      if (isTextChannel && champion) {
+        await channel.send(
+          `🏆 **${tournament.name}** 全試合終了！\n優勝: <@${champion.discord_id}> **${champion.discord_name}** さん！おめでとうございます！`
+        )
+      }
+    }
+    return true
+  }
+
+  if (tournament.format === 'swiss') {
+    const totalRounds = regulation.totalRounds ?? 4
+    const currentRound = match.round
+    const roundDone = await SwissService.isRoundComplete(tournament.id, currentRound)
+    if (!roundDone) return true
+
+    if (currentRound >= totalRounds) {
+      // Final round complete → announce results
+      await TournamentModel.setStatus(tournament.id, 'completed')
+      const standings = await SwissService.getStandings(tournament.id)
+      const champion = standings[0]?.participant
+      if (isTextChannel) {
+        const embed = await SwissService.formatSwissEmbed(tournament.id)
+        await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！`, embeds: [embed] })
+        if (champion) {
+          await channel.send(
+            `優勝: <@${champion.discord_id}> **${champion.discord_name}** さん！おめでとうございます！`
+          )
+        }
+      }
+      return true
+    }
+
+    // Generate next round
+    const nextRound = currentRound + 1
+    const allMatches = await TournamentMatchModel.getByTournament(tournament.id)
+    const participants = await TournamentParticipantModel.getByTournament(tournament.id)
+    const nextMatchIds = await SwissService.generateRound(tournament.id, nextRound, participants, regulation, allMatches)
+
+    if (isTextChannel) {
+      await channel.send(`━━━━━━━━━━━━━━━━━━━━━━\n**Round ${nextRound} / ${totalRounds} 開始！**`)
+      for (const mid of nextMatchIds) {
+        try {
+          const { content, components } = await SwissService.formatMatchContent(mid, regulation, nextRound, totalRounds)
+          const msg = await channel.send({ content, components })
+          await TournamentMatchModel.setMessageId(mid, msg.id)
+        } catch (err) {
+          console.error(`[tnm] Failed to post swiss round ${nextRound} match ${mid}:`, err)
+        }
+      }
     }
   }
 
@@ -845,14 +933,14 @@ async function handleWinButton(
   const winnerName = p1IdNum === participantId ? matchData?.p1_name : matchData?.p2_name
   const winnerLabel = winnerName ?? `参加者#${participantId}`
 
-  // League format: show loser game count input before recording
-  if (tournament.format === 'league') {
+  // League / Swiss: show loser game count input before recording
+  if (tournament.format === 'league' || tournament.format === 'swiss') {
     const winsRequired = regulation.winsRequired
     const scoreRow = new ActionRowBuilder<ButtonBuilder>()
     for (let g = 0; g < winsRequired; g++) {
       scoreRow.addComponents(
         new ButtonBuilder()
-          .setCustomId(`tnm-league-score:${matchId}:${participantId}:${g}`)
+          .setCustomId(`tnm-score:${matchId}:${participantId}:${g}`)
           .setLabel(`${g}ゲーム`)
           .setStyle(ButtonStyle.Secondary)
       )
