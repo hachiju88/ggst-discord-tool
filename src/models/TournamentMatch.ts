@@ -134,6 +134,14 @@ export class TournamentMatchModel {
     })
   }
 
+  static async changeWinner(id: number, newWinnerId: number): Promise<void> {
+    const db = getDatabase()
+    await db.execute({
+      sql: `UPDATE tournament_matches SET winner_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      args: [newWinnerId, id],
+    })
+  }
+
   static async setParticipant(id: number, participantId: number, slot: 'p1' | 'p2'): Promise<void> {
     const db = getDatabase()
     const col = slot === 'p1' ? 'participant1_id' : 'participant2_id'

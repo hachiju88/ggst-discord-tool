@@ -18,6 +18,7 @@ import type {
   ButtonInteraction,
   StringSelectMenuInteraction,
   GuildMember,
+  Guild,
 } from 'discord.js'
 import { TournamentModel, TournamentRegulation, HandicapRule } from '../models/Tournament'
 import { TournamentParticipantModel } from '../models/TournamentParticipant'
@@ -35,6 +36,19 @@ export const data = new SlashCommandBuilder()
   .addSubcommand(s => s.setName('list').setDescription('このサーバーの大会一覧を表示します'))
   .addSubcommand(s => s.setName('close').setDescription('参加受付を終了します（ブラケット生成はしない）'))
   .addSubcommand(s => s.setName('delete').setDescription('大会を削除します'))
+  .addSubcommand(s =>
+    s.setName('leave').setDescription('参加を取り消します（受付中のみ）')
+  )
+  .addSubcommand(s =>
+    s.setName('fix')
+      .setDescription('誤った試合結果を修正します')
+      .addStringOption(o =>
+        o.setName('match_code').setDescription('修正するマッチコード（6桁）').setRequired(true)
+      )
+      .addUserOption(o =>
+        o.setName('winner').setDescription('正しい勝者').setRequired(true)
+      )
+  )
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand()
@@ -46,6 +60,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (sub === 'list') return handleList(interaction)
   if (sub === 'close') return handleClose(interaction)
   if (sub === 'delete') return handleDelete(interaction)
+  if (sub === 'leave') return handleLeave(interaction)
+  if (sub === 'fix') return handleFix(interaction)
 }
 
 // ─── Subcommand handlers ──────────────────────────────────────────────────────
@@ -231,6 +247,137 @@ async function handleClose(interaction: ChatInputCommandInteraction) {
   await TournamentModel.setStatus(tournament.id, 'in_progress')
   const count = await TournamentParticipantModel.count(tournament.id)
   await interaction.reply(`🔒 **${tournament.name}** の参加受付を終了しました。（${count} 名）\nブラケットを生成するには \`/tnm start\` を使用してください。`)
+}
+
+async function handleLeave(interaction: ChatInputCommandInteraction) {
+  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
+  if (!tournament) {
+    await interaction.reply({ content: 'アクティブな大会が見つかりません。', flags: MessageFlags.Ephemeral })
+    return
+  }
+  if (tournament.status !== 'registration') {
+    await interaction.reply({
+      content: '参加受付が終了しているため、取り消しできません。',
+      flags: MessageFlags.Ephemeral,
+    })
+    return
+  }
+
+  const participant = await TournamentParticipantModel.getByDiscordId(tournament.id, interaction.user.id)
+  if (!participant) {
+    await interaction.reply({
+      content: 'この大会に参加登録されていません。',
+      flags: MessageFlags.Ephemeral,
+    })
+    return
+  }
+
+  await TournamentParticipantModel.delete(participant.id)
+  const count = await TournamentParticipantModel.count(tournament.id)
+
+  if (interaction.guild) {
+    await updateAnnouncementEmbed(interaction.guild, tournament, count)
+  }
+
+  await interaction.reply({
+    content: `✅ **${tournament.name}** の参加を取り消しました。`,
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+async function handleFix(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ ephemeral: true })
+
+  const matchCode = interaction.options.getString('match_code', true).trim()
+  const newWinnerUser = interaction.options.getUser('winner', true)
+
+  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
+  if (!tournament) {
+    await interaction.editReply('アクティブな大会が見つかりません。')
+    return
+  }
+
+  const allMatches = await TournamentMatchModel.getByTournament(tournament.id)
+  const match = allMatches.find(m => m.match_code === matchCode)
+  if (!match) {
+    await interaction.editReply(`マッチコード \`${matchCode}\` が見つかりません。`)
+    return
+  }
+  if (match.status !== 'completed') {
+    await interaction.editReply('この試合はまだ完了していません。')
+    return
+  }
+
+  const p1 = match.participant1_id ? await TournamentParticipantModel.getById(match.participant1_id) : null
+  const p2 = match.participant2_id ? await TournamentParticipantModel.getById(match.participant2_id) : null
+  const newWinnerParticipant = [p1, p2].find(p => p?.discord_id === newWinnerUser.id)
+
+  if (!newWinnerParticipant) {
+    await interaction.editReply('指定したユーザーはこの試合の参加者ではありません。')
+    return
+  }
+  if (match.winner_id === newWinnerParticipant.id) {
+    await interaction.editReply('そのユーザーはすでに勝者として記録されています。')
+    return
+  }
+
+  // 次ラウンドが完了していないか確認
+  const maxRound = Math.max(...allMatches.map(m => m.round))
+  const nextMatch = match.round < maxRound
+    ? allMatches.find(m => m.round === match.round + 1 && m.match_number === Math.ceil(match.match_number / 2)) ?? null
+    : null
+
+  if (nextMatch && nextMatch.status === 'completed') {
+    await interaction.editReply('次のラウンドの試合がすでに終了しているため修正できません。')
+    return
+  }
+
+  const oldWinnerId = match.winner_id!
+  const newWinnerId = newWinnerParticipant.id
+
+  // DB 更新
+  await TournamentMatchModel.changeWinner(match.id, newWinnerId)
+  await TournamentParticipantModel.restore(newWinnerId)   // 元の敗者を復活
+  await TournamentParticipantModel.eliminate(oldWinnerId) // 元の勝者を敗退
+
+  // 次ラウンド試合のスロット更新
+  if (nextMatch) {
+    const slot: 'p1' | 'p2' = match.match_number % 2 === 1 ? 'p1' : 'p2'
+    await TournamentMatchModel.setParticipant(nextMatch.id, newWinnerId, slot)
+
+    // 両参加者が確定していればハンデ再計算
+    const updatedNext = await TournamentMatchModel.getById(nextMatch.id)
+    if (updatedNext?.participant1_id && updatedNext?.participant2_id) {
+      const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+      const np1 = await TournamentParticipantModel.getById(updatedNext.participant1_id)
+      const np2 = await TournamentParticipantModel.getById(updatedNext.participant2_id)
+      if (np1 && np2) {
+        const h = BracketService.calcHandicap(np1, np2, regulation.handicapRules)
+        await TournamentMatchModel.setHandicap(updatedNext.id, h.handicapParticipantId, h.rounds)
+      }
+    }
+
+    // 次ラウンドのDiscordメッセージを編集
+    if (nextMatch.message_id && tournament.channel_id && interaction.guild) {
+      try {
+        const ch = await interaction.guild.channels.fetch(tournament.channel_id)
+        if (ch && ch.isTextBased() && !ch.isDMBased()) {
+          const msg = await ch.messages.fetch(nextMatch.message_id)
+          if (msg.editable) {
+            const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+            const { content, components } = await BracketService.formatMatchContent(nextMatch.id, regulation)
+            await msg.edit({ content, components })
+          }
+        }
+      } catch {
+        // best effort
+      }
+    }
+  }
+
+  await interaction.editReply(
+    `✅ マッチ \`#${matchCode}\` の勝者を修正しました。\n新しい勝者: <@${newWinnerUser.id}>`
+  )
 }
 
 async function handleDelete(interaction: ChatInputCommandInteraction) {
@@ -538,6 +685,10 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
 
   const count = await TournamentParticipantModel.count(tournamentId)
 
+  if (interaction.guild) {
+    await updateAnnouncementEmbed(interaction.guild, tournament, count)
+  }
+
   await interaction.update({
     content: `✅ **${tournament.name}** に参加登録しました！\nランク: **${rank}**\n現在の参加者: ${count} 名`,
     components: [],
@@ -547,6 +698,20 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async function updateAnnouncementEmbed(guild: Guild, tournament: { channel_id: string | null; announcement_message_id: string | null }, count: number): Promise<void> {
+  if (!tournament.channel_id || !tournament.announcement_message_id) return
+  try {
+    const ch = await guild.channels.fetch(tournament.channel_id)
+    if (!ch || !ch.isTextBased() || ch.isDMBased()) return
+    const msg = await ch.messages.fetch(tournament.announcement_message_id)
+    if (!msg.editable || !msg.embeds[0]) return
+    const updated = EmbedBuilder.from(msg.embeds[0]).setFooter({ text: `参加受付中 — ${count} 名` })
+    await msg.edit({ embeds: [updated] })
+  } catch {
+    // best effort
+  }
+}
 
 function parseHandicapRules(input: string): HandicapRule[] {
   return input.split(',').map(part => {

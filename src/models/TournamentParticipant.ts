@@ -62,6 +62,23 @@ export class TournamentParticipantModel {
     })
   }
 
+  static async restore(id: number): Promise<void> {
+    const db = getDatabase()
+    await db.execute({
+      sql: `UPDATE tournament_participants SET status = 'active' WHERE id = ?`,
+      args: [id],
+    })
+  }
+
+  static async delete(id: number): Promise<boolean> {
+    const db = getDatabase()
+    const result = await db.execute({
+      sql: 'DELETE FROM tournament_participants WHERE id = ?',
+      args: [id],
+    })
+    return result.rowsAffected > 0
+  }
+
   static async count(tournamentId: number): Promise<number> {
     const db = getDatabase()
     const result = await db.execute({
