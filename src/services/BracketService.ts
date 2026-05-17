@@ -235,10 +235,10 @@ export class BracketService {
     const rounds = regulation.roundsRequired ?? 2
     const winsLabel = `${regulation.winsRequired}先 / ${rounds}ラウンド`
     const p1Display = match.p1_discord_id
-      ? `<@${match.p1_discord_id}>${match.p1_rank ? ` [${match.p1_rank}]` : ''}`
+      ? `<@${match.p1_discord_id}>${match.p1_rank ? ` [${match.p1_rank}]` : ''}${match.p1_character ? ` (${match.p1_character})` : ''}`
       : 'TBD'
     const p2Display = match.p2_discord_id
-      ? `<@${match.p2_discord_id}>${match.p2_rank ? ` [${match.p2_rank}]` : ''}`
+      ? `<@${match.p2_discord_id}>${match.p2_rank ? ` [${match.p2_rank}]` : ''}${match.p2_character ? ` (${match.p2_character})` : ''}`
       : 'TBD'
 
     const lines: string[] = [
@@ -311,10 +311,10 @@ export class BracketService {
         if (m.status === 'bye') continue
 
         const p1 = m.p1_discord_id
-          ? `<@${m.p1_discord_id}>${m.p1_rank ? `[${m.p1_rank}]` : ''}`
+          ? `<@${m.p1_discord_id}>${m.p1_rank ? `[${m.p1_rank}]` : ''}${m.p1_character ? `(${m.p1_character})` : ''}`
           : 'TBD'
         const p2 = m.p2_discord_id
-          ? `<@${m.p2_discord_id}>${m.p2_rank ? `[${m.p2_rank}]` : ''}`
+          ? `<@${m.p2_discord_id}>${m.p2_rank ? `[${m.p2_rank}]` : ''}${m.p2_character ? `(${m.p2_character})` : ''}`
           : 'TBD'
 
         let line = `\`#${m.match_code ?? '------'}\`  ${p1} vs ${p2}`

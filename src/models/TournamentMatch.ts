@@ -22,9 +22,11 @@ export interface MatchWithParticipants extends TournamentMatch {
   p1_discord_id: string | null
   p1_name: string | null
   p1_rank: string | null
+  p1_character: string | null
   p2_discord_id: string | null
   p2_name: string | null
   p2_rank: string | null
+  p2_character: string | null
   winner_discord_id: string | null
   winner_name: string | null
   handicap_player_name: string | null
@@ -33,8 +35,8 @@ export interface MatchWithParticipants extends TournamentMatch {
 
 const WITH_PARTICIPANTS_SQL = `
   SELECT m.*,
-    p1.discord_id as p1_discord_id, p1.discord_name as p1_name, p1.rank as p1_rank,
-    p2.discord_id as p2_discord_id, p2.discord_name as p2_name, p2.rank as p2_rank,
+    p1.discord_id as p1_discord_id, p1.discord_name as p1_name, p1.rank as p1_rank, p1.character as p1_character,
+    p2.discord_id as p2_discord_id, p2.discord_name as p2_name, p2.rank as p2_rank, p2.character as p2_character,
     w.discord_id as winner_discord_id, w.discord_name as winner_name,
     hp.discord_name as handicap_player_name, hp.discord_id as handicap_player_discord_id
   FROM tournament_matches m

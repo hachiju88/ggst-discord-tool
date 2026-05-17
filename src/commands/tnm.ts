@@ -25,6 +25,7 @@ import { TournamentParticipantModel } from '../models/TournamentParticipant'
 import { TournamentMatchModel } from '../models/TournamentMatch'
 import { BracketService } from '../services/BracketService'
 import { RANKS } from '../constants/ranks'
+import { CHARACTERS } from '../constants/characters'
 
 export const data = new SlashCommandBuilder()
   .setName('tnm')
@@ -624,7 +625,7 @@ async function handleListButton(interaction: ButtonInteraction, tournamentId: nu
     .setTitle(`📋 ${tournament.name} — 参加者一覧`)
     .setDescription(
       participants.length > 0
-        ? participants.map((p, i) => `${i + 1}. <@${p.discord_id}> ${p.rank ? `[${p.rank}]` : ''}`).join('\n')
+        ? participants.map((p, i) => `${i + 1}. <@${p.discord_id}> ${p.rank ? `[${p.rank}]` : ''}${p.character ? ` (${p.character})` : ''}`).join('\n')
         : 'まだ参加者がいません。'
     )
     .setFooter({ text: `${participants.length} 名` })
@@ -703,14 +704,103 @@ async function handleWinButton(
 
 export async function handleSelectMenu(interaction: StringSelectMenuInteraction): Promise<boolean> {
   const parts = interaction.customId.split(':')
-  if (parts[0] !== 'tnm-rank-select') return false
+  if (parts[0] === 'tnm-rank-select') return handleRankSelectMenu(interaction, parseInt(parts[1]))
+  if (parts[0] === 'tnm-char-select') return handleCharacterSelectMenu(interaction, parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3]))
+  return false
+}
 
-  const tournamentId = parseInt(parts[1])
+function buildCharacterSelectRow(tournamentId: number, rankIndex: number, page: number): ActionRowBuilder<StringSelectMenuBuilder> {
+  const PAGE_SIZE = 24
+  const start = page * PAGE_SIZE
+  const end = Math.min(start + PAGE_SIZE, CHARACTERS.length)
+  const hasNext = end < CHARACTERS.length
+  const hasPrev = page > 0
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(`tnm-char-select:${tournamentId}:${rankIndex}:${page}`)
+    .setPlaceholder('キャラクターを選択してください')
+
+  if (hasPrev) {
+    menu.addOptions(new StringSelectMenuOptionBuilder().setLabel('← 前のページ').setValue('__prev__'))
+  }
+  for (let i = start; i < end; i++) {
+    menu.addOptions(new StringSelectMenuOptionBuilder().setLabel(CHARACTERS[i]).setValue(CHARACTERS[i]))
+  }
+  if (hasNext) {
+    menu.addOptions(new StringSelectMenuOptionBuilder().setLabel('次のページ →').setValue('__next__'))
+  }
+
+  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)
+}
+
+async function handleRankSelectMenu(interaction: StringSelectMenuInteraction, tournamentId: number): Promise<boolean> {
   const rank = interaction.values[0]
 
-  // サーバーサイドでランク値を検証（クライアントの細工対策）
   if (!RANKS.includes(rank as typeof RANKS[number])) {
     await interaction.update({ content: '❌ 無効なランクです。', components: [] })
+    return true
+  }
+
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament || tournament.status !== 'registration') {
+    await interaction.update({ content: '参加受付は終了しています。', components: [] })
+    return true
+  }
+
+  if (tournament.max_participants) {
+    const count = await TournamentParticipantModel.count(tournamentId)
+    if (count >= tournament.max_participants) {
+      await interaction.update({ content: `❌ 定員（${tournament.max_participants}名）に達しています。`, components: [] })
+      return true
+    }
+  }
+
+  const existing = await TournamentParticipantModel.getByDiscordId(tournamentId, interaction.user.id)
+  if (existing) {
+    await interaction.update({
+      content: `すでに参加登録済みです（ランク: ${existing.rank ?? 'なし'}）。`,
+      components: [],
+    })
+    return true
+  }
+
+  const rankIndex = RANKS.indexOf(rank as typeof RANKS[number])
+  const row = buildCharacterSelectRow(tournamentId, rankIndex, 0)
+
+  await interaction.update({
+    content: `ランク **${rank}** を選択しました。\n次に使用キャラクターを選択してください。`,
+    components: [row],
+  })
+
+  return true
+}
+
+async function handleCharacterSelectMenu(
+  interaction: StringSelectMenuInteraction,
+  tournamentId: number,
+  rankIndex: number,
+  page: number
+): Promise<boolean> {
+  const value = interaction.values[0]
+
+  if (value === '__next__') {
+    await interaction.update({ components: [buildCharacterSelectRow(tournamentId, rankIndex, page + 1)] })
+    return true
+  }
+  if (value === '__prev__') {
+    await interaction.update({ components: [buildCharacterSelectRow(tournamentId, rankIndex, page - 1)] })
+    return true
+  }
+
+  const character = value
+  if (!CHARACTERS.includes(character as typeof CHARACTERS[number])) {
+    await interaction.update({ content: '❌ 無効なキャラクターです。', components: [] })
+    return true
+  }
+
+  const rank = RANKS[rankIndex]
+  if (!rank) {
+    await interaction.update({ content: '❌ ランク情報が不正です。最初からやり直してください。', components: [] })
     return true
   }
 
@@ -745,6 +835,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
     discord_id: interaction.user.id,
     discord_name: displayName,
     rank,
+    character,
   })
 
   const count = await TournamentParticipantModel.count(tournamentId)
@@ -754,7 +845,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
   }
 
   await interaction.update({
-    content: `✅ **${tournament.name}** に参加登録しました！\nランク: **${rank}**\n現在の参加者: ${count} 名`,
+    content: `✅ **${tournament.name}** に参加登録しました！\nランク: **${rank}** / キャラ: **${character}**\n現在の参加者: ${count} 名`,
     components: [],
   })
 

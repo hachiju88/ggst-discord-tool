@@ -6,6 +6,7 @@ export interface TournamentParticipant {
   discord_id: string
   discord_name: string
   rank: string | null
+  character: string | null
   seed: number | null
   status: 'active' | 'eliminated'
   created_at: string
@@ -17,12 +18,13 @@ export class TournamentParticipantModel {
     discord_id: string
     discord_name: string
     rank: string | null
+    character: string | null
   }): Promise<TournamentParticipant> {
     const db = getDatabase()
     const result = await db.execute({
-      sql: `INSERT INTO tournament_participants (tournament_id, discord_id, discord_name, rank)
-            VALUES (?, ?, ?, ?)`,
-      args: [data.tournament_id, data.discord_id, data.discord_name, data.rank],
+      sql: `INSERT INTO tournament_participants (tournament_id, discord_id, discord_name, rank, character)
+            VALUES (?, ?, ?, ?, ?)`,
+      args: [data.tournament_id, data.discord_id, data.discord_name, data.rank, data.character],
     })
     return (await this.getById(Number(result.lastInsertRowid)))!
   }

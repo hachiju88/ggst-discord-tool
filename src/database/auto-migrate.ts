@@ -69,6 +69,18 @@ export async function autoMigrate() {
       console.log('✅ "コンボミス" already exists');
     }
 
+    // tournament_participants.character カラムの存在確認
+    const participantInfo = await db.execute({
+      sql: 'PRAGMA table_info(tournament_participants)',
+    })
+    const hasCharacter = participantInfo.rows.some((row: any) => row.name === 'character')
+    if (!hasCharacter) {
+      await db.execute({ sql: 'ALTER TABLE tournament_participants ADD COLUMN character TEXT' })
+      console.log('✅ character column added to tournament_participants')
+    } else {
+      console.log('✅ tournament_participants.character already exists')
+    }
+
     console.log('Database schema check complete');
   } catch (error) {
     console.error('Auto-migration error:', error);
