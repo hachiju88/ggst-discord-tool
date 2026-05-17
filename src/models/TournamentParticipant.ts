@@ -56,6 +56,14 @@ export class TournamentParticipantModel {
     return result.rows.length > 0 ? (result.rows[0] as unknown as TournamentParticipant) : null
   }
 
+  static async setRankAndCharacter(id: number, rank: string, character: string): Promise<void> {
+    const db = getDatabase()
+    await db.execute({
+      sql: 'UPDATE tournament_participants SET rank = ?, character = ? WHERE id = ?',
+      args: [rank, character, id],
+    })
+  }
+
   static async eliminate(id: number): Promise<void> {
     const db = getDatabase()
     await db.execute({
