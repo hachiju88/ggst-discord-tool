@@ -179,3 +179,48 @@ CREATE TABLE IF NOT EXISTS tournament_matches (
 CREATE INDEX IF NOT EXISTS idx_tournaments_guild ON tournaments(guild_id);
 CREATE INDEX IF NOT EXISTS idx_participants_tournament ON tournament_participants(tournament_id);
 CREATE INDEX IF NOT EXISTS idx_matches_tournament ON tournament_matches(tournament_id);
+
+CREATE TABLE IF NOT EXISTS tournament_teams (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  team_order INTEGER NOT NULL DEFAULT 0,
+  announcement_message_id TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS tournament_team_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  team_id INTEGER NOT NULL REFERENCES tournament_teams(id) ON DELETE CASCADE,
+  discord_id TEXT NOT NULL,
+  discord_name TEXT NOT NULL,
+  rank TEXT,
+  character TEXT,
+  position INTEGER,
+  is_captain INTEGER NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(team_id, discord_id)
+);
+
+CREATE TABLE IF NOT EXISTS tournament_team_battles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id INTEGER NOT NULL REFERENCES tournament_matches(id) ON DELETE CASCADE,
+  battle_order INTEGER NOT NULL,
+  match_code TEXT,
+  team1_member_id INTEGER REFERENCES tournament_team_members(id),
+  team2_member_id INTEGER REFERENCES tournament_team_members(id),
+  winner_member_id INTEGER REFERENCES tournament_team_members(id),
+  winner_team_id INTEGER REFERENCES tournament_teams(id),
+  team1_games_won INTEGER NOT NULL DEFAULT 0,
+  team2_games_won INTEGER NOT NULL DEFAULT 0,
+  handicap_member_id INTEGER REFERENCES tournament_team_members(id),
+  handicap_rounds INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  message_id TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_teams_tournament ON tournament_teams(tournament_id);
+CREATE INDEX IF NOT EXISTS idx_team_members_team ON tournament_team_members(team_id);
+CREATE INDEX IF NOT EXISTS idx_team_battles_match ON tournament_team_battles(match_id);

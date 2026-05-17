@@ -8,7 +8,10 @@ export interface HandicapRule {
 export interface TournamentRegulation {
   winsRequired: number
   roundsRequired: number
-  totalRounds?: number  // Swiss draw: number of rounds to play
+  totalRounds?: number
+  teamMode?: boolean
+  teamBattleFormat?: 'sequential' | 'survival'
+  teamEntryMode?: 'create' | 'join' | 'assign'
   handicapRules: HandicapRule[]
 }
 
