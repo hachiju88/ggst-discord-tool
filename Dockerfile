@@ -16,6 +16,11 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev
 
+# Install Japanese font for canvas image generation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-ipafont-gothic \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/src/database/*.sql ./dist/database/

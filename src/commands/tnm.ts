@@ -1,6 +1,7 @@
 import {
   SlashCommandBuilder,
   EmbedBuilder,
+  AttachmentBuilder,
   MessageFlags,
   ModalBuilder,
   TextInputBuilder,
@@ -12,7 +13,7 @@ import {
   StringSelectMenuOptionBuilder,
   ChannelSelectMenuBuilder,
   ChannelType,
-  ThreadAutoArchiveDuration,
+  UserSelectMenuBuilder,
 } from 'discord.js'
 import type {
   ChatInputCommandInteraction,
@@ -20,6 +21,7 @@ import type {
   ButtonInteraction,
   StringSelectMenuInteraction,
   ChannelSelectMenuInteraction,
+  UserSelectMenuInteraction,
   GuildMember,
   Guild,
 } from 'discord.js'
@@ -27,8 +29,11 @@ import { TournamentModel, TournamentRegulation, HandicapRule } from '../models/T
 import { TournamentParticipantModel } from '../models/TournamentParticipant'
 import { TournamentMatchModel } from '../models/TournamentMatch'
 import { BracketService } from '../services/BracketService'
+import { BracketImageService } from '../services/BracketImageService'
 import { LeagueService } from '../services/LeagueService'
+import { LeagueImageService } from '../services/LeagueImageService'
 import { SwissService } from '../services/SwissService'
+import { SwissImageService } from '../services/SwissImageService'
 import { TeamBattleService, isTeamProxy, teamIdFromProxy, proxyDiscordId } from '../services/TeamBattleService'
 import { TournamentTeamModel } from '../models/TournamentTeam'
 import { TournamentTeamMemberModel, POSITION_NAMES } from '../models/TournamentTeamMember'
@@ -36,7 +41,24 @@ import { TournamentTeamBattleModel } from '../models/TournamentTeamBattle'
 import { TournamentParticipant } from '../models/TournamentParticipant'
 import { RANKS } from '../constants/ranks'
 import { CHARACTERS } from '../constants/characters'
-import { BracketImageService } from '../services/BracketImageService'
+
+// ─── Unified standings helper ─────────────────────────────────────────────────
+// Returns { files, embeds } ready for channel.send() or interaction.editReply()
+async function standingsData(
+  tournamentId: number,
+  format: string
+): Promise<{ files: AttachmentBuilder[]; embeds: EmbedBuilder[] }> {
+  if (format === 'league') {
+    const { attachment, embed } = await LeagueImageService.formatLeagueAsAttachment(tournamentId)
+    return { files: [attachment], embeds: [embed] }
+  }
+  if (format === 'swiss') {
+    const { attachment, embed } = await SwissImageService.formatSwissAsAttachment(tournamentId)
+    return { files: [attachment], embeds: [embed] }
+  }
+  const { attachment, embed } = await BracketImageService.formatBracketAsAttachment(tournamentId)
+  return { files: [attachment], embeds: [embed] }
+}
 
 export const data = new SlashCommandBuilder()
   .setName('tnm')
@@ -104,6 +126,13 @@ export async function handleChannelSelectMenu(interaction: ChannelSelectMenuInte
   if (interaction.customId.startsWith('tnm-vc-setup')) {
     await handleVcSetupSelect(interaction)
   }
+}
+
+export async function handleUserSelectMenu(interaction: UserSelectMenuInteraction): Promise<boolean> {
+  const parts = interaction.customId.split(':')
+  const prefix = parts[0]
+  if (prefix === 'tnm-admin-user-select') return handleAdminUserSelect(interaction, parseInt(parts[1]))
+  return false
 }
 
 // ─── Subcommand handlers ──────────────────────────────────────────────────────
@@ -178,20 +207,7 @@ async function handleView(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply(showPublic ? {} : { flags: MessageFlags.Ephemeral })
 
   if (tournament.status === 'in_progress' || tournament.status === 'completed') {
-    if (tournament.format === 'single_elim' && !regulation.teamMode) {
-      try {
-        const { attachment, embed } = await BracketImageService.formatBracketAsAttachment(tournament.id)
-        await interaction.editReply({ embeds: [embed], files: [attachment] })
-      } catch {
-        await interaction.editReply({ embeds: [await BracketService.formatBracketEmbed(tournament.id)] })
-      }
-    } else if (tournament.format === 'league') {
-      await interaction.editReply({ embeds: [await LeagueService.formatLeagueEmbed(tournament.id)] })
-    } else if (tournament.format === 'swiss') {
-      await interaction.editReply({ embeds: [await SwissService.formatSwissEmbed(tournament.id)] })
-    } else {
-      await interaction.editReply({ embeds: [await BracketService.formatBracketEmbed(tournament.id)] })
-    }
+    await interaction.editReply(await standingsData(tournament.id, tournament.format))
   } else {
     const participants = await TournamentParticipantModel.getByTournament(tournament.id)
     const embed = new EmbedBuilder()
@@ -287,99 +303,116 @@ async function handleList(interaction: ChatInputCommandInteraction) {
 
 const HELP_PAGES: { title: string; description: string; color: number }[] = [
   {
-    title: '🏆 大会管理ボット — 使い方ガイド',
+    title: '🏆 大会管理ボット — 全体の流れ',
     description: [
       '**━━ 主催者の流れ ━━**',
-      '`/tnm create`',
-      '　　↓ モーダルで大会名・先取数・ハンデを入力',
-      '📢 大会告知メッセージが自動投稿される',
-      '　　↓ 参加者がボタンで参加登録',
-      '🔒 必要に応じて管理パネルから「受付終了」',
-      '　　↓',
-      '▶ 管理パネルから「**大会スタート**」',
-      '　　↓ ブラケット・試合メッセージが自動生成',
-      '🏁 試合完了 → 次ラウンドへ自動進行 → 優勝者発表',
+      '① `/tnm create` でモーダルを開く',
+      '　　大会名・先取数・1試合のラウンド数・ハンデルール・',
+      '　　最大人数・団体戦有無を設定して送信',
+      '② 📢 告知メッセージが自動投稿される',
+      '　　参加者は告知メッセージのボタンから参加登録',
+      '③ `/tnm view` → 管理パネル → **受付終了** で締め切り',
+      '④ 管理パネル → ▶ **大会スタート** を押す',
+      '　　ブラケット・VC・試合メッセージが自動生成される',
+      '⑤ 各試合の勝者が決まると次ラウンドへ自動進行',
+      '🏁 全試合終了 → 優勝者アナウンスが自動投稿',
       '',
       '**━━ 参加者の流れ ━━**',
-      '🎮 告知メッセージの「**参加する**」ボタンを押す',
-      '　　↓ ランクをドロップダウンで選択',
-      '　　↓ キャラ名を入力して送信',
-      '✅ 参加登録完了',
-      '　　↓ 大会スタート後',
-      '🏆 試合メッセージの「**〇〇の勝利**」ボタンで結果報告',
+      '① 告知メッセージの「**参加する 🎮**」ボタンを押す',
+      '　　ランクをドロップダウンで選択',
+      '　　→ 使用キャラ名を入力して送信 → ✅ 登録完了',
+      '② 大会スタート後、自分の試合メッセージが投稿される',
+      '　　対戦相手・マッチコード・VC・ハンデが表示される',
+      '③ 試合終了後、「**〇〇の勝利 ✅**」ボタンを押して報告',
+      '　　勝者は自動で次の試合へ進む',
+      '',
+      '◀▶ ボタンでページを切り替えられます',
     ].join('\n'),
     color: 0xf5a623,
   },
   {
-    title: '👑 主催者ガイド',
+    title: '👑 主催者ガイド — コマンド & 管理パネル',
     description: [
-      '**コマンド一覧**',
-      '`/tnm create` — 大会を作成（形式・団体戦を選択可）',
-      '`/tnm view` — 大会状況 + 管理パネルを表示',
-      '`/tnm list` — このサーバーの大会一覧',
+      '**━━ コマンド ━━**',
+      '`/tnm create` — 大会を新規作成',
+      '`/tnm view` — 進行中の大会を表示（管理パネル付き）',
+      '`/tnm list` — サーバー内の大会一覧を表示',
       '`/tnm help` — この使い方ガイドを表示',
       '',
-      '**管理パネル（`/tnm view` 後に表示）**',
-      '▶ **大会スタート** — ブラケット生成・試合開始',
-      '🔒 **受付終了** — 参加受付を締め切る',
-      '🔓 **受付を再開** — 受付終了後に再開する',
-      '👤+ **代理エントリー** — 主催者が代わりに参加者を追加',
-      '✏️ **結果修正** — 間違った勝利報告を修正（進行中のみ）',
-      '👥 **チーム設定** — チーム名を設定（団体戦のみ）',
-      '🎲 **振り分け** — 参加者をチームに自動配分（団体戦のみ）',
-      '🗑 **大会削除** — 大会データをすべて削除',
+      '**━━ 管理パネル（`/tnm view` → 自分が作成した大会のみ表示）━━**',
+      '',
+      '**受付フェーズ中**',
+      '▶ **大会スタート** — ブラケット・試合を一括生成して開幕',
+      '🔒 **受付終了** — 追加参加を停止（後から再開も可能）',
+      '🔓 **受付を再開** — 締め切り後に参加受付を再開',
+      '👤 **代理エントリー** — ユーザーを選択して主催者が代わりに登録',
+      '👥 **チーム設定** — チーム名を個別に変更（団体戦のみ）',
+      '🎲 **振り分け** — 参加者を全チームにランダム配分（団体戦のみ）',
+      '🗑 **大会削除** — 大会と全データを完全に削除',
+      '',
+      '**進行中のみ表示**',
+      '✏️ **結果修正** — 誤押しした勝利報告を修正（マッチIDで指定）',
+      '',
+      '> 📌 `/tnm view` は管理パネルが自分（主催者）にのみ表示されます。',
+      '> ブラケット表示は全員に公開されます。',
     ].join('\n'),
     color: 0x5865f2,
   },
   {
-    title: '🎮 参加者ガイド',
+    title: '🎮 参加者ガイド — 参加・試合・団体戦',
     description: [
-      '**参加登録の流れ（個人戦）**',
-      '1️⃣ 告知メッセージの「参加する 🎮」ボタンを押す',
-      '2️⃣ ランクをドロップダウンから選択する',
-      '　　（未指定・ランダムも選べます）',
-      '3️⃣ 使用キャラ名を入力して送信',
-      '✅ 登録完了！「参加者一覧 📋」ボタンで確認できます',
+      '**━━ 個人戦の参加登録 ━━**',
+      '1️⃣ 告知メッセージ「**参加する 🎮**」ボタンを押す',
+      '2️⃣ ランクをドロップダウンから選ぶ（闘神〜アイアン1 の21段階、未指定も可）',
+      '3️⃣ 使用キャラ名をテキスト入力 → 送信',
+      '✅ 「参加者一覧 📋」ボタンで自分の名前を確認できます',
+      '✏️ 開始前なら「**エントリー編集**」でランク・キャラを何度でも変更可',
+      '🚪 開始前なら「**参加取り消し**」でキャンセル可',
       '',
-      '**参加登録の流れ（団体戦）**',
-      '• チーム作成制: 「チームを作る ➕」または「チームに参加 📋」',
-      '• 振り分け制: 「参加登録 🎮」→ 主催者がチームに割り当て',
+      '**━━ 団体戦の参加登録 ━━**',
+      '• **チーム作成制**: 「チームを作る ➕」でチームを作成し、',
+      '　　　　　　　メンバーは「チームに参加 📋」で合流',
+      '• **振り分け制**: 「参加登録 🎮」後に主催者が自動または手動で配分',
       '',
-      '**試合の流れ**',
-      '• 試合メッセージに対戦相手・ハンデ・VCが表示される',
-      '• 試合終了後に「〇〇の勝利」ボタンを押す',
-      '　（誰でも押せます。不正報告はマッチコードで主催者が管理）',
-      '• 勝者が自動的に次ラウンドへ進む',
-      '',
-      '**告知メッセージ上の操作**',
-      '✏️ **エントリー編集** — ランク・キャラを変更する',
-      '🚪 **参加取り消し** — 大会開始前に参加をキャンセルする',
-      '📋 **参加者一覧** — 現在の参加者を確認する',
+      '**━━ 試合の流れ ━━**',
+      '• 試合メッセージに **マッチコード** / 対戦相手 / VC / ハンデが表示',
+      '• 指定された VC（ボイスチャンネル）に入って対戦',
+      '• ハンデがある場合: 強い側の先取数が上乗せされます',
+      '　　例）2先でハンデ1R → 強い側は **3勝** が必要',
+      '• 試合終了後「**〇〇の勝利 ✅**」ボタンを押す（誰でも押せます）',
+      '• 不正報告があった場合は **マッチコード** を主催者に報告',
+      '• 勝者は自動で次ラウンドの試合メッセージに組み込まれる',
     ].join('\n'),
     color: 0x57f287,
   },
   {
-    title: '📋 大会形式ガイド',
+    title: '📋 大会形式 & レギュレーション設定',
     description: [
-      '**🗡 シングルエリミネーション（デフォルト）**',
-      '負けたら脱落。勝ち続けた1名が優勝。',
-      '参加人数は2のべき乗に自動調整（Bye処理あり）。最大64名。',
+      '**━━ 大会形式 ━━**',
+      '🗡 **シングルエリミネーション**（デフォルト）',
+      '　負けたら即脱落。2のべき乗に自動調整（Bye処理あり）。最大64名。',
+      '　→ ブラケット図で進行状況が一目でわかる',
       '',
-      '**⚖️ リーグ戦（総当たり）**',
-      '全員と1回ずつ対戦してポイントを競う。',
-      '同点の場合は直接対決の結果で順位決定。',
+      '📊 **リーグ戦（総当たり）**',
+      '　全員と1回ずつ対戦。勝ち点（勝利=3pt）で順位を決定。',
+      '　同点時は直接対決の結果 → 得失点差の順で決定。',
       '',
-      '**🎲 スイスドロー**',
-      '同じ勝利数の相手とマッチングするペアリング。',
-      '総ラウンド数を事前設定（例: 5ラウンド）。',
+      '🎲 **スイスドロー**',
+      '　同じ勝利数の相手とマッチングするペアリング方式。',
+      '　事前に総ラウンド数を設定（例: 5ラウンド）。消耗が少ない。',
       '',
-      '**⚖️ ハンデルール**',
-      'ランク差に応じて強い側に「ラウンド落とし」を適用。',
-      '入力例: `3:1,7:2` → ランク差3以上で1R落とし、7以上で2R落とし',
-      '「先取2」でハンデ1Rなら、強い側は3勝が必要。',
+      '**━━ レギュレーション設定（大会作成時） ━━**',
+      '**先取数**: 1先〜5先を選択（デフォルト: 2先）',
+      '**ラウンド数**: 1試合あたりのラウンド数（デフォルト: 2）',
+      '**ハンデルール**: ランク差に応じてラウンド落としを自動適用',
+      '　入力形式: `ランク差:落とし数, ...`',
+      '　例: `3:1,7:2` → ランク差3以上で1R落とし、7以上で2R落とし',
+      '　ランク差はインデックス差（闘神グラマス=0 〜 アイアン1=20）',
+      '　設定なしの場合はハンデなし大会になります',
       '',
-      '**👥 団体戦モード**',
-      'チームを組んで対戦。ポジション対応または勝ち抜き戦を選択可。',
+      '**━━ 団体戦モード ━━**',
+      '👥 **チーム作成制** / **振り分け制** の2種類',
+      '　対戦形式: ポジション対応 または 勝ち抜き戦',
     ].join('\n'),
     color: 0xeb459e,
   },
@@ -439,6 +472,10 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   if (interaction.customId.startsWith('tnm-char-modal:')) return handleCharModal(interaction)
   if (interaction.customId.startsWith('tnm-admin-fix-modal:')) return handleAdminFixModal(interaction, parseInt(interaction.customId.split(':')[1]))
   if (interaction.customId.startsWith('tnm-admin-enter-modal:')) return handleAdminEnterModal(interaction, parseInt(interaction.customId.split(':')[1]))
+  if (interaction.customId.startsWith('tnm-admin-enter-char:')) {
+    const p = interaction.customId.split(':')
+    return handleAdminEnterCharModal(interaction, parseInt(p[1]), p[2], p.slice(3).join(':'))
+  }
   if (interaction.customId.startsWith('tnm-admin-team-setup-modal:')) return handleAdminTeamSetupModal(interaction, parseInt(interaction.customId.split(':')[1]))
   if (interaction.customId.startsWith('tnm-team-create:modal')) {
     const tournamentId = parseInt(interaction.customId.split(':')[2])
@@ -835,6 +872,9 @@ async function handleConfirmButton(
             `🏆 **${tournament.name}** 終了！\n優勝: <@${winner.discord_id}> **${winner.discord_name}** さん！おめでとうございます！`
           )
         }
+        try {
+          await channel.send(await standingsData(tournament.id, tournament.format))
+        } catch (err) { console.error('[tnm] Failed to post final bracket:', err) }
       } else if (result.nextMatchId && result.nextMatchReady) {
         try {
           const { content, components } = await BracketService.formatMatchContent(result.nextMatchId, regulation)
@@ -866,10 +906,15 @@ async function handleConfirmButton(
       await TournamentModel.setStatus(tournament.id, 'completed')
       const standings = await LeagueService.getStandings(tournament.id)
       const champion = standings[0]?.participant
-      if (isTextChannel && champion && channel) {
-        await channel.send(
-          `🏆 **${tournament.name}** 全試合終了！\n優勝: <@${champion.discord_id}> **${champion.discord_name}** さん！おめでとうございます！`
-        )
+      if (isTextChannel && channel) {
+        if (champion) {
+          await channel.send(
+            `🏆 **${tournament.name}** 全試合終了！\n優勝: <@${champion.discord_id}> **${champion.discord_name}** さん！おめでとうございます！`
+          )
+        }
+        try {
+          await channel.send(await standingsData(tournament.id, tournament.format))
+        } catch (err) { console.error('[tnm] Failed to post final league standings:', err) }
       }
     }
     return true
@@ -886,8 +931,8 @@ async function handleConfirmButton(
       const standings = await SwissService.getStandings(tournament.id)
       const champion = standings[0]?.participant
       if (isTextChannel && channel) {
-        const embed = await SwissService.formatSwissEmbed(tournament.id)
-        await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！`, embeds: [embed] })
+        const sd = await standingsData(tournament.id, tournament.format)
+        await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！`, ...sd })
         if (champion) {
           await channel.send(
             `優勝: <@${champion.discord_id}> **${champion.discord_name}** さん！おめでとうございます！`
@@ -1152,6 +1197,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
   const parts = interaction.customId.split(':')
   if (parts[0] === 'tnm-handicap-preset') return handleHandicapPreset(interaction, parseInt(parts[1]))
   if (parts[0] === 'tnm-rank-select')  return handleRankSelect(interaction, parts[1], parseInt(parts[2]))
+  if (parts[0] === 'tnm-admin-enter-rank') return handleAdminEnterRank(interaction, parseInt(parts[1]), parts[2])
   if (parts[0] === 'tnm-team-select')  return handleTeamSelectMenu(interaction, parseInt(parts[1]))
   if (parts[0] === 'tnm-assign-slot')  return handleAssignSlotSelect(interaction, parseInt(parts[1]), parts[2], parts[3])
   return false
@@ -1795,6 +1841,9 @@ async function handleBattleConfirmButton(
     const result = await BracketService.advanceWinner(battle.match_id, winnerProxy.id, regulation)
     if (result.isChampion && isText && channel) {
       await channel.send(`🏆 **${tournament.name}** 終了！\n優勝: **${winnerTeam?.name}** ！おめでとうございます！`)
+      try {
+        await channel.send(await standingsData(tournament.id, tournament.format))
+      } catch (err) { console.error('[tnm] Failed to post final bracket (team):', err) }
     } else if (result.nextMatchId && result.nextMatchReady && isText && channel) {
       try {
         const { content: nc, components: rc } = await TeamBattleService.formatTeamMatchContent(result.nextMatchId, regulation)
@@ -1816,7 +1865,12 @@ async function handleBattleConfirmButton(
     const allDone = await LeagueService.checkAllComplete(tournament.id)
     if (allDone) {
       await TournamentModel.setStatus(tournament.id, 'completed')
-      if (isText && channel) await channel.send(`🏆 **${tournament.name}** 全試合終了！\n優勝チーム: **${winnerTeam?.name}** ！おめでとうございます！`)
+      if (isText && channel) {
+        await channel.send(`🏆 **${tournament.name}** 全試合終了！\n優勝チーム: **${winnerTeam?.name}** ！おめでとうございます！`)
+        try {
+          await channel.send(await standingsData(tournament.id, tournament.format))
+        } catch (err) { console.error('[tnm] Failed to post final league standings (team):', err) }
+      }
     }
   } else if (tournament.format === 'swiss') {
     const allBattles = await TournamentTeamBattleModel.getByMatch(battle.match_id)
@@ -1836,8 +1890,8 @@ async function handleBattleConfirmButton(
     if (currentRound >= totalRounds) {
       await TournamentModel.setStatus(tournament.id, 'completed')
       if (isText && channel) {
-        const embed = await SwissService.formatSwissEmbed(tournament.id)
-        await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！\n優勝チーム: **${winnerTeam?.name}**！`, embeds: [embed] })
+        const sd = await standingsData(tournament.id, tournament.format)
+        await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！\n優勝チーム: **${winnerTeam?.name}**！`, ...sd })
       }
     } else {
       const nextRound = currentRound + 1
@@ -1990,7 +2044,7 @@ async function handleAutoAssign(
 // ─── Admin panel button / modal handlers ─────────────────────────────────────
 
 async function checkAdminPermission(
-  interaction: ButtonInteraction | ModalSubmitInteraction,
+  interaction: ButtonInteraction | ModalSubmitInteraction | UserSelectMenuInteraction,
   tournament: { created_by: string }
 ): Promise<boolean> {
   const member = interaction.member as GuildMember | null
@@ -2048,11 +2102,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
     }
     await TournamentModel.setStatus(tournament.id, 'in_progress')
 
-    let teamMatchTarget: any = channel
-    try {
-      const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
-      teamMatchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
-    } catch { /* fallback */ }
+    const teamMatchTarget: any = channel
 
     for (const matchId of matchIds) {
       try {
@@ -2062,12 +2112,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
       } catch (err) { console.error(`[tnm] Failed to post team match ${matchId}:`, err) }
     }
 
-    const bracketEmbed = tournament.format === 'swiss'
-      ? await SwissService.formatSwissEmbed(tournament.id)
-      : tournament.format === 'league'
-      ? await LeagueService.formatLeagueEmbed(tournament.id)
-      : await BracketService.formatBracketEmbed(tournament.id)
-    await channel.send({ embeds: [bracketEmbed] })
+    await channel.send(await standingsData(tournament.id, tournament.format))
     await setAnnouncementButtonsDisabled(interaction.guild, tournament, true, '大会開始済み — 受付終了')
     await interaction.editReply('✅ 大会を開始しました！')
     return true
@@ -2078,13 +2123,9 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
     if (!totalRounds) { await interaction.editReply('❌ スイスドローの総ラウンド数が設定されていません。大会を作り直してください。'); return true }
     const matchIds = await SwissService.generateRound(tournament.id, 1, participants, regulation, [])
     await TournamentModel.setStatus(tournament.id, 'in_progress')
-    await channel.send({ embeds: [await SwissService.formatSwissEmbed(tournament.id)] })
+    await channel.send(await standingsData(tournament.id, 'swiss'))
 
-    let swissMatchTarget: any = channel
-    try {
-      const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
-      swissMatchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
-    } catch { /* fallback */ }
+    const swissMatchTarget: any = channel
 
     for (const matchId of matchIds) {
       try {
@@ -2101,13 +2142,9 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
   if (tournament.format === 'league') {
     const matchIds = await LeagueService.generateLeague(tournament.id, participants, regulation)
     await TournamentModel.setStatus(tournament.id, 'in_progress')
-    await channel.send({ embeds: [await LeagueService.formatLeagueEmbed(tournament.id)] })
+    await channel.send(await standingsData(tournament.id, 'league'))
 
-    let leagueMatchTarget: any = channel
-    try {
-      const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
-      leagueMatchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
-    } catch { /* fallback */ }
+    const leagueMatchTarget: any = channel
 
     for (const matchId of matchIds) {
       try {
@@ -2134,7 +2171,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
   const playableMatchIds = await BracketService.generateBracket(tournament.id, participants, regulation, voiceChannels)
   await TournamentModel.setStatus(tournament.id, 'in_progress')
 
-  await channel.send({ embeds: [await BracketService.formatBracketEmbed(tournament.id)] })
+  await channel.send(await standingsData(tournament.id, 'single_elim'))
 
   if (voiceChannels.length > 0 && voiceChannels.length < playableMatchIds.length) {
     await interaction.followUp({
@@ -2143,11 +2180,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
     })
   }
 
-  let matchTarget: any = channel
-  try {
-    const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
-    matchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
-  } catch { /* fallback */ }
+  const matchTarget: any = channel
 
   for (const matchId of playableMatchIds) {
     try {
@@ -2385,21 +2418,33 @@ async function handleAdminEnter(interaction: ButtonInteraction, tournamentId: nu
     await interaction.reply({ content: '❌ 権限がありません。', flags: MessageFlags.Ephemeral }); return true
   }
 
-  const modal = new ModalBuilder()
-    .setCustomId(`tnm-admin-enter-modal:${tournamentId}`)
-    .setTitle('代理エントリー')
-  modal.addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId('user').setLabel('ユーザー（@メンション または ID）').setStyle(TextInputStyle.Short).setRequired(true)
-    ),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId('rank').setLabel('ランク（部分入力 / 未指定 / ランダム）').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('例: ダイヤ２、未指定')
-    ),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId('character').setLabel('キャラ（部分入力 / 未指定 / ランダム）').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('例: ソル、未指定')
-    ),
+  const row = new ActionRowBuilder<any>().addComponents(
+    new UserSelectMenuBuilder()
+      .setCustomId(`tnm-admin-user-select:${tournamentId}`)
+      .setPlaceholder('参加させるユーザーを選択...')
+      .setMinValues(1)
+      .setMaxValues(1)
   )
-  await interaction.showModal(modal)
+  await interaction.reply({
+    content: '👤 代理エントリーするユーザーを選択してください。',
+    components: [row],
+    flags: MessageFlags.Ephemeral,
+  })
+  return true
+}
+
+async function handleAdminUserSelect(interaction: UserSelectMenuInteraction, tournamentId: number): Promise<boolean> {
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.update({ content: '❌ 大会が見つかりません。', components: [] }); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.update({ content: '❌ 権限がありません。', components: [] }); return true
+  }
+
+  const userId = interaction.values[0]
+  await interaction.update({
+    content: `👤 <@${userId}> のランクを選択してください。`,
+    components: [buildRankSelectRow(`tnm-admin-enter-rank:${tournamentId}:${userId}`)],
+  })
   return true
 }
 
@@ -2443,6 +2488,65 @@ async function handleAdminEnterModal(interaction: ModalSubmitInteraction, tourna
     const count = await TournamentParticipantModel.count(tournamentId)
     if (interaction.guild) await updateAnnouncementEmbed(interaction.guild, tournament, count)
     await interaction.editReply(`✅ **${targetName}** をエントリーしました。\nランク: **${rank ?? '未指定'}** / キャラ: **${character ?? '未指定'}**`)
+  }
+  return true
+}
+
+async function handleAdminEnterRank(interaction: StringSelectMenuInteraction, tournamentId: number, userId: string): Promise<boolean> {
+  const selectedRank = interaction.values[0]
+  const modal = new ModalBuilder()
+    .setCustomId(`tnm-admin-enter-char:${tournamentId}:${userId}:${selectedRank}`)
+    .setTitle('代理エントリー — キャラ入力')
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('character')
+        .setLabel('使用キャラ（部分入力可 / 未指定）')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setPlaceholder('例: ソル、未指定')
+    )
+  )
+  await interaction.showModal(modal)
+  return true
+}
+
+async function handleAdminEnterCharModal(
+  interaction: ModalSubmitInteraction,
+  tournamentId: number,
+  userId: string,
+  rawRank: string
+): Promise<boolean> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.editReply('❌ 大会が見つかりません。'); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.editReply('❌ 権限がありません。'); return true
+  }
+
+  const rank = resolveRank(rawRank)
+  const character = resolveCharacter(interaction.fields.getTextInputValue('character'))
+
+  let targetName = userId
+  try {
+    const gm = await interaction.guild?.members.fetch(userId)
+    targetName = gm?.displayName ?? gm?.user.username ?? userId
+  } catch { /* fallback */ }
+
+  const existing = await TournamentParticipantModel.getByDiscordId(tournament.id, userId)
+  if (existing) {
+    await TournamentParticipantModel.setRankAndCharacter(existing.id, rank, character)
+    await interaction.editReply(`✅ **${targetName}** のエントリー情報を更新しました。${rank ? ` ランク: ${rank}` : ''}${character ? ` キャラ: ${character}` : ''}`)
+  } else {
+    await TournamentParticipantModel.create({
+      tournament_id: tournament.id,
+      discord_id: userId,
+      discord_name: targetName,
+      rank: rank ?? null,
+      character: character ?? null,
+    })
+    await interaction.editReply(`✅ **${targetName}** を代理エントリーしました。${rank ? ` ランク: ${rank}` : ''}${character ? ` キャラ: ${character}` : ''}`)
   }
   return true
 }

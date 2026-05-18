@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, REST, Routes, MessageFlags } from 'discord.js';
-import { commandHandler, getAutocompleteHandler, getModalSubmitHandler, buttonHandler, selectMenuHandler, channelSelectMenuHandler } from './commands';
+import { commandHandler, getAutocompleteHandler, getModalSubmitHandler, buttonHandler, selectMenuHandler, channelSelectMenuHandler, userSelectMenuHandler } from './commands';
 
 export function createClient(): Client {
   const client = new Client({
@@ -50,6 +50,19 @@ export function createClient(): Client {
         await channelSelectMenuHandler(interaction);
       } catch (error) {
         console.error('[ChannelSelectMenu] Error:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
+        }
+      }
+      return;
+    }
+
+    // ユーザーセレクトメニュー処理（代理エントリーなど）
+    if (interaction.isUserSelectMenu()) {
+      try {
+        await userSelectMenuHandler(interaction);
+      } catch (error) {
+        console.error('[UserSelectMenu] Error:', error);
         if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
         }

@@ -29,6 +29,52 @@ function nextPowerOf2(n: number): number {
   return p
 }
 
+// Display-width helpers: full-width (CJK/emoji) chars count as 2 columns.
+function charDisplayWidth(ch: string): number {
+  const cp = ch.codePointAt(0) ?? 0
+  if (
+    (cp >= 0x1100 && cp <= 0x115F) ||  // Hangul Jamo
+    (cp >= 0x2E80 && cp <= 0x303E) ||  // CJK Radicals etc.
+    (cp >= 0x3040 && cp <= 0x33FF) ||  // Hiragana / Katakana / CJK symbols
+    (cp >= 0x3400 && cp <= 0x4DBF) ||  // CJK Extension A
+    (cp >= 0x4E00 && cp <= 0x9FFF) ||  // CJK Unified Ideographs
+    (cp >= 0xA000 && cp <= 0xA4CF) ||  // Yi Syllables
+    (cp >= 0xAC00 && cp <= 0xD7AF) ||  // Hangul Syllables
+    (cp >= 0xF900 && cp <= 0xFAFF) ||  // CJK Compatibility Ideographs
+    (cp >= 0xFE10 && cp <= 0xFE19) ||  // Vertical Forms
+    (cp >= 0xFE30 && cp <= 0xFE6F) ||  // CJK Compatibility Forms
+    (cp >= 0xFF01 && cp <= 0xFF60) ||  // Fullwidth Forms
+    (cp >= 0xFFE0 && cp <= 0xFFE6) ||  // Fullwidth Signs
+    (cp >= 0x1F300 && cp <= 0x1FAFF)   // Emoji
+  ) return 2
+  return 1
+}
+
+function strDisplayWidth(s: string): number {
+  let w = 0
+  for (const ch of s) w += charDisplayWidth(ch)
+  return w
+}
+
+// Truncate s so its display width ≤ maxW, always appending … when truncated.
+// Reserves 1 column for … so the result always fits within maxW.
+function truncDisplay(s: string, maxW: number): string {
+  if (strDisplayWidth(s) <= maxW) return s
+  let w = 0, result = ''
+  for (const ch of s) {
+    const cw = charDisplayWidth(ch)
+    if (w + cw > maxW - 1) break  // leave 1 col for …
+    result += ch; w += cw
+  }
+  return result + '…'
+}
+
+// Pad s with pad chars so its display width equals targetW.
+function padDisplay(s: string, targetW: number, pad = '─'): string {
+  const cur = strDisplayWidth(s)
+  return cur >= targetW ? s : s + pad.repeat(targetW - cur)
+}
+
 export class BracketService {
   static calcHandicap(
     p1: TournamentParticipant,
@@ -64,16 +110,27 @@ export class BracketService {
     const numRounds = Math.log2(size)
     const numByes = size - shuffled.length
 
-    // Place participants so byes are never paired with byes.
-    // First `numByes` real players are placed in even slots (paired with null);
-    // the rest fill consecutive slots.
-    const slots: (TournamentParticipant | null)[] = new Array(size).fill(null)
-    for (let i = 0; i < numByes; i++) {
-      slots[i * 2] = shuffled[i]
+    // Distribute BYEs evenly throughout the bracket.
+    // Spread BYE match indices using equal intervals so they don't cluster.
+    const matchCount = size / 2
+    const byeMatchIndices = new Set<number>()
+    if (numByes === 1) {
+      byeMatchIndices.add(0)
+    } else {
+      for (let i = 0; i < numByes; i++) {
+        byeMatchIndices.add(Math.round(i * (matchCount - 1) / (numByes - 1)))
+      }
     }
-    let idx = numByes
-    for (let i = numByes * 2; i < size && idx < shuffled.length; i++) {
-      slots[i] = shuffled[idx++]
+
+    const slots: (TournamentParticipant | null)[] = new Array(size).fill(null)
+    let pIdx = 0
+    for (let mi = 0; mi < matchCount; mi++) {
+      if (byeMatchIndices.has(mi)) {
+        slots[mi * 2] = shuffled[pIdx++]  // p1 gets the real participant; p2 stays null (BYE)
+      } else {
+        slots[mi * 2]     = shuffled[pIdx++]
+        slots[mi * 2 + 1] = shuffled[pIdx++]
+      }
     }
 
     // Round 1 matches. Assign VC only to real (non-bye) matches.
@@ -234,7 +291,9 @@ export class BracketService {
 
     const lines: string[] = [
       `\`#${match.match_code ?? '------'}\`  Round ${match.round} - Match ${match.match_number}  【${winsLabel}】`,
-      `${p1Display}  vs  ${p2Display}`,
+      p1Display,
+      '**vs**',
+      p2Display,
     ]
 
     if (match.handicap_rounds > 0 && match.handicap_player_name) {
@@ -269,6 +328,121 @@ export class BracketService {
     }
   }
 
+  // Builds a bracket art string using box-drawing characters.
+  // Positions are tracked in display columns so full-width (Japanese/CJK)
+  // characters align correctly.
+  static buildBracketArt(matches: MatchWithParticipants[]): string {
+    if (matches.length === 0) return '試合データがありません'
+
+    const maxRound = Math.max(...matches.map(m => m.round))
+    const bracketSize = Math.pow(2, maxRound)
+    const totalRows = bracketSize * 2 - 1
+
+    // NAME_W / COL_W are in **display columns**, not JS string length.
+    const NAME_W = 14
+    const H_PAD = 2
+    const COL_W = NAME_W + H_PAD + 1  // display cols per bracket section
+
+    // Each row is a list of {display-column, text} segments.
+    // buildRow assembles them left-to-right, padding with spaces as needed.
+    type Seg = { pos: number; text: string }
+    const rowSegs: Seg[][] = Array.from({ length: totalRows }, () => [])
+
+    const addSeg = (row: number, pos: number, text: string) => {
+      if (row >= 0 && row < totalRows) rowSegs[row].push({ pos, text })
+    }
+
+    const buildRow = (segs: Seg[]): string => {
+      const sorted = [...segs].sort((a, b) => a.pos - b.pos)
+      let result = '', cur = 0
+      for (const seg of sorted) {
+        if (seg.pos < cur) continue
+        if (seg.pos > cur) result += ' '.repeat(seg.pos - cur)
+        result += seg.text
+        cur = seg.pos + strDisplayWidth(seg.text)
+      }
+      return result.trimEnd()
+    }
+
+    // Row position of ├ for round r (1-indexed), match index m (0-indexed)
+    const getMidRow = (r: number, m: number) =>
+      Math.pow(2, r) - 1 + m * Math.pow(2, r + 1)
+
+    // Display column of ├/┐/┘ for round r
+    const getJoinCol = (r: number) => (r - 1) * COL_W + NAME_W
+
+    const matchMap = new Map<string, MatchWithParticipants>()
+    for (const m of matches) matchMap.set(`${m.round}:${m.match_number - 1}`, m)
+    const getMatch = (r: number, mIdx: number) => matchMap.get(`${r}:${mIdx}`)
+
+    const getWinnerName = (m: MatchWithParticipants | undefined): string | null => {
+      if (!m || (m.status !== 'completed' && m.status !== 'bye')) return null
+      if (m.winner_discord_id && m.winner_discord_id === m.p1_discord_id) return m.p1_name ?? null
+      if (m.winner_discord_id && m.winner_discord_id === m.p2_discord_id) return m.p2_name ?? null
+      return null
+    }
+
+    // Helper: truncate + pad a name to exactly NAME_W display columns with ─
+    const nameSeg = (name: string) => padDisplay(truncDisplay(name, NAME_W), NAME_W)
+
+    // Round 1: participant names, ┐/┘, ├──
+    for (let m = 0; m < bracketSize / 2; m++) {
+      const match = getMatch(1, m)
+      const topRow = m * 4, botRow = m * 4 + 2
+      const mid = getMidRow(1, m)
+      const jc = getJoinCol(1)  // = NAME_W
+
+      addSeg(topRow, 0,  nameSeg(match?.p1_name ?? ''))
+      addSeg(topRow, jc, '┐')
+
+      // BYE: show only the bracket line (no name), not "BYE" as a participant
+      if (match?.status !== 'bye') {
+        addSeg(botRow, 0,  nameSeg(match?.p2_name ?? ''))
+      }
+      addSeg(botRow, jc, '┘')
+
+      addSeg(mid, jc, '├' + '─'.repeat(H_PAD))
+    }
+
+    // All rounds: winner name → ┐/┘ for next round (or 🏆 for final)
+    for (let r = 1; r <= maxRound; r++) {
+      const matchCount = bracketSize / Math.pow(2, r)
+      const jc = getJoinCol(r)
+
+      for (let m = 0; m < matchCount; m++) {
+        const mid = getMidRow(r, m)
+        const wName = getWinnerName(getMatch(r, m))
+
+        if (r < maxRound) {
+          const nameStart = jc + 1 + H_PAD          // display col right after ├──
+          const nextJC = getJoinCol(r + 1)
+          addSeg(mid, nameStart, nameSeg(wName ?? ''))
+          addSeg(mid, nextJC, m % 2 === 0 ? '┐' : '┘')
+        } else if (wName) {
+          addSeg(mid, jc + 1 + H_PAD, '🏆 ' + wName)
+        }
+      }
+    }
+
+    // Rounds 2+: vertical connectors (│) and ├──
+    for (let r = 2; r <= maxRound; r++) {
+      const matchCount = bracketSize / Math.pow(2, r)
+      const jc = getJoinCol(r)
+
+      for (let m = 0; m < matchCount; m++) {
+        const topInRow = getMidRow(r - 1, 2 * m)
+        const botInRow = getMidRow(r - 1, 2 * m + 1)
+        const mid = getMidRow(r, m)
+
+        for (let row = topInRow + 1; row < mid; row++) addSeg(row, jc, '│')
+        addSeg(mid, jc, '├' + '─'.repeat(H_PAD))
+        for (let row = mid + 1; row < botInRow; row++) addSeg(row, jc, '│')
+      }
+    }
+
+    return rowSegs.map(buildRow).join('\n')
+  }
+
   static async formatBracketEmbed(tournamentId: number): Promise<EmbedBuilder> {
     const tournament = await TournamentModel.getById(tournamentId)
     if (!tournament) throw new Error('Tournament not found')
@@ -281,57 +455,13 @@ export class BracketService {
       .setTitle(`🏆 ${tournament.name}`)
       .setTimestamp()
 
-    const roundsMap = new Map<number, MatchWithParticipants[]>()
-    for (const m of matches) {
-      if (!roundsMap.has(m.round)) roundsMap.set(m.round, [])
-      roundsMap.get(m.round)!.push(m)
-    }
-
-    const totalRounds = roundsMap.size > 0 ? Math.max(...roundsMap.keys()) : 0
-
-    for (const [round, roundMatches] of [...roundsMap.entries()].sort((a, b) => a[0] - b[0])) {
-      const roundName =
-        round === totalRounds
-          ? '決勝'
-          : round === totalRounds - 1 && totalRounds > 2
-          ? '準決勝'
-          : `Round ${round}`
-
-      const lines: string[] = []
-      for (const m of roundMatches) {
-        if (m.status === 'bye') continue
-
-        const p1 = m.p1_discord_id
-          ? `<@${m.p1_discord_id}>${m.p1_rank ? `[${m.p1_rank}]` : ''}${m.p1_character ? `(${m.p1_character})` : ''}`
-          : 'TBD'
-        const p2 = m.p2_discord_id
-          ? `<@${m.p2_discord_id}>${m.p2_rank ? `[${m.p2_rank}]` : ''}${m.p2_character ? `(${m.p2_character})` : ''}`
-          : 'TBD'
-
-        let line = `\`#${m.match_code ?? '------'}\`  ${p1} vs ${p2}`
-
-        if (m.status === 'completed' && m.winner_discord_id) {
-          line += `  ✅ <@${m.winner_discord_id}> の勝利`
-        } else if (m.handicap_rounds > 0 && m.handicap_player_name) {
-          line += `  ⚖️ ${m.handicap_rounds}R落とし(${m.handicap_player_name})`
-        }
-
-        if (m.vc_channel_id && m.status !== 'completed') {
-          line += `  🎤 <#${m.vc_channel_id}>`
-        }
-
-        lines.push(line)
-      }
-
-      if (lines.length > 0) {
-        const fieldValue = lines.join('\n')
-        // Discord embed field value limit is 1024 chars
-        embed.addFields({ name: roundName, value: fieldValue.slice(0, 1024) })
-      }
-    }
+    const bracketArt = BracketService.buildBracketArt(matches)
+    const description = '```\n' + bracketArt + '\n```'
 
     const active = matches.filter(m => m.status !== 'bye')
     const completed = active.filter(m => m.status === 'completed')
+
+    embed.setDescription(description.slice(0, 4096))
     embed.setFooter({
       text: `進行状況: ${completed.length}/${active.length} 試合完了 | ${regulation.winsRequired}先 / ${regulation.roundsRequired ?? 2}ラウンド`,
     })
