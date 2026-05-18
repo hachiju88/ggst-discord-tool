@@ -12,10 +12,10 @@ import {
   StringSelectMenuOptionBuilder,
   ChannelSelectMenuBuilder,
   ChannelType,
+  ThreadAutoArchiveDuration,
 } from 'discord.js'
 import type {
   ChatInputCommandInteraction,
-  AutocompleteInteraction,
   ModalSubmitInteraction,
   ButtonInteraction,
   StringSelectMenuInteraction,
@@ -128,16 +128,6 @@ export const data = new SlashCommandBuilder()
     s.setName('team-assign')
       .setDescription('参加者をチームに振り分けます（assign方式のみ）')
   )
-  .addSubcommand(s =>
-    s.setName('join')
-      .setDescription('大会に参加します（コマンド入力でランク・キャラを検索できます）')
-      .addStringOption(o =>
-        o.setName('rank').setDescription('現在のランク').setRequired(true).setAutocomplete(true)
-      )
-      .addStringOption(o =>
-        o.setName('character').setDescription('使用キャラクター').setRequired(true).setAutocomplete(true)
-      )
-  )
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand()
@@ -154,25 +144,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (sub === 'enter') return handleEnter(interaction)
   if (sub === 'team-setup') return handleTeamSetup(interaction)
   if (sub === 'team-assign') return handleTeamAssign(interaction)
-  if (sub === 'join') return handleJoinCmd(interaction)
 }
 
-export async function autocomplete(interaction: AutocompleteInteraction) {
-  const sub = interaction.options.getSubcommand(false)
-  if (sub !== 'join') return
-  const focused = interaction.options.getFocused(true)
-  const value = focused.value.toLowerCase()
-  if (focused.name === 'rank') {
-    const filtered = (RANKS as readonly string[]).filter(r => r.toLowerCase().includes(value))
-    await interaction.respond(filtered.slice(0, 25).map(r => ({ name: r, value: r })))
-  } else if (focused.name === 'character') {
-    const filtered = (CHARACTERS as readonly string[]).filter(c => c.toLowerCase().includes(value))
-    await interaction.respond(filtered.slice(0, 25).map(c => ({ name: c, value: c })))
-  }
-}
 
 export async function handleChannelSelectMenu(interaction: ChannelSelectMenuInteraction): Promise<void> {
-  if (interaction.customId === 'tnm-vc-setup') {
+  if (interaction.customId.startsWith('tnm-vc-setup')) {
     await handleVcSetupSelect(interaction)
   }
 }
@@ -224,19 +200,11 @@ async function handleCreate(interaction: ChatInputCommandInteraction) {
     .setPlaceholder('2')
     .setValue('2')
 
-  const handicapInput = new TextInputBuilder()
-    .setCustomId('handicap_rules')
-    .setLabel('ハンデルール（空白=なし）')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(false)
-    .setPlaceholder('例: 3:1,7:2 （ランク差:ラウンド数、カンマ区切り）')
-
   modal.addComponents(
     new ActionRowBuilder<TextInputBuilder>().addComponents(nameInput),
     new ActionRowBuilder<TextInputBuilder>().addComponents(maxInput),
     new ActionRowBuilder<TextInputBuilder>().addComponents(winsInput),
     new ActionRowBuilder<TextInputBuilder>().addComponents(roundsInput),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(handicapInput),
   )
 
   await interaction.showModal(modal)
@@ -697,7 +665,6 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   const maxRaw = interaction.fields.getTextInputValue('max_participants').trim()
   const winsRaw = interaction.fields.getTextInputValue('wins_required').trim()
   const roundsRaw = interaction.fields.getTextInputValue('rounds_required').trim()
-  const handicapRaw = interaction.fields.getTextInputValue('handicap_rules').trim()
 
   const maxParticipants = maxRaw ? parseInt(maxRaw) : null
   if (maxRaw && (isNaN(maxParticipants!) || maxParticipants! < 2)) {
@@ -726,18 +693,7 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
     return true
   }
 
-  let handicapRules: HandicapRule[] = []
-  if (handicapRaw) {
-    try {
-      handicapRules = parseHandicapRules(handicapRaw)
-    } catch {
-      await interaction.reply({
-        content: '❌ ハンデルールの形式が正しくありません。\n例: `3:1,7:2`（ランク差:ラウンド数）',
-        flags: MessageFlags.Ephemeral,
-      })
-      return true
-    }
-  }
+  const handicapRules: HandicapRule[] = []
 
   const regulation: TournamentRegulation = {
     winsRequired,
