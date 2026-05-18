@@ -2303,7 +2303,7 @@ async function handleAdminFixModal(interaction: ModalSubmitInteraction, tourname
   const winnerInput = interaction.fields.getTextInputValue('winner').trim()
   const winnerDiscordId = parseDiscordId(winnerInput)
   if (!winnerDiscordId) {
-    await interaction.editReply('❌ 正しいDiscordユーザーのメンション（@）またはIDを入力してください。')
+    await interaction.editReply('❌ ユーザーIDを正しく入力してください（17〜20桁の数字）。\n取得方法: 開発者モードをオン → 対象ユーザーを右クリック → 「IDをコピー」')
     return true
   }
 
@@ -2390,7 +2390,7 @@ async function handleAdminEnter(interaction: ButtonInteraction, tournamentId: nu
     .setTitle('代理エントリー')
   modal.addComponents(
     new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId('user').setLabel('ユーザー（@メンション または ID）').setStyle(TextInputStyle.Short).setRequired(true)
+      new TextInputBuilder().setCustomId('user').setLabel('ユーザーID（右クリック→IDをコピー）').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('例: 123456789012345678')
     ),
     new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder().setCustomId('rank').setLabel('ランク（部分入力 / 未指定 / ランダム）').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('例: ダイヤ２、未指定')
@@ -2415,7 +2415,7 @@ async function handleAdminEnterModal(interaction: ModalSubmitInteraction, tourna
   const userInput = interaction.fields.getTextInputValue('user').trim()
   const targetDiscordId = parseDiscordId(userInput)
   if (!targetDiscordId) {
-    await interaction.editReply('❌ 正しいDiscordユーザーのメンション（@）またはIDを入力してください。')
+    await interaction.editReply('❌ ユーザーIDを正しく入力してください（17〜20桁の数字）。\n取得方法: Discord の設定 → 詳細設定 → 開発者モードをオン → 対象ユーザーを右クリック → 「IDをコピー」')
     return true
   }
 
