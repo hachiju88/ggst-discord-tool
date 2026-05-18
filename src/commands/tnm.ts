@@ -10,13 +10,16 @@ import {
   ButtonStyle,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
+  ChannelSelectMenuBuilder,
   ChannelType,
 } from 'discord.js'
 import type {
   ChatInputCommandInteraction,
+  AutocompleteInteraction,
   ModalSubmitInteraction,
   ButtonInteraction,
   StringSelectMenuInteraction,
+  ChannelSelectMenuInteraction,
   GuildMember,
   Guild,
 } from 'discord.js'
@@ -124,6 +127,20 @@ export const data = new SlashCommandBuilder()
     s.setName('team-assign')
       .setDescription('参加者をチームに振り分けます（assign方式のみ）')
   )
+  .addSubcommand(s =>
+    s.setName('join')
+      .setDescription('大会に参加します（コマンド入力でランク・キャラを検索できます）')
+      .addStringOption(o =>
+        o.setName('rank').setDescription('現在のランク').setRequired(true).setAutocomplete(true)
+      )
+      .addStringOption(o =>
+        o.setName('character').setDescription('使用キャラクター').setRequired(true).setAutocomplete(true)
+      )
+  )
+  .addSubcommand(s =>
+    s.setName('vc-setup')
+      .setDescription('大会で使用するVCチャンネルを設定します')
+  )
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand()
@@ -140,6 +157,28 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (sub === 'enter') return handleEnter(interaction)
   if (sub === 'team-setup') return handleTeamSetup(interaction)
   if (sub === 'team-assign') return handleTeamAssign(interaction)
+  if (sub === 'join') return handleJoinCmd(interaction)
+  if (sub === 'vc-setup') return handleVcSetup(interaction)
+}
+
+export async function autocomplete(interaction: AutocompleteInteraction) {
+  const sub = interaction.options.getSubcommand(false)
+  if (sub !== 'join') return
+  const focused = interaction.options.getFocused(true)
+  const value = focused.value.toLowerCase()
+  if (focused.name === 'rank') {
+    const filtered = (RANKS as readonly string[]).filter(r => r.toLowerCase().includes(value))
+    await interaction.respond(filtered.slice(0, 25).map(r => ({ name: r, value: r })))
+  } else if (focused.name === 'character') {
+    const filtered = (CHARACTERS as readonly string[]).filter(c => c.toLowerCase().includes(value))
+    await interaction.respond(filtered.slice(0, 25).map(c => ({ name: c, value: c })))
+  }
+}
+
+export async function handleChannelSelectMenu(interaction: ChannelSelectMenuInteraction): Promise<void> {
+  if (interaction.customId === 'tnm-vc-setup') {
+    await handleVcSetupSelect(interaction)
+  }
 }
 
 // ─── Subcommand handlers ──────────────────────────────────────────────────────
@@ -332,10 +371,13 @@ async function handleStart(interaction: ChatInputCommandInteraction) {
 
   // single_elim
   const guild = interaction.guild!
-  const voiceChannels = guild.channels.cache
-    .filter(c => c.type === ChannelType.GuildVoice)
-    .sort((a, b) => (a.rawPosition ?? 0) - (b.rawPosition ?? 0))
-    .map(c => c.id)
+  let voiceChannels: string[] = regulation.vcChannelIds ?? []
+  if (voiceChannels.length === 0) {
+    const defaultVC = guild.channels.cache.find(
+      c => c.type === ChannelType.GuildVoice && c.name === '🟦 GGST - ラウンジ #1'
+    ) ?? guild.channels.cache.filter(c => c.type === ChannelType.GuildVoice).sort((a, b) => (a.rawPosition ?? 0) - (b.rawPosition ?? 0)).first()
+    if (defaultVC) voiceChannels = [defaultVC.id]
+  }
 
   const playableMatchIds = await BracketService.generateBracket(
     tournament.id,
@@ -626,6 +668,7 @@ async function handleDelete(interaction: ChatInputCommandInteraction) {
 // ─── Modal submit ─────────────────────────────────────────────────────────────
 
 export async function handleModalSubmit(interaction: ModalSubmitInteraction): Promise<boolean> {
+  if (interaction.customId.startsWith('tnm-char-modal:')) return handleCharModal(interaction)
   if (interaction.customId.startsWith('tnm-team-create:modal')) {
     const tournamentId = parseInt(interaction.customId.split(':')[2])
     return handleTeamCreateModal(interaction, tournamentId)
@@ -1321,13 +1364,9 @@ async function handleWinButton(
 export async function handleSelectMenu(interaction: StringSelectMenuInteraction): Promise<boolean> {
   const parts = interaction.customId.split(':')
   if (parts[0] === 'tnm-rank-select')  return handleRankSelectMenu(interaction, parseInt(parts[1]))
-  if (parts[0] === 'tnm-char-select')  return handleCharacterSelectMenu(interaction, parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3]))
   if (parts[0] === 'tnm-edit-rank')    return handleEditRankSelectMenu(interaction, parseInt(parts[1]))
-  if (parts[0] === 'tnm-edit-char')    return handleEditCharSelectMenu(interaction, parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3]))
   if (parts[0] === 'tnm-admin-rank')   return handleAdminRankSelectMenu(interaction, parseInt(parts[1]), parts[2])
-  if (parts[0] === 'tnm-admin-char')   return handleAdminCharSelectMenu(interaction, parseInt(parts[1]), parts[2], parseInt(parts[3]), parseInt(parts[4]))
   if (parts[0] === 'tnm-team-rank')    return handleTeamMemberRankSelect(interaction, parseInt(parts[1]), parseInt(parts[2]))
-  if (parts[0] === 'tnm-team-char')    return handleTeamMemberCharSelect(interaction, parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3]))
   if (parts[0] === 'tnm-team-select')  return handleTeamSelectMenu(interaction, parseInt(parts[1]))
   if (parts[0] === 'tnm-assign-slot')  return handleAssignSlotSelect(interaction, parseInt(parts[1]), parts[2], parts[3])
   return false
@@ -1340,49 +1379,7 @@ async function handleEditRankSelectMenu(interaction: StringSelectMenuInteraction
     return true
   }
   const rankIndex = RANKS.indexOf(rank as typeof RANKS[number])
-  const row = buildCharacterSelectRow(`tnm-edit-char:${tournamentId}:${rankIndex}`, 0)
-  await interaction.update({
-    content: `ランク **${rank}** を選択しました。\nキャラクターを選択してください。`,
-    components: [row],
-  })
-  return true
-}
-
-async function handleEditCharSelectMenu(
-  interaction: StringSelectMenuInteraction,
-  tournamentId: number,
-  rankIndex: number,
-  page: number
-): Promise<boolean> {
-  const value = interaction.values[0]
-  if (value === '__next__') {
-    await interaction.update({ components: [buildCharacterSelectRow(`tnm-edit-char:${tournamentId}:${rankIndex}`, page + 1)] })
-    return true
-  }
-  if (value === '__prev__') {
-    await interaction.update({ components: [buildCharacterSelectRow(`tnm-edit-char:${tournamentId}:${rankIndex}`, page - 1)] })
-    return true
-  }
-  const character = value
-  if (!CHARACTERS.includes(character as typeof CHARACTERS[number])) {
-    await interaction.update({ content: '❌ 無効なキャラクターです。', components: [] })
-    return true
-  }
-  const rank = RANKS[rankIndex]
-  if (!rank) {
-    await interaction.update({ content: '❌ ランク情報が不正です。最初からやり直してください。', components: [] })
-    return true
-  }
-  const participant = await TournamentParticipantModel.getByDiscordId(tournamentId, interaction.user.id)
-  if (!participant) {
-    await interaction.update({ content: '参加登録が見つかりません。', components: [] })
-    return true
-  }
-  await TournamentParticipantModel.setRankAndCharacter(participant.id, rank, character)
-  await interaction.update({
-    content: `✅ エントリーを更新しました！\nランク: **${rank}** / キャラ: **${character}**`,
-    components: [],
-  })
+  await showCharacterModal(interaction, `edit:${tournamentId}:${rankIndex}`, rank)
   return true
 }
 
@@ -1397,110 +1394,28 @@ async function handleAdminRankSelectMenu(
     return true
   }
   const rankIndex = RANKS.indexOf(rank as typeof RANKS[number])
-  const row = buildCharacterSelectRow(`tnm-admin-char:${tournamentId}:${targetDiscordId}:${rankIndex}`, 0)
-  await interaction.update({
-    content: `ランク **${rank}** を選択しました。\nキャラクターを選択してください。`,
-    components: [row],
-  })
+  await showCharacterModal(interaction, `admin:${tournamentId}:${targetDiscordId}:${rankIndex}`, rank)
   return true
 }
 
-async function handleAdminCharSelectMenu(
+// キャラクター入力モーダルを表示するヘルパー
+async function showCharacterModal(
   interaction: StringSelectMenuInteraction,
-  tournamentId: number,
-  targetDiscordId: string,
-  rankIndex: number,
-  page: number
-): Promise<boolean> {
-  const value = interaction.values[0]
-  if (value === '__next__') {
-    await interaction.update({ components: [buildCharacterSelectRow(`tnm-admin-char:${tournamentId}:${targetDiscordId}:${rankIndex}`, page + 1)] })
-    return true
-  }
-  if (value === '__prev__') {
-    await interaction.update({ components: [buildCharacterSelectRow(`tnm-admin-char:${tournamentId}:${targetDiscordId}:${rankIndex}`, page - 1)] })
-    return true
-  }
-  const character = value
-  if (!CHARACTERS.includes(character as typeof CHARACTERS[number])) {
-    await interaction.update({ content: '❌ 無効なキャラクターです。', components: [] })
-    return true
-  }
-  const rank = RANKS[rankIndex]
-  if (!rank) {
-    await interaction.update({ content: '❌ ランク情報が不正です。最初からやり直してください。', components: [] })
-    return true
-  }
-  const tournament = await TournamentModel.getById(tournamentId)
-  if (!tournament || tournament.status !== 'registration') {
-    await interaction.update({ content: '参加受付は終了しています。', components: [] })
-    return true
-  }
-
-  // Fetch target member for display name
-  let targetName = targetDiscordId
-  try {
-    const member = await interaction.guild?.members.fetch(targetDiscordId)
-    targetName = member?.displayName ?? member?.user.username ?? targetDiscordId
-  } catch { /* fallback to id */ }
-
-  const existing = await TournamentParticipantModel.getByDiscordId(tournamentId, targetDiscordId)
-  if (existing) {
-    await TournamentParticipantModel.setRankAndCharacter(existing.id, rank, character)
-    await interaction.update({
-      content: `✅ **${targetName}** のエントリーを更新しました。\nランク: **${rank}** / キャラ: **${character}**`,
-      components: [],
-    })
-  } else {
-    if (tournament.max_participants) {
-      const count = await TournamentParticipantModel.count(tournamentId)
-      if (count >= tournament.max_participants) {
-        await interaction.update({ content: `❌ 定員（${tournament.max_participants}名）に達しています。`, components: [] })
-        return true
-      }
-    }
-    await TournamentParticipantModel.create({
-      tournament_id: tournamentId,
-      discord_id: targetDiscordId,
-      discord_name: targetName,
-      rank,
-      character,
-    })
-    const count = await TournamentParticipantModel.count(tournamentId)
-    if (interaction.guild) {
-      await updateAnnouncementEmbed(interaction.guild, tournament, count)
-    }
-    await interaction.update({
-      content: `✅ **${targetName}** をエントリーしました。\nランク: **${rank}** / キャラ: **${character}**`,
-      components: [],
-    })
-  }
-  return true
-}
-
-// idPrefix: everything before ":page" in the customId (e.g. "tnm-char-select:1:5")
-function buildCharacterSelectRow(idPrefix: string, page: number): ActionRowBuilder<StringSelectMenuBuilder> {
-  const PAGE_SIZE = 24
-  const start = page * PAGE_SIZE
-  const end = Math.min(start + PAGE_SIZE, CHARACTERS.length)
-  const hasNext = end < CHARACTERS.length
-  const hasPrev = page > 0
-
-  const menu = new StringSelectMenuBuilder()
-    .setCustomId(`${idPrefix}:${page}`)
-    .setPlaceholder('キャラクターを選択してください')
-
-  if (hasPrev) {
-    menu.addOptions(new StringSelectMenuOptionBuilder().setLabel('← 前のページ').setValue('__prev__'))
-  }
-  for (let i = start; i < end; i++) {
-    menu.addOptions(new StringSelectMenuOptionBuilder().setLabel(CHARACTERS[i]).setValue(CHARACTERS[i]))
-  }
-  if (hasNext) {
-    menu.addOptions(new StringSelectMenuOptionBuilder().setLabel('次のページ →').setValue('__next__'))
-  }
-
-  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)
+  suffixId: string,
+  rank: string
+): Promise<void> {
+  const modal = new ModalBuilder()
+    .setCustomId(`tnm-char-modal:${suffixId}`)
+    .setTitle(`キャラクター選択（ランク: ${rank}）`)
+  const charInput = new TextInputBuilder()
+    .setCustomId('character')
+    .setLabel('使用キャラクター（一部入力でも可）')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setPlaceholder('例: ソル・バッドガイ')
+    .setMaxLength(30)
+  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(charInput))
+  await interaction.showModal(modal)
 }
 
 async function handleRankSelectMenu(interaction: StringSelectMenuInteraction, tournamentId: number): Promise<boolean> {
@@ -1535,87 +1450,7 @@ async function handleRankSelectMenu(interaction: StringSelectMenuInteraction, to
   }
 
   const rankIndex = RANKS.indexOf(rank as typeof RANKS[number])
-  const row = buildCharacterSelectRow(`tnm-char-select:${tournamentId}:${rankIndex}`, 0)
-
-  await interaction.update({
-    content: `ランク **${rank}** を選択しました。\n次に使用キャラクターを選択してください。`,
-    components: [row],
-  })
-
-  return true
-}
-
-async function handleCharacterSelectMenu(
-  interaction: StringSelectMenuInteraction,
-  tournamentId: number,
-  rankIndex: number,
-  page: number
-): Promise<boolean> {
-  const value = interaction.values[0]
-
-  if (value === '__next__') {
-    await interaction.update({ components: [buildCharacterSelectRow(`tnm-char-select:${tournamentId}:${rankIndex}`, page + 1)] })
-    return true
-  }
-  if (value === '__prev__') {
-    await interaction.update({ components: [buildCharacterSelectRow(`tnm-char-select:${tournamentId}:${rankIndex}`, page - 1)] })
-    return true
-  }
-
-  const character = value
-  if (!CHARACTERS.includes(character as typeof CHARACTERS[number])) {
-    await interaction.update({ content: '❌ 無効なキャラクターです。', components: [] })
-    return true
-  }
-
-  const rank = RANKS[rankIndex]
-  if (!rank) {
-    await interaction.update({ content: '❌ ランク情報が不正です。最初からやり直してください。', components: [] })
-    return true
-  }
-
-  const tournament = await TournamentModel.getById(tournamentId)
-  if (!tournament || tournament.status !== 'registration') {
-    await interaction.update({ content: '参加受付は終了しています。', components: [] })
-    return true
-  }
-
-  const member = interaction.member as GuildMember | null
-  const displayName = member?.displayName ?? interaction.user.displayName ?? interaction.user.username
-
-  const result = await TournamentParticipantModel.createIfUnderCap({
-    tournament_id: tournamentId,
-    discord_id: interaction.user.id,
-    discord_name: displayName,
-    rank,
-    character,
-    maxParticipants: tournament.max_participants,
-  })
-
-  if (result === 'duplicate') {
-    await interaction.update({
-      content: 'すでに参加登録済みです。',
-      components: [],
-    })
-    return true
-  }
-
-  if (result === 'over_cap') {
-    await interaction.update({ content: `❌ 定員（${tournament.max_participants}名）に達しています。`, components: [] })
-    return true
-  }
-
-  const count = await TournamentParticipantModel.count(tournamentId)
-
-  if (interaction.guild) {
-    await updateAnnouncementEmbed(interaction.guild, tournament, count)
-  }
-
-  await interaction.update({
-    content: `✅ **${tournament.name}** に参加登録しました！\nランク: **${rank}** / キャラ: **${character}**\n現在の参加者: ${count} 名`,
-    components: [],
-  })
-
+  await showCharacterModal(interaction, `join:${tournamentId}:${rankIndex}`, rank)
   return true
 }
 
@@ -1905,33 +1740,7 @@ async function handleTeamMemberRankSelect(interaction: StringSelectMenuInteracti
   if (!member) { await interaction.update({ content: '❌ チームメンバーが見つかりません。', components: [] }); return true }
   await TournamentTeamMemberModel.setRank(member.id, rank)
   const rankIndex = RANKS.indexOf(rank as any)
-  const charRow = buildCharacterSelectRow(`tnm-team-char:${tournamentId}:${teamId}:${rankIndex}`, 0)
-  await interaction.update({ content: `ランク **${rank}** を設定しました。キャラクターを選択してください。`, components: [charRow] })
-  return true
-}
-
-async function handleTeamMemberCharSelect(interaction: StringSelectMenuInteraction, tournamentId: number, teamId: number, rankIndex: number): Promise<boolean> {
-  const value = interaction.values[0]
-  const parts = interaction.customId.split(':')
-  // customId format: tnm-team-char:tournamentId:teamId:rankIndex:page
-  const page = parseInt(parts[4] ?? '0')
-
-  if (value === '__next__') {
-    const row = buildCharacterSelectRow(`tnm-team-char:${tournamentId}:${teamId}:${rankIndex}`, page + 1)
-    await interaction.update({ components: [row] })
-    return true
-  }
-  if (value === '__prev__') {
-    const row = buildCharacterSelectRow(`tnm-team-char:${tournamentId}:${teamId}:${rankIndex}`, page - 1)
-    await interaction.update({ components: [row] })
-    return true
-  }
-  const character = value
-  const member = await TournamentTeamMemberModel.getByDiscordId(teamId, interaction.user.id)
-  if (!member) { await interaction.update({ content: '❌ メンバーが見つかりません。', components: [] }); return true }
-  await TournamentTeamMemberModel.setCharacter(member.id, character)
-  const team = await TournamentTeamModel.getById(teamId)
-  await interaction.update({ content: `✅ キャラクター **${character}** を設定しました。登録完了！（チーム: **${team?.name}**）`, components: [] })
+  await showCharacterModal(interaction, `team:${tournamentId}:${teamId}:${rankIndex}`, rank)
   return true
 }
 
@@ -2548,4 +2357,199 @@ async function handleAutoAssign(
   })
 
   return true
+}
+
+// ─── キャラクターモーダル処理 ─────────────────────────────────────────────────
+
+async function handleCharModal(interaction: ModalSubmitInteraction): Promise<boolean> {
+  const parts = interaction.customId.split(':')
+  // parts[0] = 'tnm-char-modal', parts[1] = type ('join'|'edit'|'admin'|'team')
+  const type = parts[1]
+  const rawChar = interaction.fields.getTextInputValue('character').trim()
+
+  // 部分一致で正規化（例: "ソル" → "ソル・バッドガイ"）
+  const character = (CHARACTERS as readonly string[]).find(c => c === rawChar)
+    ?? (CHARACTERS as readonly string[]).find(c => c.toLowerCase().includes(rawChar.toLowerCase()))
+
+  if (!character) {
+    const suggestions = (CHARACTERS as readonly string[])
+      .filter(c => c.toLowerCase().includes(rawChar.toLowerCase()))
+      .slice(0, 5)
+    const hint = suggestions.length > 0
+      ? `\n候補: ${suggestions.join('、')}`
+      : `\n全キャラ一覧: ${(CHARACTERS as readonly string[]).join('、')}`
+    await interaction.reply({
+      content: `❌ 「${rawChar}」は見つかりませんでした。${hint}`,
+      flags: MessageFlags.Ephemeral,
+    })
+    return true
+  }
+
+  if (type === 'join') {
+    const tournamentId = parseInt(parts[2])
+    const rankIndex = parseInt(parts[3])
+    const rank = RANKS[rankIndex]
+    if (!rank) { await interaction.reply({ content: '❌ ランク情報が不正です。', flags: MessageFlags.Ephemeral }); return true }
+
+    const tournament = await TournamentModel.getById(tournamentId)
+    if (!tournament || tournament.status !== 'registration') {
+      await interaction.reply({ content: '参加受付は終了しています。', flags: MessageFlags.Ephemeral }); return true
+    }
+    const member = interaction.member as GuildMember | null
+    const displayName = member?.displayName ?? interaction.user.displayName ?? interaction.user.username
+
+    const result = await TournamentParticipantModel.createIfUnderCap({
+      tournament_id: tournamentId, discord_id: interaction.user.id, discord_name: displayName,
+      rank, character, maxParticipants: tournament.max_participants,
+    })
+    if (result === 'duplicate') { await interaction.reply({ content: 'すでに参加登録済みです。', flags: MessageFlags.Ephemeral }); return true }
+    if (result === 'over_cap') { await interaction.reply({ content: `❌ 定員（${tournament.max_participants}名）に達しています。`, flags: MessageFlags.Ephemeral }); return true }
+    const count = await TournamentParticipantModel.count(tournamentId)
+    if (interaction.guild) await updateAnnouncementEmbed(interaction.guild, tournament, count)
+    await interaction.reply({ content: `✅ **${tournament.name}** に参加登録しました！\nランク: **${rank}** / キャラ: **${character}**\n現在の参加者: ${count} 名`, flags: MessageFlags.Ephemeral })
+
+  } else if (type === 'edit') {
+    const tournamentId = parseInt(parts[2])
+    const rankIndex = parseInt(parts[3])
+    const rank = RANKS[rankIndex]
+    if (!rank) { await interaction.reply({ content: '❌ ランク情報が不正です。', flags: MessageFlags.Ephemeral }); return true }
+    const participant = await TournamentParticipantModel.getByDiscordId(tournamentId, interaction.user.id)
+    if (!participant) { await interaction.reply({ content: '参加登録が見つかりません。', flags: MessageFlags.Ephemeral }); return true }
+    await TournamentParticipantModel.setRankAndCharacter(participant.id, rank, character)
+    await interaction.reply({ content: `✅ エントリーを更新しました！\nランク: **${rank}** / キャラ: **${character}**`, flags: MessageFlags.Ephemeral })
+
+  } else if (type === 'admin') {
+    const tournamentId = parseInt(parts[2])
+    const targetDiscordId = parts[3]
+    const rankIndex = parseInt(parts[4])
+    const rank = RANKS[rankIndex]
+    if (!rank) { await interaction.reply({ content: '❌ ランク情報が不正です。', flags: MessageFlags.Ephemeral }); return true }
+    const tournament = await TournamentModel.getById(tournamentId)
+    if (!tournament || tournament.status !== 'registration') { await interaction.reply({ content: '参加受付は終了しています。', flags: MessageFlags.Ephemeral }); return true }
+    let targetName = targetDiscordId
+    try {
+      const gm = await interaction.guild?.members.fetch(targetDiscordId)
+      targetName = gm?.displayName ?? gm?.user.username ?? targetDiscordId
+    } catch { /* fallback */ }
+    const existing = await TournamentParticipantModel.getByDiscordId(tournamentId, targetDiscordId)
+    if (existing) {
+      await TournamentParticipantModel.setRankAndCharacter(existing.id, rank, character)
+      await interaction.reply({ content: `✅ **${targetName}** のエントリーを更新しました。\nランク: **${rank}** / キャラ: **${character}**`, flags: MessageFlags.Ephemeral })
+    } else {
+      if (tournament.max_participants) {
+        const count = await TournamentParticipantModel.count(tournamentId)
+        if (count >= tournament.max_participants) { await interaction.reply({ content: `❌ 定員（${tournament.max_participants}名）に達しています。`, flags: MessageFlags.Ephemeral }); return true }
+      }
+      await TournamentParticipantModel.create({ tournament_id: tournamentId, discord_id: targetDiscordId, discord_name: targetName, rank, character })
+      const count = await TournamentParticipantModel.count(tournamentId)
+      if (interaction.guild) await updateAnnouncementEmbed(interaction.guild, tournament, count)
+      await interaction.reply({ content: `✅ **${targetName}** をエントリーしました。\nランク: **${rank}** / キャラ: **${character}**`, flags: MessageFlags.Ephemeral })
+    }
+
+  } else if (type === 'team') {
+    const tournamentId = parseInt(parts[2])
+    const teamId = parseInt(parts[3])
+    const member = await TournamentTeamMemberModel.getByDiscordId(teamId, interaction.user.id)
+    if (!member) { await interaction.reply({ content: '❌ メンバーが見つかりません。', flags: MessageFlags.Ephemeral }); return true }
+    await TournamentTeamMemberModel.setCharacter(member.id, character)
+    const team = await TournamentTeamModel.getById(teamId)
+    await interaction.reply({ content: `✅ キャラクター **${character}** を設定しました。登録完了！（チーム: **${team?.name}**）`, flags: MessageFlags.Ephemeral })
+  }
+
+  return true
+}
+
+// ─── /tnm join コマンド（autocomplete）─────────────────────────────────────
+
+async function handleJoinCmd(interaction: ChatInputCommandInteraction) {
+  const rankStr = interaction.options.getString('rank', true)
+  const charStr = interaction.options.getString('character', true)
+
+  if (!RANKS.includes(rankStr as typeof RANKS[number])) {
+    await interaction.reply({ content: `❌ 無効なランク「${rankStr}」です。`, flags: MessageFlags.Ephemeral })
+    return
+  }
+  const character = (CHARACTERS as readonly string[]).find(c => c === charStr)
+    ?? (CHARACTERS as readonly string[]).find(c => c.toLowerCase().includes(charStr.toLowerCase()))
+  if (!character) {
+    const suggestions = (CHARACTERS as readonly string[]).filter(c => c.toLowerCase().includes(charStr.toLowerCase())).slice(0, 5)
+    await interaction.reply({
+      content: `❌ キャラクター「${charStr}」が見つかりません。${suggestions.length > 0 ? `\n候補: ${suggestions.join('、')}` : ''}`,
+      flags: MessageFlags.Ephemeral,
+    })
+    return
+  }
+
+  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
+  if (!tournament || tournament.status !== 'registration') {
+    await interaction.reply({ content: 'アクティブな大会の参加受付がありません。', flags: MessageFlags.Ephemeral })
+    return
+  }
+
+  const guildMember = interaction.member as GuildMember | null
+  const displayName = guildMember?.displayName ?? interaction.user.displayName ?? interaction.user.username
+
+  const result = await TournamentParticipantModel.createIfUnderCap({
+    tournament_id: tournament.id, discord_id: interaction.user.id, discord_name: displayName,
+    rank: rankStr, character, maxParticipants: tournament.max_participants,
+  })
+  if (result === 'duplicate') { await interaction.reply({ content: 'すでに参加登録済みです。', flags: MessageFlags.Ephemeral }); return }
+  if (result === 'over_cap') { await interaction.reply({ content: `❌ 定員（${tournament.max_participants}名）に達しています。`, flags: MessageFlags.Ephemeral }); return }
+
+  const count = await TournamentParticipantModel.count(tournament.id)
+  if (interaction.guild) await updateAnnouncementEmbed(interaction.guild, tournament, count)
+  await interaction.reply({
+    content: `✅ **${tournament.name}** に参加登録しました！\nランク: **${rankStr}** / キャラ: **${character}**\n現在の参加者: ${count} 名`,
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+// ─── /tnm vc-setup ─────────────────────────────────────────────────────────
+
+async function handleVcSetup(interaction: ChatInputCommandInteraction) {
+  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
+  if (!tournament) {
+    await interaction.reply({ content: '❌ アクティブな大会が見つかりません。', flags: MessageFlags.Ephemeral })
+    return
+  }
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+  const currentIds = regulation.vcChannelIds ?? []
+
+  const vcSelect = new ChannelSelectMenuBuilder()
+    .setCustomId('tnm-vc-setup')
+    .setPlaceholder('使用するVCチャンネルを選択（複数可）')
+    .addChannelTypes(ChannelType.GuildVoice)
+    .setMinValues(0)
+    .setMaxValues(10)
+
+  const row = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(vcSelect)
+
+  const currentLabel = currentIds.length > 0
+    ? `現在の設定: ${currentIds.map(id => `<#${id}>`).join(', ')}`
+    : '現在の設定: なし（デフォルト: 🟦 GGST - ラウンジ #1）'
+
+  await interaction.reply({
+    content: `**VC設定 — ${tournament.name}**\n${currentLabel}\n\n使用するVCチャンネルを選択してください。未選択で送信すると「🟦 GGST - ラウンジ #1」がデフォルトとして使われます。`,
+    components: [row as any],
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+async function handleVcSetupSelect(interaction: ChannelSelectMenuInteraction): Promise<void> {
+  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
+  if (!tournament) { await interaction.reply({ content: '❌ 大会が見つかりません。', flags: MessageFlags.Ephemeral }); return }
+
+  const selectedIds = interaction.values
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+  regulation.vcChannelIds = selectedIds
+  await TournamentModel.setRegulation(tournament.id, regulation)
+
+  const label = selectedIds.length > 0
+    ? selectedIds.map(id => `<#${id}>`).join(', ')
+    : '未設定（デフォルト: 🟦 GGST - ラウンジ #1）'
+
+  await interaction.update({
+    content: `✅ VC設定を保存しました。\n使用VC: ${label}`,
+    components: [],
+  })
 }

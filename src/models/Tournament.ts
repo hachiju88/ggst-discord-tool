@@ -12,6 +12,7 @@ export interface TournamentRegulation {
   teamMode?: boolean
   teamBattleFormat?: 'sequential' | 'survival'
   teamEntryMode?: 'create' | 'join' | 'assign'
+  vcChannelIds?: string[]
   handicapRules: HandicapRule[]
 }
 
@@ -99,6 +100,14 @@ export class TournamentModel {
     await db.execute({
       sql: `UPDATE tournaments SET channel_id = ?, announcement_message_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       args: [channelId, messageId, id],
+    })
+  }
+
+  static async setRegulation(id: number, regulation: TournamentRegulation): Promise<void> {
+    const db = getDatabase()
+    await db.execute({
+      sql: `UPDATE tournaments SET regulation = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      args: [JSON.stringify(regulation), id],
     })
   }
 
