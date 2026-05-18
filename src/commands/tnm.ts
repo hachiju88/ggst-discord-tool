@@ -287,7 +287,7 @@ async function handleList(interaction: ChatInputCommandInteraction) {
 
 const HELP_PAGES: { title: string; description: string; color: number }[] = [
   {
-    title: '🏆 大会管理ボット — 使い方ガイド (1/4)',
+    title: '🏆 大会管理ボット — 使い方ガイド',
     description: [
       '**━━ 主催者の流れ ━━**',
       '`/tnm create`',
@@ -311,12 +311,13 @@ const HELP_PAGES: { title: string; description: string; color: number }[] = [
     color: 0xf5a623,
   },
   {
-    title: '👑 主催者ガイド (2/4)',
+    title: '👑 主催者ガイド',
     description: [
       '**コマンド一覧**',
       '`/tnm create` — 大会を作成（形式・団体戦を選択可）',
       '`/tnm view` — 大会状況 + 管理パネルを表示',
       '`/tnm list` — このサーバーの大会一覧',
+      '`/tnm help` — この使い方ガイドを表示',
       '',
       '**管理パネル（`/tnm view` 後に表示）**',
       '▶ **大会スタート** — ブラケット生成・試合開始',
@@ -331,14 +332,18 @@ const HELP_PAGES: { title: string; description: string; color: number }[] = [
     color: 0x5865f2,
   },
   {
-    title: '🎮 参加者ガイド (3/4)',
+    title: '🎮 参加者ガイド',
     description: [
-      '**参加登録の流れ**',
+      '**参加登録の流れ（個人戦）**',
       '1️⃣ 告知メッセージの「参加する 🎮」ボタンを押す',
       '2️⃣ ランクをドロップダウンから選択する',
       '　　（未指定・ランダムも選べます）',
       '3️⃣ 使用キャラ名を入力して送信',
       '✅ 登録完了！「参加者一覧 📋」ボタンで確認できます',
+      '',
+      '**参加登録の流れ（団体戦）**',
+      '• チーム作成制: 「チームを作る ➕」または「チームに参加 📋」',
+      '• 振り分け制: 「参加登録 🎮」→ 主催者がチームに割り当て',
       '',
       '**試合の流れ**',
       '• 試合メッセージに対戦相手・ハンデ・VCが表示される',
@@ -348,13 +353,13 @@ const HELP_PAGES: { title: string; description: string; color: number }[] = [
       '',
       '**告知メッセージ上の操作**',
       '✏️ **エントリー編集** — ランク・キャラを変更する',
-      '❌ **参加取り消し** — 大会開始前に参加をキャンセルする',
+      '🚪 **参加取り消し** — 大会開始前に参加をキャンセルする',
       '📋 **参加者一覧** — 現在の参加者を確認する',
     ].join('\n'),
     color: 0x57f287,
   },
   {
-    title: '📋 大会形式ガイド (4/4)',
+    title: '📋 大会形式ガイド',
     description: [
       '**🗡 シングルエリミネーション（デフォルト）**',
       '負けたら脱落。勝ち続けた1名が優勝。',
@@ -382,7 +387,11 @@ const HELP_PAGES: { title: string; description: string; color: number }[] = [
 
 function buildHelpEmbed(page: number): EmbedBuilder {
   const p = HELP_PAGES[page]
-  return new EmbedBuilder().setTitle(p.title).setDescription(p.description).setColor(p.color)
+  return new EmbedBuilder()
+    .setTitle(p.title)
+    .setDescription(p.description)
+    .setColor(p.color)
+    .setFooter({ text: `${page + 1} / ${HELP_PAGES.length}` })
 }
 
 function buildHelpNavRow(page: number): ActionRowBuilder<ButtonBuilder> {
@@ -410,7 +419,7 @@ async function handleHelp(interaction: ChatInputCommandInteraction): Promise<voi
 }
 
 async function handleHelpPage(interaction: ButtonInteraction, page: number): Promise<boolean> {
-  if (page < 0 || page >= HELP_PAGES.length) return true
+  if (!Number.isInteger(page) || page < 0 || page >= HELP_PAGES.length) return true
   await interaction.update({
     embeds: [buildHelpEmbed(page)],
     components: [buildHelpNavRow(page)],
