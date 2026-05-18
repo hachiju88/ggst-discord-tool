@@ -86,64 +86,15 @@ export const data = new SlashCommandBuilder()
           )
       )
   )
-  .addSubcommand(s => s.setName('start').setDescription('参加受付を終了してブラケットを生成します'))
-  .addSubcommand(s => s.setName('bracket').setDescription('現在のブラケットを表示します'))
-  .addSubcommand(s => s.setName('status').setDescription('参加者一覧と進行状況を表示します'))
+  .addSubcommand(s => s.setName('view').setDescription('現在の大会状況を表示します（主催者には管理パネルも表示）'))
   .addSubcommand(s => s.setName('list').setDescription('このサーバーの大会一覧を表示します'))
-  .addSubcommand(s => s.setName('close').setDescription('参加受付を終了します（ブラケット生成はしない）'))
-  .addSubcommand(s => s.setName('delete').setDescription('大会を削除します'))
-  .addSubcommand(s =>
-    s.setName('leave').setDescription('参加を取り消します（受付中のみ）')
-  )
-  .addSubcommand(s =>
-    s.setName('fix')
-      .setDescription('誤った試合結果を修正します')
-      .addStringOption(o =>
-        o.setName('match_code').setDescription('修正するマッチコード（6桁）').setRequired(true)
-      )
-      .addUserOption(o =>
-        o.setName('winner').setDescription('正しい勝者').setRequired(true)
-      )
-  )
-  .addSubcommand(s =>
-    s.setName('enter')
-      .setDescription('指定ユーザーを代理でエントリーします（管理者用）')
-      .addUserOption(o =>
-        o.setName('user').setDescription('エントリーさせるユーザー').setRequired(true)
-      )
-  )
-  .addSubcommand(s =>
-    s.setName('team-setup')
-      .setDescription('団体戦のチームを作成します（joinまたはassign方式）')
-      .addStringOption(o => o.setName('team1').setDescription('チーム1名').setRequired(true))
-      .addStringOption(o => o.setName('team2').setDescription('チーム2名').setRequired(true))
-      .addStringOption(o => o.setName('team3').setDescription('チーム3名').setRequired(false))
-      .addStringOption(o => o.setName('team4').setDescription('チーム4名').setRequired(false))
-      .addStringOption(o => o.setName('team5').setDescription('チーム5名').setRequired(false))
-      .addStringOption(o => o.setName('team6').setDescription('チーム6名').setRequired(false))
-      .addStringOption(o => o.setName('team7').setDescription('チーム7名').setRequired(false))
-      .addStringOption(o => o.setName('team8').setDescription('チーム8名').setRequired(false))
-  )
-  .addSubcommand(s =>
-    s.setName('team-assign')
-      .setDescription('参加者をチームに振り分けます（assign方式のみ）')
-  )
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand()
 
   if (sub === 'create') return handleCreate(interaction)
-  if (sub === 'start') return handleStart(interaction)
-  if (sub === 'bracket') return handleBracket(interaction)
-  if (sub === 'status') return handleStatus(interaction)
+  if (sub === 'view') return handleView(interaction)
   if (sub === 'list') return handleList(interaction)
-  if (sub === 'close') return handleClose(interaction)
-  if (sub === 'delete') return handleDelete(interaction)
-  if (sub === 'leave') return handleLeave(interaction)
-  if (sub === 'fix') return handleFix(interaction)
-  if (sub === 'enter') return handleEnter(interaction)
-  if (sub === 'team-setup') return handleTeamSetup(interaction)
-  if (sub === 'team-assign') return handleTeamAssign(interaction)
 }
 
 
@@ -210,248 +161,93 @@ async function handleCreate(interaction: ChatInputCommandInteraction) {
   await interaction.showModal(modal)
 }
 
-async function handleStart(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply()
+// (handleStart moved to handleAdminStart — triggered via admin panel button)
+
+async function handleView(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
 
   const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
   if (!tournament) {
-    await interaction.editReply('アクティブな大会が見つかりません。`/tnm create` で作成してください。')
-    return
-  }
-  if (tournament.status !== 'registration' && tournament.status !== 'closed') {
-    await interaction.editReply(`大会 **${tournament.name}** はすでに開始済みです。`)
-    return
-  }
-
-  const participants = await TournamentParticipantModel.getByTournament(tournament.id)
-  if (participants.length < 2) {
-    await interaction.editReply('参加者が2人以上いないと大会を開始できません。')
+    await interaction.editReply({ content: 'アクティブな大会が見つかりません。`/tnm create` で作成してください。' })
     return
   }
 
   const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
-  const channel = interaction.channel
-  if (!channel || !channel.isTextBased() || channel.isDMBased()) return
 
-  // ─── 団体戦モード ───────────────────────────────────────────────────────────
-  if (regulation.teamMode) {
-    const teams = await TournamentTeamModel.getByTournament(tournament.id)
-    if (teams.length < 2) {
-      await interaction.editReply('❌ チームが2つ以上必要です。エントリーを受け付けてください。')
-      return
-    }
-
-    // チームごとにプロキシ参加者を作成（まだなければ）
-    const proxyParticipants: TournamentParticipant[] = []
-    for (const team of teams) {
-      const did = proxyDiscordId(team.id)
-      let proxy = await TournamentParticipantModel.getByDiscordId(tournament.id, did)
-      if (!proxy) {
-        proxy = await TournamentParticipantModel.create({
-          tournament_id: tournament.id,
-          discord_id: did,
-          discord_name: team.name,
-          rank: null,
-          character: null,
-        })
-      }
-      proxyParticipants.push(proxy)
-    }
-
-    let matchIds: number[] = []
-    if (tournament.format === 'swiss') {
-      const totalRounds = regulation.totalRounds
-      if (!totalRounds) { await interaction.editReply('❌ スイスドローの総ラウンド数が設定されていません。'); return }
-      matchIds = await SwissService.generateRound(tournament.id, 1, proxyParticipants, regulation, [])
-    } else if (tournament.format === 'league') {
-      matchIds = await LeagueService.generateLeague(tournament.id, proxyParticipants, regulation)
-    } else {
-      matchIds = await BracketService.generateBracket(tournament.id, proxyParticipants, regulation, [])
-    }
-    await TournamentModel.setStatus(tournament.id, 'in_progress')
-
-    let teamMatchTarget: any = channel
-    try {
-      const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
-      teamMatchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
-    } catch { /* fallback to channel */ }
-
-    for (const matchId of matchIds) {
+  if (tournament.status === 'in_progress') {
+    if (tournament.format === 'single_elim' && !regulation.teamMode) {
       try {
-        const { content, components } = await TeamBattleService.formatTeamMatchContent(matchId, regulation)
-        const msg = await teamMatchTarget.send({ content, components })
-        await TournamentMatchModel.setMessageId(matchId, msg.id)
-      } catch (err) {
-        console.error(`[tnm] Failed to post team match ${matchId}:`, err)
+        const { attachment, embed } = await BracketImageService.formatBracketAsAttachment(tournament.id)
+        await interaction.editReply({ embeds: [embed], files: [attachment] })
+      } catch {
+        await interaction.editReply({ embeds: [await BracketService.formatBracketEmbed(tournament.id)] })
       }
-    }
-
-    if (tournament.format === 'swiss') {
-      await interaction.editReply({ embeds: [await SwissService.formatSwissEmbed(tournament.id)] })
     } else if (tournament.format === 'league') {
       await interaction.editReply({ embeds: [await LeagueService.formatLeagueEmbed(tournament.id)] })
+    } else if (tournament.format === 'swiss') {
+      await interaction.editReply({ embeds: [await SwissService.formatSwissEmbed(tournament.id)] })
     } else {
       await interaction.editReply({ embeds: [await BracketService.formatBracketEmbed(tournament.id)] })
     }
-    return
-  }
-
-  if (tournament.format === 'swiss') {
-    const totalRounds = regulation.totalRounds
-    if (!totalRounds) {
-      await interaction.editReply('❌ スイスドローの総ラウンド数が設定されていません。大会を作り直してください。')
-      return
-    }
-    const matchIds = await SwissService.generateRound(tournament.id, 1, participants, regulation, [])
-    await TournamentModel.setStatus(tournament.id, 'in_progress')
-
-    const embed = await SwissService.formatSwissEmbed(tournament.id)
+  } else {
+    const participants = await TournamentParticipantModel.getByTournament(tournament.id)
+    const embed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle(`📋 ${tournament.name} — 参加者一覧`)
+      .setDescription(participants.length > 0
+        ? participants.map((p, i) =>
+            `${i + 1}. <@${p.discord_id}> ${p.rank ? `[${p.rank}]` : ''}${p.character ? ` (${p.character})` : ''}`
+          ).join('\n')
+        : 'まだ参加者がいません。')
+      .setFooter({ text: `${participants.length} 名 | ${statusLabel(tournament.status)}` })
+      .setTimestamp()
     await interaction.editReply({ embeds: [embed] })
-
-    let swissMatchTarget: any = channel
-    try {
-      const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
-      swissMatchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
-    } catch { /* fallback to channel */ }
-
-    for (const matchId of matchIds) {
-      try {
-        const { content, components } = await SwissService.formatMatchContent(matchId, regulation, 1, totalRounds)
-        const msg = await swissMatchTarget.send({ content, components })
-        await TournamentMatchModel.setMessageId(matchId, msg.id)
-      } catch (err) {
-        console.error(`[tnm] Failed to post swiss match ${matchId}:`, err)
-      }
-    }
-    return
   }
 
-  if (tournament.format === 'league') {
-    const matchIds = await LeagueService.generateLeague(tournament.id, participants, regulation)
-    await TournamentModel.setStatus(tournament.id, 'in_progress')
+  const member = interaction.member as GuildMember | null
+  const isAdmin = interaction.user.id === tournament.created_by ||
+    member?.permissions.has('ManageGuild')
+  if (!isAdmin) return
 
-    const leagueEmbed = await LeagueService.formatLeagueEmbed(tournament.id)
-    await interaction.editReply({ embeds: [leagueEmbed] })
-
-    let leagueMatchTarget: any = channel
-    try {
-      const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
-      leagueMatchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
-    } catch { /* fallback to channel */ }
-
-    for (const matchId of matchIds) {
-      try {
-        const { content, components } = await LeagueService.formatMatchContent(matchId, regulation)
-        const msg = await leagueMatchTarget.send({ content, components })
-        await TournamentMatchModel.setMessageId(matchId, msg.id)
-      } catch (err) {
-        console.error(`[tnm] Failed to post league match ${matchId}:`, err)
-      }
-    }
-    return
-  }
-
-  // single_elim
-  const guild = interaction.guild!
-  let voiceChannels: string[] = regulation.vcChannelIds ?? []
-  if (voiceChannels.length === 0) {
-    const defaultVC = guild.channels.cache.find(
-      c => c.type === ChannelType.GuildVoice && c.name === '🟦 GGST - ラウンジ #1'
-    ) ?? guild.channels.cache.filter(c => c.type === ChannelType.GuildVoice).sort((a, b) => (a.rawPosition ?? 0) - (b.rawPosition ?? 0)).first()
-    if (defaultVC) voiceChannels = [defaultVC.id]
-  }
-
-  const playableMatchIds = await BracketService.generateBracket(
-    tournament.id,
-    participants,
-    regulation,
-    voiceChannels
-  )
-
-  await TournamentModel.setStatus(tournament.id, 'in_progress')
-
-  const bracketEmbed = await BracketService.formatBracketEmbed(tournament.id)
-  await interaction.editReply({ embeds: [bracketEmbed] })
-
-  if (voiceChannels.length > 0 && voiceChannels.length < playableMatchIds.length) {
-    await interaction.followUp({
-      content: `⚠️ VCチャンネル数（${voiceChannels.length}）が試合数（${playableMatchIds.length}）より少ないため、複数の試合が同じVCを使用します。`,
-      flags: MessageFlags.Ephemeral,
-    })
-  }
-
-  let matchTarget: any = channel
-  try {
-    const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
-    matchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
-  } catch { /* fallback to channel */ }
-
-  for (const matchId of playableMatchIds) {
-    try {
-      const { content, components } = await BracketService.formatMatchContent(matchId, regulation)
-      const msg = await matchTarget.send({ content, components })
-      await TournamentMatchModel.setMessageId(matchId, msg.id)
-    } catch (err) {
-      console.error(`[tnm] Failed to post match ${matchId}:`, err)
-    }
-  }
+  const adminRows = buildAdminPanelRows(tournament, regulation)
+  await interaction.followUp({
+    content: `**管理パネル — ${tournament.name}**`,
+    components: adminRows,
+    flags: MessageFlags.Ephemeral,
+  })
 }
 
-async function handleBracket(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+function buildAdminPanelRows(tournament: { id: number; status: string; name: string }, regulation: TournamentRegulation): ActionRowBuilder<ButtonBuilder>[] {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = []
+  const id = tournament.id
 
-  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
-  if (!tournament) {
-    await interaction.editReply({ content: 'アクティブな大会が見つかりません。' })
-    return
-  }
-
-  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
-
-  if (tournament.format === 'single_elim' && tournament.status === 'in_progress') {
-    try {
-      const { attachment, embed } = await BracketImageService.formatBracketAsAttachment(tournament.id)
-      await interaction.editReply({ embeds: [embed], files: [attachment] })
-      return
-    } catch (err) {
-      console.error('[BracketImage] Failed, falling back to text:', err)
+  if (tournament.status === 'registration' || tournament.status === 'closed') {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`tnm-admin-start:${id}`).setLabel('▶ 大会スタート').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`tnm-admin-close:${id}`).setLabel('🔒 受付終了').setStyle(ButtonStyle.Secondary)
+        .setDisabled(tournament.status === 'closed'),
+      new ButtonBuilder().setCustomId(`tnm-admin-enter:${id}`).setLabel('👤+ 代理エントリー').setStyle(ButtonStyle.Primary),
+    ))
+    if (regulation.teamMode) {
+      rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(`tnm-admin-team-setup:${id}`).setLabel('👥 チーム設定').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`tnm-admin-assign:${id}`).setLabel('🎲 振り分け').setStyle(ButtonStyle.Primary),
+      ))
     }
   }
 
-  const embed = tournament.format === 'league'
-    ? await LeagueService.formatLeagueEmbed(tournament.id)
-    : tournament.format === 'swiss'
-    ? await SwissService.formatSwissEmbed(tournament.id)
-    : await BracketService.formatBracketEmbed(tournament.id)
-  await interaction.editReply({ embeds: [embed] })
-}
-
-async function handleStatus(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
-
-  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
-  if (!tournament) {
-    await interaction.editReply({
-      content: 'アクティブな大会が見つかりません。',
-    })
-    return
+  if (tournament.status === 'in_progress') {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`tnm-admin-fix:${id}`).setLabel('✏️ 結果修正').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`tnm-admin-enter:${id}`).setLabel('👤+ 代理エントリー').setStyle(ButtonStyle.Primary),
+    ))
   }
 
-  const participants = await TournamentParticipantModel.getByTournament(tournament.id)
-  const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle(`📋 ${tournament.name} — 参加者一覧`)
-    .setDescription(
-      participants.length > 0
-        ? participants
-            .map((p, i) => `${i + 1}. <@${p.discord_id}> ${p.rank ? `[${p.rank}]` : ''}`)
-            .join('\n')
-        : 'まだ参加者がいません。'
-    )
-    .setFooter({ text: `${participants.length} 名参加中 | ステータス: ${statusLabel(tournament.status)}` })
-    .setTimestamp()
+  rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`tnm-admin-delete:${id}`).setLabel('🗑 大会削除').setStyle(ButtonStyle.Danger),
+  ))
 
-  await interaction.editReply({ embeds: [embed] })
+  return rows
 }
 
 async function handleList(interaction: ChatInputCommandInteraction) {
@@ -478,197 +274,7 @@ async function handleList(interaction: ChatInputCommandInteraction) {
   await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral })
 }
 
-async function handleClose(interaction: ChatInputCommandInteraction) {
-  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
-  if (!tournament) {
-    await interaction.reply({
-      content: 'アクティブな大会が見つかりません。',
-      flags: MessageFlags.Ephemeral,
-    })
-    return
-  }
-  if (tournament.status !== 'registration') {
-    await interaction.reply({
-      content: '参加受付中の大会が見つかりません。',
-      flags: MessageFlags.Ephemeral,
-    })
-    return
-  }
-
-  await TournamentModel.setStatus(tournament.id, 'closed')
-  const count = await TournamentParticipantModel.count(tournament.id)
-  await interaction.reply(`🔒 **${tournament.name}** の参加受付を終了しました。（${count} 名）\nブラケットを生成するには \`/tnm start\` を使用してください。`)
-}
-
-async function handleLeave(interaction: ChatInputCommandInteraction) {
-  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
-  if (!tournament) {
-    await interaction.reply({ content: 'アクティブな大会が見つかりません。', flags: MessageFlags.Ephemeral })
-    return
-  }
-  if (tournament.status !== 'registration') {
-    await interaction.reply({
-      content: '参加受付が終了しているため、取り消しできません。',
-      flags: MessageFlags.Ephemeral,
-    })
-    return
-  }
-
-  const participant = await TournamentParticipantModel.getByDiscordId(tournament.id, interaction.user.id)
-  if (!participant) {
-    await interaction.reply({
-      content: 'この大会に参加登録されていません。',
-      flags: MessageFlags.Ephemeral,
-    })
-    return
-  }
-
-  await TournamentParticipantModel.delete(participant.id)
-  const count = await TournamentParticipantModel.count(tournament.id)
-
-  if (interaction.guild) {
-    await updateAnnouncementEmbed(interaction.guild, tournament, count)
-  }
-
-  await interaction.reply({
-    content: `✅ **${tournament.name}** の参加を取り消しました。`,
-    flags: MessageFlags.Ephemeral,
-  })
-}
-
-async function handleFix(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
-
-  const matchCode = interaction.options.getString('match_code', true).trim()
-  const newWinnerUser = interaction.options.getUser('winner', true)
-
-  // 完了済みの大会も含めて、マッチコードから対象大会と試合を特定する
-  const tournaments = await TournamentModel.getByGuild(interaction.guildId!)
-  let tournament: typeof tournaments[number] | null = null
-  let match: Awaited<ReturnType<typeof TournamentMatchModel.getById>> = null
-  let allMatches: Awaited<ReturnType<typeof TournamentMatchModel.getByTournament>> = []
-
-  for (const t of tournaments) {
-    const ms = await TournamentMatchModel.getByTournament(t.id)
-    const found = ms.find(m => m.match_code === matchCode)
-    if (found) {
-      tournament = t
-      match = found
-      allMatches = ms
-      break
-    }
-  }
-
-  if (!tournament || !match) {
-    await interaction.editReply(`マッチコード \`${matchCode}\` が見つかりません。`)
-    return
-  }
-  if (match.status !== 'completed') {
-    await interaction.editReply('この試合はまだ完了していません。')
-    return
-  }
-
-  const p1 = match.participant1_id ? await TournamentParticipantModel.getById(match.participant1_id) : null
-  const p2 = match.participant2_id ? await TournamentParticipantModel.getById(match.participant2_id) : null
-  const newWinnerParticipant = [p1, p2].find(p => p?.discord_id === newWinnerUser.id)
-
-  if (!newWinnerParticipant) {
-    await interaction.editReply('指定したユーザーはこの試合の参加者ではありません。')
-    return
-  }
-  if (Number(match.winner_id) === Number(newWinnerParticipant.id)) {
-    await interaction.editReply('そのユーザーはすでに勝者として記録されています。')
-    return
-  }
-
-  // 次ラウンドが完了していないか確認
-  const maxRound = Math.max(...allMatches.map(m => m.round))
-  const nextMatch = match.round < maxRound
-    ? allMatches.find(m => m.round === match.round + 1 && m.match_number === Math.ceil(match.match_number / 2)) ?? null
-    : null
-
-  if (nextMatch && nextMatch.status === 'completed') {
-    await interaction.editReply('次のラウンドの試合がすでに終了しているため修正できません。')
-    return
-  }
-
-  const oldWinnerId = Number(match.winner_id)
-  const newWinnerId = newWinnerParticipant.id
-  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
-
-  // DB 更新
-  await TournamentMatchModel.changeWinner(match.id, newWinnerId)
-  await TournamentParticipantModel.restore(newWinnerId)
-  await TournamentParticipantModel.eliminate(oldWinnerId)
-
-  // 元の試合メッセージに修正注記を追加
-  if (match.message_id && tournament.channel_id && interaction.guild) {
-    try {
-      const ch = await interaction.guild.channels.fetch(tournament.channel_id)
-      if (ch && ch.isTextBased() && !ch.isDMBased()) {
-        const origMsg = await ch.messages.fetch(match.message_id)
-        if (origMsg.editable) {
-          await origMsg.edit({
-            content: `${origMsg.content}\n🔧 修正: 勝者は <@${newWinnerUser.id}> に変更されました`,
-            components: [],
-          })
-        }
-      }
-    } catch {
-      // best effort
-    }
-  }
-
-  // 次ラウンド試合の更新（決勝戦修正の場合は nextMatch なし）
-  if (nextMatch) {
-    const slot: 'p1' | 'p2' = match.match_number % 2 === 1 ? 'p1' : 'p2'
-    await TournamentMatchModel.setParticipant(nextMatch.id, newWinnerId, slot)
-
-    // ハンデ再計算 + match_code 確定（必要なら）
-    const finalized = await BracketService.finalizeMatchIfReady(nextMatch.id, regulation)
-
-    if (interaction.guild && tournament.channel_id) {
-      try {
-        const ch = await interaction.guild.channels.fetch(tournament.channel_id)
-        if (ch && ch.isTextBased() && !ch.isDMBased()) {
-          if (nextMatch.message_id) {
-            // 既存メッセージを上書き
-            const msg = await ch.messages.fetch(nextMatch.message_id)
-            if (msg.editable) {
-              const { content, components } = await formatMatchByFormat(tournament.format, nextMatch.id, nextMatch.round, regulation)
-              await msg.edit({ content, components })
-            }
-          } else if (finalized) {
-            // 修正をきっかけに次の試合が両方の参加者揃った → 新規投稿
-            const { content, components } = await formatMatchByFormat(tournament.format, nextMatch.id, nextMatch.round, regulation)
-            const newMsg = await ch.send({ content, components })
-            await TournamentMatchModel.setMessageId(nextMatch.id, newMsg.id)
-          }
-        }
-      } catch {
-        // best effort
-      }
-    }
-  }
-
-  await interaction.editReply(
-    `✅ マッチ \`#${matchCode}\` の勝者を修正しました。\n新しい勝者: <@${newWinnerUser.id}>`
-  )
-}
-
-async function handleDelete(interaction: ChatInputCommandInteraction) {
-  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
-  if (!tournament) {
-    await interaction.reply({
-      content: 'アクティブな大会が見つかりません。',
-      flags: MessageFlags.Ephemeral,
-    })
-    return
-  }
-
-  await TournamentModel.delete(tournament.id)
-  await interaction.reply(`🗑 **${tournament.name}** を削除しました。`)
-}
+// (handleClose / handleLeave / handleFix / handleDelete moved to admin panel button handlers)
 
 // ─── Modal submit ─────────────────────────────────────────────────────────────
 
@@ -677,6 +283,9 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   if (interaction.customId.startsWith('tnm-handicap-custom-modal:')) {
     return handleHandicapCustomModal(interaction, parseInt(interaction.customId.split(':')[1]))
   }
+  if (interaction.customId.startsWith('tnm-admin-fix-modal:')) return handleAdminFixModal(interaction, parseInt(interaction.customId.split(':')[1]))
+  if (interaction.customId.startsWith('tnm-admin-enter-modal:')) return handleAdminEnterModal(interaction, parseInt(interaction.customId.split(':')[1]))
+  if (interaction.customId.startsWith('tnm-admin-team-setup-modal:')) return handleAdminTeamSetupModal(interaction, parseInt(interaction.customId.split(':')[1]))
   if (interaction.customId.startsWith('tnm-team-create:modal')) {
     const tournamentId = parseInt(interaction.customId.split(':')[2])
     return handleTeamCreateModal(interaction, tournamentId)
@@ -941,6 +550,16 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
   if (prefix === 'tnm-battle-cancel')  return handleBattleCancelButton(interaction, parseInt(parts[1]))
   if (prefix === 'tnm-assign')         return handleAssignButton(interaction, parseInt(parts[1]), parts[2])
   if (prefix === 'tnm-auto-assign')    return handleAutoAssign(interaction, parseInt(parts[1]), parts[2] as 'balanced' | 'random')
+
+  if (prefix === 'tnm-admin-start')         return handleAdminStart(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-admin-close')         return handleAdminClose(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-admin-delete')        return handleAdminDelete(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-admin-delete-confirm') return handleAdminDeleteConfirm(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-admin-delete-cancel') return handleAdminDeleteCancel(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-admin-fix')           return handleAdminFix(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-admin-enter')         return handleAdminEnter(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-admin-team-setup')    return handleAdminTeamSetup(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-admin-assign')        return handleAdminAssign(interaction, parseInt(parts[1]))
 
   return false
 }
@@ -1366,16 +985,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
 }
 
 
-async function handleEnter(interaction: ChatInputCommandInteraction) {
-  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
-  if (!tournament || tournament.status !== 'registration') {
-    await interaction.reply({ content: 'アクティブな大会の参加受付がありません。', flags: MessageFlags.Ephemeral })
-    return
-  }
-  const targetUser = interaction.options.getUser('user', true)
-  const existing = await TournamentParticipantModel.getByDiscordId(tournament.id, targetUser.id)
-  await showCombinedModal(interaction, `admin:${tournament.id}:${targetUser.id}`, existing?.rank, existing?.character)
-}
+// (handleEnter moved to handleAdminEnter — triggered via admin panel button)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1634,31 +1244,7 @@ async function handleTeamSelectMenu(interaction: StringSelectMenuInteraction, to
 
 // ─── /tnm team-setup / team-assign ──────────────────────────────────────────
 
-async function handleTeamSetup(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply()
-  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
-  if (!tournament) { await interaction.editReply('❌ アクティブな大会が見つかりません。'); return }
-  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
-  if (!regulation.teamMode) { await interaction.editReply('❌ 団体戦モードの大会ではありません。'); return }
-
-  const names: string[] = []
-  for (let i = 1; i <= 8; i++) {
-    const n = interaction.options.getString(`team${i}`)
-    if (n) names.push(n.trim())
-  }
-
-  const created: string[] = []
-  for (let i = 0; i < names.length; i++) {
-    const name = names[i]
-    const existing = await TournamentTeamModel.getByName(tournament.id, name)
-    if (existing) { created.push(`${name}（既存）`); continue }
-    await TournamentTeamModel.create({ tournament_id: tournament.id, name, team_order: i })
-    created.push(name)
-  }
-
-  await updateTeamAnnouncement(interaction.guild!, tournament, regulation)
-  await interaction.editReply(`✅ チームを作成しました:\n${created.map(n => `• ${n}`).join('\n')}`)
-}
+// (handleTeamSetup moved to handleAdminTeamSetup — triggered via admin panel button)
 
 const TEAM_EMOJIS = ['🔵', '🔴', '🟡', '🟢', '🟠', '🟣', '⚫', '⚪']
 
@@ -1732,21 +1318,7 @@ async function buildAssignPanel(tournamentId: number): Promise<{ content: string
   return { content: lines.join('\n'), components: rows }
 }
 
-async function handleTeamAssign(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply()
-  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
-  if (!tournament) { await interaction.editReply('❌ アクティブな大会が見つかりません。'); return }
-  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
-  if (!regulation.teamMode || regulation.teamEntryMode !== 'assign') {
-    await interaction.editReply('❌ この大会は「振り分け」エントリー方式ではありません。'); return
-  }
-
-  const teams = await TournamentTeamModel.getByTournament(tournament.id)
-  if (teams.length === 0) { await interaction.editReply('❌ 先に `/tnm team-setup` でチームを作成してください。'); return }
-
-  const { content, components } = await buildAssignPanel(tournament.id)
-  await interaction.editReply({ content, components })
-}
+// (handleTeamAssign moved to handleAdminAssign — triggered via admin panel button)
 
 async function handleAssignButton(interaction: ButtonInteraction, tournamentId: number, discordId: string): Promise<boolean> {
   const tournament = await TournamentModel.getById(tournamentId)
@@ -2240,6 +1812,497 @@ async function handleAutoAssign(
   })
 
   return true
+}
+
+// ─── Admin panel button / modal handlers ─────────────────────────────────────
+
+async function checkAdminPermission(
+  interaction: ButtonInteraction | ModalSubmitInteraction,
+  tournament: { created_by: string }
+): Promise<boolean> {
+  const member = interaction.member as GuildMember | null
+  return interaction.user.id === tournament.created_by || (member?.permissions.has('ManageGuild') ?? false)
+}
+
+async function handleAdminStart(interaction: ButtonInteraction, tournamentId: number): Promise<boolean> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.editReply('❌ 大会が見つかりません。'); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.editReply('❌ この操作は大会主催者またはサーバー管理者のみ実行できます。'); return true
+  }
+  if (tournament.status !== 'registration' && tournament.status !== 'closed') {
+    await interaction.editReply(`大会 **${tournament.name}** はすでに開始済みです。`); return true
+  }
+
+  const participants = await TournamentParticipantModel.getByTournament(tournament.id)
+  if (participants.length < 2) {
+    await interaction.editReply('参加者が2人以上いないと大会を開始できません。'); return true
+  }
+
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+  const channel = interaction.channel
+  if (!channel || !channel.isTextBased() || channel.isDMBased()) {
+    await interaction.editReply('❌ テキストチャンネルで実行してください。'); return true
+  }
+
+  if (regulation.teamMode) {
+    const teams = await TournamentTeamModel.getByTournament(tournament.id)
+    if (teams.length < 2) { await interaction.editReply('❌ チームが2つ以上必要です。'); return true }
+
+    const proxyParticipants: TournamentParticipant[] = []
+    for (const team of teams) {
+      const did = proxyDiscordId(team.id)
+      let proxy = await TournamentParticipantModel.getByDiscordId(tournament.id, did)
+      if (!proxy) {
+        proxy = await TournamentParticipantModel.create({
+          tournament_id: tournament.id, discord_id: did, discord_name: team.name, rank: null, character: null,
+        })
+      }
+      proxyParticipants.push(proxy)
+    }
+
+    let matchIds: number[] = []
+    if (tournament.format === 'swiss') {
+      const totalRounds = regulation.totalRounds
+      if (!totalRounds) { await interaction.editReply('❌ スイスドローの総ラウンド数が設定されていません。'); return true }
+      matchIds = await SwissService.generateRound(tournament.id, 1, proxyParticipants, regulation, [])
+    } else if (tournament.format === 'league') {
+      matchIds = await LeagueService.generateLeague(tournament.id, proxyParticipants, regulation)
+    } else {
+      matchIds = await BracketService.generateBracket(tournament.id, proxyParticipants, regulation, [])
+    }
+    await TournamentModel.setStatus(tournament.id, 'in_progress')
+
+    let teamMatchTarget: any = channel
+    try {
+      const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
+      teamMatchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
+    } catch { /* fallback */ }
+
+    for (const matchId of matchIds) {
+      try {
+        const { content, components } = await TeamBattleService.formatTeamMatchContent(matchId, regulation)
+        const msg = await teamMatchTarget.send({ content, components })
+        await TournamentMatchModel.setMessageId(matchId, msg.id)
+      } catch (err) { console.error(`[tnm] Failed to post team match ${matchId}:`, err) }
+    }
+
+    const bracketEmbed = tournament.format === 'swiss'
+      ? await SwissService.formatSwissEmbed(tournament.id)
+      : tournament.format === 'league'
+      ? await LeagueService.formatLeagueEmbed(tournament.id)
+      : await BracketService.formatBracketEmbed(tournament.id)
+    await channel.send({ embeds: [bracketEmbed] })
+    await interaction.editReply('✅ 大会を開始しました！')
+    return true
+  }
+
+  if (tournament.format === 'swiss') {
+    const totalRounds = regulation.totalRounds
+    if (!totalRounds) { await interaction.editReply('❌ スイスドローの総ラウンド数が設定されていません。大会を作り直してください。'); return true }
+    const matchIds = await SwissService.generateRound(tournament.id, 1, participants, regulation, [])
+    await TournamentModel.setStatus(tournament.id, 'in_progress')
+    await channel.send({ embeds: [await SwissService.formatSwissEmbed(tournament.id)] })
+
+    let swissMatchTarget: any = channel
+    try {
+      const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
+      swissMatchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
+    } catch { /* fallback */ }
+
+    for (const matchId of matchIds) {
+      try {
+        const { content, components } = await SwissService.formatMatchContent(matchId, regulation, 1, totalRounds)
+        const msg = await swissMatchTarget.send({ content, components })
+        await TournamentMatchModel.setMessageId(matchId, msg.id)
+      } catch (err) { console.error(`[tnm] Failed to post swiss match ${matchId}:`, err) }
+    }
+    await interaction.editReply('✅ 大会を開始しました！')
+    return true
+  }
+
+  if (tournament.format === 'league') {
+    const matchIds = await LeagueService.generateLeague(tournament.id, participants, regulation)
+    await TournamentModel.setStatus(tournament.id, 'in_progress')
+    await channel.send({ embeds: [await LeagueService.formatLeagueEmbed(tournament.id)] })
+
+    let leagueMatchTarget: any = channel
+    try {
+      const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
+      leagueMatchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
+    } catch { /* fallback */ }
+
+    for (const matchId of matchIds) {
+      try {
+        const { content, components } = await LeagueService.formatMatchContent(matchId, regulation)
+        const msg = await leagueMatchTarget.send({ content, components })
+        await TournamentMatchModel.setMessageId(matchId, msg.id)
+      } catch (err) { console.error(`[tnm] Failed to post league match ${matchId}:`, err) }
+    }
+    await interaction.editReply('✅ 大会を開始しました！')
+    return true
+  }
+
+  // single_elim
+  const guild = interaction.guild!
+  let voiceChannels: string[] = regulation.vcChannelIds ?? []
+  if (voiceChannels.length === 0) {
+    const defaultVC = guild.channels.cache.find(
+      c => c.type === ChannelType.GuildVoice && c.name === '🟦 GGST - ラウンジ #1'
+    ) ?? guild.channels.cache.filter(c => c.type === ChannelType.GuildVoice).sort((a, b) => (a.rawPosition ?? 0) - (b.rawPosition ?? 0)).first()
+    if (defaultVC) voiceChannels = [defaultVC.id]
+  }
+
+  const playableMatchIds = await BracketService.generateBracket(tournament.id, participants, regulation, voiceChannels)
+  await TournamentModel.setStatus(tournament.id, 'in_progress')
+
+  await channel.send({ embeds: [await BracketService.formatBracketEmbed(tournament.id)] })
+
+  if (voiceChannels.length > 0 && voiceChannels.length < playableMatchIds.length) {
+    await interaction.followUp({
+      content: `⚠️ VCチャンネル数（${voiceChannels.length}）が試合数（${playableMatchIds.length}）より少ないため、複数の試合が同じVCを使用します。`,
+      flags: MessageFlags.Ephemeral,
+    })
+  }
+
+  let matchTarget: any = channel
+  try {
+    const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
+    matchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
+  } catch { /* fallback */ }
+
+  for (const matchId of playableMatchIds) {
+    try {
+      const { content, components } = await BracketService.formatMatchContent(matchId, regulation)
+      const msg = await matchTarget.send({ content, components })
+      await TournamentMatchModel.setMessageId(matchId, msg.id)
+    } catch (err) { console.error(`[tnm] Failed to post match ${matchId}:`, err) }
+  }
+
+  await interaction.editReply('✅ 大会を開始しました！')
+  return true
+}
+
+async function handleAdminClose(interaction: ButtonInteraction, tournamentId: number): Promise<boolean> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.editReply('❌ 大会が見つかりません。'); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.editReply('❌ この操作は大会主催者またはサーバー管理者のみ実行できます。'); return true
+  }
+  if (tournament.status !== 'registration') {
+    await interaction.editReply('❌ 参加受付中の大会ではありません。'); return true
+  }
+
+  await TournamentModel.setStatus(tournament.id, 'closed')
+  const count = await TournamentParticipantModel.count(tournament.id)
+  await interaction.editReply(`🔒 **${tournament.name}** の参加受付を終了しました。（${count} 名）`)
+  return true
+}
+
+async function handleAdminDelete(interaction: ButtonInteraction, tournamentId: number): Promise<boolean> {
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.reply({ content: '❌ 大会が見つかりません。', flags: MessageFlags.Ephemeral }); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.reply({ content: '❌ 権限がありません。', flags: MessageFlags.Ephemeral }); return true
+  }
+
+  const confirmRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`tnm-admin-delete-confirm:${tournamentId}`).setLabel('🗑 削除する').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`tnm-admin-delete-cancel:${tournamentId}`).setLabel('キャンセル').setStyle(ButtonStyle.Secondary),
+  )
+  await interaction.reply({
+    content: `⚠️ **${tournament.name}** を削除します。この操作は取り消せません。`,
+    components: [confirmRow],
+    flags: MessageFlags.Ephemeral,
+  })
+  return true
+}
+
+async function handleAdminDeleteConfirm(interaction: ButtonInteraction, tournamentId: number): Promise<boolean> {
+  await interaction.deferUpdate()
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.editReply({ content: '❌ 大会が見つかりません。', components: [] }); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.editReply({ content: '❌ 権限がありません。', components: [] }); return true
+  }
+  const name = tournament.name
+  await TournamentModel.delete(tournament.id)
+  await interaction.editReply({ content: `🗑 **${name}** を削除しました。`, components: [] })
+  return true
+}
+
+async function handleAdminDeleteCancel(interaction: ButtonInteraction, _tournamentId: number): Promise<boolean> {
+  await interaction.update({ content: 'キャンセルしました。', components: [] })
+  return true
+}
+
+async function handleAdminFix(interaction: ButtonInteraction, tournamentId: number): Promise<boolean> {
+  const modal = new ModalBuilder()
+    .setCustomId(`tnm-admin-fix-modal:${tournamentId}`)
+    .setTitle('試合結果を修正')
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId('match_code').setLabel('マッチコード（6桁）').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(10)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId('winner').setLabel('正しい勝者（@メンション または ID）').setStyle(TextInputStyle.Short).setRequired(true)
+    ),
+  )
+  await interaction.showModal(modal)
+  return true
+}
+
+async function handleAdminFixModal(interaction: ModalSubmitInteraction, tournamentId: number): Promise<boolean> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.editReply('❌ 大会が見つかりません。'); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.editReply('❌ 権限がありません。'); return true
+  }
+
+  const matchCode = interaction.fields.getTextInputValue('match_code').trim()
+  const winnerInput = interaction.fields.getTextInputValue('winner').trim()
+  const winnerDiscordId = parseDiscordId(winnerInput)
+  if (!winnerDiscordId) {
+    await interaction.editReply('❌ 正しいDiscordユーザーのメンション（@）またはIDを入力してください。')
+    return true
+  }
+
+  const allMatches = await TournamentMatchModel.getByTournament(tournament.id)
+  const match = allMatches.find(m => m.match_code === matchCode)
+  if (!match) { await interaction.editReply(`❌ マッチコード \`${matchCode}\` が見つかりません。`); return true }
+  if (match.status !== 'completed') { await interaction.editReply('❌ この試合はまだ完了していません。'); return true }
+
+  const p1 = match.participant1_id ? await TournamentParticipantModel.getById(match.participant1_id) : null
+  const p2 = match.participant2_id ? await TournamentParticipantModel.getById(match.participant2_id) : null
+  const newWinnerParticipant = [p1, p2].find(p => p?.discord_id === winnerDiscordId)
+
+  if (!newWinnerParticipant) { await interaction.editReply('❌ 指定したユーザーはこの試合の参加者ではありません。'); return true }
+  if (Number(match.winner_id) === Number(newWinnerParticipant.id)) {
+    await interaction.editReply('そのユーザーはすでに勝者として記録されています。'); return true
+  }
+
+  const maxRound = Math.max(...allMatches.map(m => m.round))
+  const nextMatch = match.round < maxRound
+    ? allMatches.find(m => m.round === match.round + 1 && m.match_number === Math.ceil(match.match_number / 2)) ?? null
+    : null
+
+  if (nextMatch && nextMatch.status === 'completed') {
+    await interaction.editReply('❌ 次のラウンドの試合がすでに終了しているため修正できません。'); return true
+  }
+
+  const oldWinnerId = Number(match.winner_id)
+  const newWinnerId = newWinnerParticipant.id
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+
+  await TournamentMatchModel.changeWinner(match.id, newWinnerId)
+  await TournamentParticipantModel.restore(newWinnerId)
+  await TournamentParticipantModel.eliminate(oldWinnerId)
+
+  if (match.message_id && tournament.channel_id && interaction.guild) {
+    try {
+      const ch = await interaction.guild.channels.fetch(tournament.channel_id)
+      if (ch && ch.isTextBased() && !ch.isDMBased()) {
+        const origMsg = await ch.messages.fetch(match.message_id)
+        if (origMsg.editable) {
+          await origMsg.edit({ content: `${origMsg.content}\n🔧 修正: 勝者は <@${winnerDiscordId}> に変更されました`, components: [] })
+        }
+      }
+    } catch { /* best effort */ }
+  }
+
+  if (nextMatch) {
+    const slot: 'p1' | 'p2' = match.match_number % 2 === 1 ? 'p1' : 'p2'
+    await TournamentMatchModel.setParticipant(nextMatch.id, newWinnerId, slot)
+    const finalized = await BracketService.finalizeMatchIfReady(nextMatch.id, regulation)
+    if (interaction.guild && tournament.channel_id) {
+      try {
+        const ch = await interaction.guild.channels.fetch(tournament.channel_id)
+        if (ch && ch.isTextBased() && !ch.isDMBased()) {
+          if (nextMatch.message_id) {
+            const msg = await ch.messages.fetch(nextMatch.message_id)
+            if (msg.editable) {
+              const { content, components } = await formatMatchByFormat(tournament.format, nextMatch.id, nextMatch.round, regulation)
+              await msg.edit({ content, components })
+            }
+          } else if (finalized) {
+            const { content, components } = await formatMatchByFormat(tournament.format, nextMatch.id, nextMatch.round, regulation)
+            const newMsg = await ch.send({ content, components })
+            await TournamentMatchModel.setMessageId(nextMatch.id, newMsg.id)
+          }
+        }
+      } catch { /* best effort */ }
+    }
+  }
+
+  await interaction.editReply(`✅ マッチ \`#${matchCode}\` の勝者を修正しました。\n新しい勝者: <@${winnerDiscordId}>`)
+  return true
+}
+
+async function handleAdminEnter(interaction: ButtonInteraction, tournamentId: number): Promise<boolean> {
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.reply({ content: '❌ 大会が見つかりません。', flags: MessageFlags.Ephemeral }); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.reply({ content: '❌ 権限がありません。', flags: MessageFlags.Ephemeral }); return true
+  }
+
+  const modal = new ModalBuilder()
+    .setCustomId(`tnm-admin-enter-modal:${tournamentId}`)
+    .setTitle('代理エントリー')
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId('user').setLabel('ユーザー（@メンション または ID）').setStyle(TextInputStyle.Short).setRequired(true)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId('rank').setLabel('ランク（部分入力 / 未指定 / ランダム）').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('例: ダイヤ２、未指定')
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId('character').setLabel('キャラ（部分入力 / 未指定 / ランダム）').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('例: ソル、未指定')
+    ),
+  )
+  await interaction.showModal(modal)
+  return true
+}
+
+async function handleAdminEnterModal(interaction: ModalSubmitInteraction, tournamentId: number): Promise<boolean> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.editReply('❌ 大会が見つかりません。'); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.editReply('❌ 権限がありません。'); return true
+  }
+
+  const userInput = interaction.fields.getTextInputValue('user').trim()
+  const targetDiscordId = parseDiscordId(userInput)
+  if (!targetDiscordId) {
+    await interaction.editReply('❌ 正しいDiscordユーザーのメンション（@）またはIDを入力してください。')
+    return true
+  }
+
+  const rank = resolveRank(interaction.fields.getTextInputValue('rank'))
+  const character = resolveCharacter(interaction.fields.getTextInputValue('character'))
+
+  let targetName = targetDiscordId
+  try {
+    const gm = await interaction.guild?.members.fetch(targetDiscordId)
+    targetName = gm?.displayName ?? gm?.user.username ?? targetDiscordId
+  } catch { /* fallback */ }
+
+  const existing = await TournamentParticipantModel.getByDiscordId(tournamentId, targetDiscordId)
+  if (existing) {
+    await TournamentParticipantModel.setRankAndCharacter(existing.id, rank, character)
+    await interaction.editReply(`✅ **${targetName}** のエントリーを更新しました。\nランク: **${rank ?? '未指定'}** / キャラ: **${character ?? '未指定'}**`)
+  } else {
+    if (tournament.max_participants) {
+      const count = await TournamentParticipantModel.count(tournamentId)
+      if (count >= tournament.max_participants) {
+        await interaction.editReply(`❌ 定員（${tournament.max_participants}名）に達しています。`); return true
+      }
+    }
+    await TournamentParticipantModel.create({ tournament_id: tournamentId, discord_id: targetDiscordId, discord_name: targetName, rank, character })
+    const count = await TournamentParticipantModel.count(tournamentId)
+    if (interaction.guild) await updateAnnouncementEmbed(interaction.guild, tournament, count)
+    await interaction.editReply(`✅ **${targetName}** をエントリーしました。\nランク: **${rank ?? '未指定'}** / キャラ: **${character ?? '未指定'}**`)
+  }
+  return true
+}
+
+async function handleAdminTeamSetup(interaction: ButtonInteraction, tournamentId: number): Promise<boolean> {
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.reply({ content: '❌ 大会が見つかりません。', flags: MessageFlags.Ephemeral }); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.reply({ content: '❌ 権限がありません。', flags: MessageFlags.Ephemeral }); return true
+  }
+
+  const modal = new ModalBuilder()
+    .setCustomId(`tnm-admin-team-setup-modal:${tournamentId}`)
+    .setTitle('チームを作成する')
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId('team1').setLabel('チーム1の名前').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(30)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId('team2').setLabel('チーム2の名前').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(30)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId('team3').setLabel('チーム3の名前（任意）').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(30)
+    ),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder().setCustomId('team4').setLabel('チーム4の名前（任意）').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(30)
+    ),
+  )
+  await interaction.showModal(modal)
+  return true
+}
+
+async function handleAdminTeamSetupModal(interaction: ModalSubmitInteraction, tournamentId: number): Promise<boolean> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.editReply('❌ 大会が見つかりません。'); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.editReply('❌ 権限がありません。'); return true
+  }
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+  if (!regulation.teamMode) { await interaction.editReply('❌ 団体戦モードの大会ではありません。'); return true }
+
+  const names: string[] = []
+  for (let i = 1; i <= 4; i++) {
+    try {
+      const n = interaction.fields.getTextInputValue(`team${i}`).trim()
+      if (n) names.push(n)
+    } catch { /* optional fields */ }
+  }
+
+  if (names.length < 2) { await interaction.editReply('❌ チームは2つ以上設定してください。'); return true }
+
+  const created: string[] = []
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i]
+    const existing = await TournamentTeamModel.getByName(tournament.id, name)
+    if (existing) { created.push(`${name}（既存）`); continue }
+    await TournamentTeamModel.create({ tournament_id: tournament.id, name, team_order: i })
+    created.push(name)
+  }
+
+  await updateTeamAnnouncement(interaction.guild!, tournament, regulation)
+  await interaction.editReply(`✅ チームを作成しました:\n${created.map(n => `• ${n}`).join('\n')}`)
+  return true
+}
+
+async function handleAdminAssign(interaction: ButtonInteraction, tournamentId: number): Promise<boolean> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.editReply('❌ 大会が見つかりません。'); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.editReply('❌ 権限がありません。'); return true
+  }
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+  if (!regulation.teamMode || regulation.teamEntryMode !== 'assign') {
+    await interaction.editReply('❌ この大会は「振り分け」エントリー方式ではありません。'); return true
+  }
+
+  const teams = await TournamentTeamModel.getByTournament(tournament.id)
+  if (teams.length === 0) { await interaction.editReply('❌ 先にチームを作成してください。'); return true }
+
+  const { content, components } = await buildAssignPanel(tournament.id)
+  await interaction.editReply({ content, components })
+  return true
+}
+
+function parseDiscordId(input: string): string | null {
+  const trimmed = input.trim()
+  const mentionMatch = trimmed.match(/^<@!?(\d+)>$/)
+  if (mentionMatch) return mentionMatch[1]
+  if (/^\d{17,20}$/.test(trimmed)) return trimmed
+  return null
 }
 
 // ─── Rank / character resolution ─────────────────────────────────────────────

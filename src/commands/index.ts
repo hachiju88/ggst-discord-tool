@@ -67,6 +67,9 @@ export function getModalSubmitHandler(customId: string): ((interaction: any) => 
     'tnm-team-create': 'tnm',
     'tnm-combined-modal': 'tnm',
     'tnm-handicap-custom-modal': 'tnm',
+    'tnm-admin-fix-modal': 'tnm',
+    'tnm-admin-enter-modal': 'tnm',
+    'tnm-admin-team-setup-modal': 'tnm',
   };
   const commandName = prefixToCommand[prefix];
   if (commandName) {
