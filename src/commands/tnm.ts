@@ -164,17 +164,18 @@ async function handleCreate(interaction: ChatInputCommandInteraction) {
 // (handleStart moved to handleAdminStart — triggered via admin panel button)
 
 async function handleView(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
-
   const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
   if (!tournament) {
-    await interaction.editReply({ content: 'アクティブな大会が見つかりません。`/tnm create` で作成してください。' })
+    await interaction.reply({ content: 'アクティブな大会が見つかりません。`/tnm create` で作成してください。', flags: MessageFlags.Ephemeral })
     return
   }
 
   const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+  // 大会開始後や完了後はみんなに見えるように公開、それ以外はエフェメラル
+  const showPublic = tournament.status === 'in_progress' || tournament.status === 'completed'
+  await interaction.deferReply(showPublic ? {} : { flags: MessageFlags.Ephemeral })
 
-  if (tournament.status === 'in_progress') {
+  if (tournament.status === 'in_progress' || tournament.status === 'completed') {
     if (tournament.format === 'single_elim' && !regulation.teamMode) {
       try {
         const { attachment, embed } = await BracketImageService.formatBracketAsAttachment(tournament.id)
@@ -221,19 +222,25 @@ function buildAdminPanelRows(tournament: { id: number; status: string; name: str
   const rows: ActionRowBuilder<ButtonBuilder>[] = []
   const id = tournament.id
 
-  if (tournament.status === 'registration' || tournament.status === 'closed') {
+  if (tournament.status === 'registration') {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`tnm-admin-start:${id}`).setLabel('▶ 大会スタート').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`tnm-admin-close:${id}`).setLabel('🔒 受付終了').setStyle(ButtonStyle.Secondary)
-        .setDisabled(tournament.status === 'closed'),
+      new ButtonBuilder().setCustomId(`tnm-admin-close:${id}`).setLabel('🔒 受付終了').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`tnm-admin-enter:${id}`).setLabel('👤+ 代理エントリー').setStyle(ButtonStyle.Primary),
     ))
-    if (regulation.teamMode) {
-      rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(`tnm-admin-team-setup:${id}`).setLabel('👥 チーム設定').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`tnm-admin-assign:${id}`).setLabel('🎲 振り分け').setStyle(ButtonStyle.Primary),
-      ))
-    }
+  } else if (tournament.status === 'closed') {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`tnm-admin-start:${id}`).setLabel('▶ 大会スタート').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`tnm-admin-reopen:${id}`).setLabel('🔓 受付を再開').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`tnm-admin-enter:${id}`).setLabel('👤+ 代理エントリー').setStyle(ButtonStyle.Primary),
+    ))
+  }
+
+  if ((tournament.status === 'registration' || tournament.status === 'closed') && regulation.teamMode) {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`tnm-admin-team-setup:${id}`).setLabel('👥 チーム設定').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`tnm-admin-assign:${id}`).setLabel('🎲 振り分け').setStyle(ButtonStyle.Primary),
+    ))
   }
 
   if (tournament.status === 'in_progress') {
@@ -561,6 +568,7 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
 
   if (prefix === 'tnm-admin-start')         return handleAdminStart(interaction, parseInt(parts[1]))
   if (prefix === 'tnm-admin-close')         return handleAdminClose(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-admin-reopen')        return handleAdminReopen(interaction, parseInt(parts[1]))
   if (prefix === 'tnm-admin-delete')        return handleAdminDelete(interaction, parseInt(parts[1]))
   if (prefix === 'tnm-admin-delete-confirm') return handleAdminDeleteConfirm(interaction, parseInt(parts[1]))
   if (prefix === 'tnm-admin-delete-cancel') return handleAdminDeleteCancel(interaction, parseInt(parts[1]))
@@ -1913,6 +1921,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
       ? await LeagueService.formatLeagueEmbed(tournament.id)
       : await BracketService.formatBracketEmbed(tournament.id)
     await channel.send({ embeds: [bracketEmbed] })
+    await disableAnnouncementButtons(interaction.guild, tournament)
     await interaction.editReply('✅ 大会を開始しました！')
     return true
   }
@@ -1937,6 +1946,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
         await TournamentMatchModel.setMessageId(matchId, msg.id)
       } catch (err) { console.error(`[tnm] Failed to post swiss match ${matchId}:`, err) }
     }
+    await disableAnnouncementButtons(interaction.guild, tournament)
     await interaction.editReply('✅ 大会を開始しました！')
     return true
   }
@@ -1959,6 +1969,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
         await TournamentMatchModel.setMessageId(matchId, msg.id)
       } catch (err) { console.error(`[tnm] Failed to post league match ${matchId}:`, err) }
     }
+    await disableAnnouncementButtons(interaction.guild, tournament)
     await interaction.editReply('✅ 大会を開始しました！')
     return true
   }
@@ -1999,6 +2010,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
     } catch (err) { console.error(`[tnm] Failed to post match ${matchId}:`, err) }
   }
 
+  await disableAnnouncementButtons(interaction.guild, tournament)
   await interaction.editReply('✅ 大会を開始しました！')
   return true
 }
@@ -2017,8 +2029,58 @@ async function handleAdminClose(interaction: ButtonInteraction, tournamentId: nu
 
   await TournamentModel.setStatus(tournament.id, 'closed')
   const count = await TournamentParticipantModel.count(tournament.id)
-  await interaction.editReply(`🔒 **${tournament.name}** の参加受付を終了しました。（${count} 名）`)
+  await interaction.editReply(`🔒 **${tournament.name}** の参加受付を終了しました。（${count} 名）\n再開する場合は再度 \`/tnm view\` から「🔓 受付を再開」を押してください。`)
   return true
+}
+
+async function handleAdminReopen(interaction: ButtonInteraction, tournamentId: number): Promise<boolean> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.editReply('❌ 大会が見つかりません。'); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.editReply('❌ 権限がありません。'); return true
+  }
+  if (tournament.status !== 'closed') {
+    await interaction.editReply('❌ 受付終了状態の大会のみ再開できます。'); return true
+  }
+
+  await TournamentModel.setStatus(tournament.id, 'registration')
+  await interaction.editReply(`🔓 **${tournament.name}** の参加受付を再開しました。`)
+  return true
+}
+
+// 大会開始時に告知メッセージの参加ボタンを無効化する
+async function disableAnnouncementButtons(
+  guild: Guild | null,
+  tournament: { channel_id: string | null; announcement_message_id: string | null }
+): Promise<void> {
+  if (!guild || !tournament.channel_id || !tournament.announcement_message_id) return
+  try {
+    const ch = await guild.channels.fetch(tournament.channel_id)
+    if (!ch || !ch.isTextBased() || ch.isDMBased()) return
+    const msg = await ch.messages.fetch(tournament.announcement_message_id)
+    if (!msg.editable) return
+    const disabledRows: ActionRowBuilder<ButtonBuilder>[] = []
+    for (const row of msg.components) {
+      const components = (row as any).components
+      if (!Array.isArray(components)) continue
+      const r = new ActionRowBuilder<ButtonBuilder>()
+      for (const c of components) {
+        if (c.type === 2) { // Button
+          r.addComponents(ButtonBuilder.from(c).setDisabled(true))
+        }
+      }
+      if (r.components.length > 0) disabledRows.push(r)
+    }
+    const embed = msg.embeds[0]
+      ? EmbedBuilder.from(msg.embeds[0]).setFooter({ text: '大会開始済み — 受付終了' })
+      : null
+    await msg.edit({
+      embeds: embed ? [embed] : msg.embeds,
+      components: disabledRows,
+    })
+  } catch { /* ベストエフォート */ }
 }
 
 async function handleAdminDelete(interaction: ButtonInteraction, tournamentId: number): Promise<boolean> {
