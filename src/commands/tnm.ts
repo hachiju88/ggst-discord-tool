@@ -283,6 +283,7 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   if (interaction.customId.startsWith('tnm-handicap-custom-modal:')) {
     return handleHandicapCustomModal(interaction, parseInt(interaction.customId.split(':')[1]))
   }
+  if (interaction.customId.startsWith('tnm-char-modal:')) return handleCharModal(interaction)
   if (interaction.customId.startsWith('tnm-admin-fix-modal:')) return handleAdminFixModal(interaction, parseInt(interaction.customId.split(':')[1]))
   if (interaction.customId.startsWith('tnm-admin-enter-modal:')) return handleAdminEnterModal(interaction, parseInt(interaction.customId.split(':')[1]))
   if (interaction.customId.startsWith('tnm-admin-team-setup-modal:')) return handleAdminTeamSetupModal(interaction, parseInt(interaction.customId.split(':')[1]))
@@ -485,6 +486,13 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
           )
       )
     ],
+    flags: MessageFlags.Ephemeral,
+  })
+
+  const adminRows = buildAdminPanelRows(tournament, regulation)
+  await interaction.followUp({
+    content: `**管理パネル — ${tournament.name}**\nVCとハンデを設定したら「▶ 大会スタート」で開始できます。`,
+    components: adminRows,
     flags: MessageFlags.Ephemeral,
   })
 
@@ -824,7 +832,12 @@ async function handleEditButton(interaction: ButtonInteraction, tournamentId: nu
     await interaction.reply({ content: 'まだ参加登録されていません。「参加する」ボタンから登録してください。', flags: MessageFlags.Ephemeral })
     return true
   }
-  await showCombinedModal(interaction, `edit:${tournamentId}`, existing.rank, existing.character)
+  const currentInfo = `現在: ランク **${existing.rank ?? '未指定'}** / キャラ **${existing.character ?? '未指定'}**`
+  await interaction.reply({
+    content: `${currentInfo}\n\n新しいランクを選択してください。`,
+    components: [buildRankSelectRow(`tnm-rank-select:edit:${tournamentId}`, existing.rank)],
+    flags: MessageFlags.Ephemeral,
+  })
   return true
 }
 
@@ -873,7 +886,11 @@ async function handleJoinButton(interaction: ButtonInteraction, tournamentId: nu
     await interaction.reply({ content: `すでに参加登録済みです（ランク: ${existing.rank ?? 'なし'}）。`, flags: MessageFlags.Ephemeral })
     return true
   }
-  await showCombinedModal(interaction, `join:${tournamentId}`)
+  await interaction.reply({
+    content: 'ランクを選択してください。',
+    components: [buildRankSelectRow(`tnm-rank-select:join:${tournamentId}`)],
+    flags: MessageFlags.Ephemeral,
+  })
   return true
 }
 
@@ -979,6 +996,7 @@ async function handleWinButton(
 export async function handleSelectMenu(interaction: StringSelectMenuInteraction): Promise<boolean> {
   const parts = interaction.customId.split(':')
   if (parts[0] === 'tnm-handicap-preset') return handleHandicapPreset(interaction, parseInt(parts[1]))
+  if (parts[0] === 'tnm-rank-select')  return handleRankSelect(interaction, parts[1], parseInt(parts[2]))
   if (parts[0] === 'tnm-team-select')  return handleTeamSelectMenu(interaction, parseInt(parts[1]))
   if (parts[0] === 'tnm-assign-slot')  return handleAssignSlotSelect(interaction, parseInt(parts[1]), parts[2], parts[3])
   return false
@@ -2303,6 +2321,85 @@ function parseDiscordId(input: string): string | null {
   if (mentionMatch) return mentionMatch[1]
   if (/^\d{17,20}$/.test(trimmed)) return trimmed
   return null
+}
+
+function buildRankSelectRow(customId: string, currentRank?: string | null): ActionRowBuilder<StringSelectMenuBuilder> {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(customId)
+    .setPlaceholder('ランクを選択...')
+    .addOptions(
+      new StringSelectMenuOptionBuilder()
+        .setLabel(!currentRank ? '未指定（現在）' : '未指定')
+        .setValue('未指定'),
+      new StringSelectMenuOptionBuilder().setLabel('ランダム').setValue('ランダム'),
+      ...(RANKS as readonly string[]).map(r =>
+        new StringSelectMenuOptionBuilder()
+          .setLabel(r === currentRank ? `${r}（現在）` : r)
+          .setValue(r)
+      )
+    )
+  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)
+}
+
+async function handleRankSelect(interaction: StringSelectMenuInteraction, type: string, tournamentId: number): Promise<boolean> {
+  const selectedRank = interaction.values[0]
+  const modal = new ModalBuilder()
+    .setCustomId(`tnm-char-modal:${type}:${tournamentId}:${selectedRank}`)
+    .setTitle(type === 'join' ? '参加登録' : 'エントリー編集')
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('character')
+        .setLabel('キャラクター（部分入力 / 未指定 / ランダム）')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setPlaceholder('例: ソル、ラム、未指定、ランダム')
+    )
+  )
+  await interaction.showModal(modal)
+  return true
+}
+
+async function handleCharModal(interaction: ModalSubmitInteraction): Promise<boolean> {
+  // customId: tnm-char-modal:{type}:{tournamentId}:{rank}
+  const parts = interaction.customId.split(':')
+  const type = parts[1]
+  const tournamentId = parseInt(parts[2])
+  const rawRank = parts.slice(3).join(':')
+
+  const rank = resolveRank(rawRank)
+  const character = resolveCharacter(interaction.fields.getTextInputValue('character'))
+
+  if (type === 'join') {
+    const tournament = await TournamentModel.getById(tournamentId)
+    if (!tournament || tournament.status !== 'registration') {
+      await interaction.reply({ content: '参加受付は終了しています。', flags: MessageFlags.Ephemeral }); return true
+    }
+    const member = interaction.member as GuildMember | null
+    const displayName = member?.displayName ?? interaction.user.displayName ?? interaction.user.username
+    const result = await TournamentParticipantModel.createIfUnderCap({
+      tournament_id: tournamentId, discord_id: interaction.user.id, discord_name: displayName,
+      rank, character, maxParticipants: tournament.max_participants,
+    })
+    if (result === 'duplicate') { await interaction.reply({ content: 'すでに参加登録済みです。', flags: MessageFlags.Ephemeral }); return true }
+    if (result === 'over_cap') { await interaction.reply({ content: `❌ 定員（${tournament.max_participants}名）に達しています。`, flags: MessageFlags.Ephemeral }); return true }
+    const count = await TournamentParticipantModel.count(tournamentId)
+    if (interaction.guild) await updateAnnouncementEmbed(interaction.guild, tournament, count)
+    await interaction.reply({
+      content: `✅ **${tournament.name}** に参加しました！\nランク: **${rank ?? '未指定'}** / キャラ: **${character ?? '未指定'}**\n現在の参加者: ${count} 名`,
+      flags: MessageFlags.Ephemeral,
+    })
+  } else if (type === 'edit') {
+    const participant = await TournamentParticipantModel.getByDiscordId(tournamentId, interaction.user.id)
+    if (!participant) { await interaction.reply({ content: '参加登録が見つかりません。', flags: MessageFlags.Ephemeral }); return true }
+    await TournamentParticipantModel.setRankAndCharacter(participant.id, rank, character)
+    await interaction.reply({
+      content: `✅ エントリーを更新しました！\nランク: **${rank ?? '未指定'}** / キャラ: **${character ?? '未指定'}**`,
+      flags: MessageFlags.Ephemeral,
+    })
+  }
+
+  return true
 }
 
 // ─── Rank / character resolution ─────────────────────────────────────────────
