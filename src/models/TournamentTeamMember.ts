@@ -104,7 +104,7 @@ export class TournamentTeamMemberModel {
     })
   }
 
-  static async setCharacter(id: number, character: string): Promise<void> {
+  static async setCharacter(id: number, character: string | null): Promise<void> {
     const db = getDatabase()
     await db.execute({
       sql: 'UPDATE tournament_team_members SET character = ? WHERE id = ?',
@@ -112,7 +112,7 @@ export class TournamentTeamMemberModel {
     })
   }
 
-  static async setRank(id: number, rank: string): Promise<void> {
+  static async setRank(id: number, rank: string | null): Promise<void> {
     const db = getDatabase()
     await db.execute({
       sql: 'UPDATE tournament_team_members SET rank = ? WHERE id = ?',
