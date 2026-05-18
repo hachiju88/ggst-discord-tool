@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
-import type { ButtonInteraction, StringSelectMenuInteraction, ChannelSelectMenuInteraction } from 'discord.js';
+import type { ButtonInteraction, StringSelectMenuInteraction, ChannelSelectMenuInteraction, UserSelectMenuInteraction } from 'discord.js';
 import * as setmychar from './setmychar';
 import * as addnote from './addnote';
 import * as history from './history';
@@ -68,7 +68,7 @@ export function getModalSubmitHandler(customId: string): ((interaction: any) => 
     'tnm-combined-modal': 'tnm',
     'tnm-handicap-custom-modal': 'tnm',
     'tnm-admin-fix-modal': 'tnm',
-    'tnm-admin-enter-modal': 'tnm',
+    'tnm-admin-enter-char': 'tnm',
     'tnm-admin-team-setup-modal': 'tnm',
   };
   const commandName = prefixToCommand[prefix];
@@ -99,6 +99,14 @@ export async function channelSelectMenuHandler(interaction: ChannelSelectMenuInt
   const customId = interaction.customId;
   if (customId.startsWith('tnm-')) {
     await tnm.handleChannelSelectMenu(interaction);
+  }
+}
+
+// UserSelectMenuハンドラー
+export async function userSelectMenuHandler(interaction: UserSelectMenuInteraction): Promise<void> {
+  const customId = interaction.customId;
+  if (customId.startsWith('tnm-')) {
+    await tnm.handleUserSelectMenu(interaction);
   }
 }
 

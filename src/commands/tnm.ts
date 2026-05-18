@@ -12,7 +12,7 @@ import {
   StringSelectMenuOptionBuilder,
   ChannelSelectMenuBuilder,
   ChannelType,
-  ThreadAutoArchiveDuration,
+  UserSelectMenuBuilder,
 } from 'discord.js'
 import type {
   ChatInputCommandInteraction,
@@ -20,6 +20,7 @@ import type {
   ButtonInteraction,
   StringSelectMenuInteraction,
   ChannelSelectMenuInteraction,
+  UserSelectMenuInteraction,
   GuildMember,
   Guild,
 } from 'discord.js'
@@ -36,7 +37,6 @@ import { TournamentTeamBattleModel } from '../models/TournamentTeamBattle'
 import { TournamentParticipant } from '../models/TournamentParticipant'
 import { RANKS } from '../constants/ranks'
 import { CHARACTERS } from '../constants/characters'
-import { BracketImageService } from '../services/BracketImageService'
 
 export const data = new SlashCommandBuilder()
   .setName('tnm')
@@ -104,6 +104,13 @@ export async function handleChannelSelectMenu(interaction: ChannelSelectMenuInte
   if (interaction.customId.startsWith('tnm-vc-setup')) {
     await handleVcSetupSelect(interaction)
   }
+}
+
+export async function handleUserSelectMenu(interaction: UserSelectMenuInteraction): Promise<boolean> {
+  const parts = interaction.customId.split(':')
+  const prefix = parts[0]
+  if (prefix === 'tnm-admin-user-select') return handleAdminUserSelect(interaction, parseInt(parts[1]))
+  return false
 }
 
 // ─── Subcommand handlers ──────────────────────────────────────────────────────
@@ -179,12 +186,7 @@ async function handleView(interaction: ChatInputCommandInteraction) {
 
   if (tournament.status === 'in_progress' || tournament.status === 'completed') {
     if (tournament.format === 'single_elim' && !regulation.teamMode) {
-      try {
-        const { attachment, embed } = await BracketImageService.formatBracketAsAttachment(tournament.id)
-        await interaction.editReply({ embeds: [embed], files: [attachment] })
-      } catch {
-        await interaction.editReply({ embeds: [await BracketService.formatBracketEmbed(tournament.id)] })
-      }
+      await interaction.editReply({ embeds: [await BracketService.formatBracketEmbed(tournament.id)] })
     } else if (tournament.format === 'league') {
       await interaction.editReply({ embeds: [await LeagueService.formatLeagueEmbed(tournament.id)] })
     } else if (tournament.format === 'swiss') {
@@ -439,6 +441,10 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   if (interaction.customId.startsWith('tnm-char-modal:')) return handleCharModal(interaction)
   if (interaction.customId.startsWith('tnm-admin-fix-modal:')) return handleAdminFixModal(interaction, parseInt(interaction.customId.split(':')[1]))
   if (interaction.customId.startsWith('tnm-admin-enter-modal:')) return handleAdminEnterModal(interaction, parseInt(interaction.customId.split(':')[1]))
+  if (interaction.customId.startsWith('tnm-admin-enter-char:')) {
+    const p = interaction.customId.split(':')
+    return handleAdminEnterCharModal(interaction, parseInt(p[1]), p[2], p.slice(3).join(':'))
+  }
   if (interaction.customId.startsWith('tnm-admin-team-setup-modal:')) return handleAdminTeamSetupModal(interaction, parseInt(interaction.customId.split(':')[1]))
   if (interaction.customId.startsWith('tnm-team-create:modal')) {
     const tournamentId = parseInt(interaction.customId.split(':')[2])
@@ -1152,6 +1158,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
   const parts = interaction.customId.split(':')
   if (parts[0] === 'tnm-handicap-preset') return handleHandicapPreset(interaction, parseInt(parts[1]))
   if (parts[0] === 'tnm-rank-select')  return handleRankSelect(interaction, parts[1], parseInt(parts[2]))
+  if (parts[0] === 'tnm-admin-enter-rank') return handleAdminEnterRank(interaction, parseInt(parts[1]), parts[2])
   if (parts[0] === 'tnm-team-select')  return handleTeamSelectMenu(interaction, parseInt(parts[1]))
   if (parts[0] === 'tnm-assign-slot')  return handleAssignSlotSelect(interaction, parseInt(parts[1]), parts[2], parts[3])
   return false
@@ -1990,7 +1997,7 @@ async function handleAutoAssign(
 // ─── Admin panel button / modal handlers ─────────────────────────────────────
 
 async function checkAdminPermission(
-  interaction: ButtonInteraction | ModalSubmitInteraction,
+  interaction: ButtonInteraction | ModalSubmitInteraction | UserSelectMenuInteraction,
   tournament: { created_by: string }
 ): Promise<boolean> {
   const member = interaction.member as GuildMember | null
@@ -2048,11 +2055,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
     }
     await TournamentModel.setStatus(tournament.id, 'in_progress')
 
-    let teamMatchTarget: any = channel
-    try {
-      const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
-      teamMatchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
-    } catch { /* fallback */ }
+    const teamMatchTarget: any = channel
 
     for (const matchId of matchIds) {
       try {
@@ -2080,11 +2083,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
     await TournamentModel.setStatus(tournament.id, 'in_progress')
     await channel.send({ embeds: [await SwissService.formatSwissEmbed(tournament.id)] })
 
-    let swissMatchTarget: any = channel
-    try {
-      const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
-      swissMatchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
-    } catch { /* fallback */ }
+    const swissMatchTarget: any = channel
 
     for (const matchId of matchIds) {
       try {
@@ -2103,11 +2102,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
     await TournamentModel.setStatus(tournament.id, 'in_progress')
     await channel.send({ embeds: [await LeagueService.formatLeagueEmbed(tournament.id)] })
 
-    let leagueMatchTarget: any = channel
-    try {
-      const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
-      leagueMatchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
-    } catch { /* fallback */ }
+    const leagueMatchTarget: any = channel
 
     for (const matchId of matchIds) {
       try {
@@ -2143,11 +2138,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
     })
   }
 
-  let matchTarget: any = channel
-  try {
-    const tp = await channel.send({ content: `━━━━━━━━━━━━━━━━━━━━━━\n🏆 **${tournament.name}** — 試合はこのスレッドで行います` })
-    matchTarget = await (tp as any).startThread({ name: `${tournament.name} 試合`.slice(0, 100), autoArchiveDuration: ThreadAutoArchiveDuration.ThreeDays })
-  } catch { /* fallback */ }
+  const matchTarget: any = channel
 
   for (const matchId of playableMatchIds) {
     try {
@@ -2385,21 +2376,33 @@ async function handleAdminEnter(interaction: ButtonInteraction, tournamentId: nu
     await interaction.reply({ content: '❌ 権限がありません。', flags: MessageFlags.Ephemeral }); return true
   }
 
-  const modal = new ModalBuilder()
-    .setCustomId(`tnm-admin-enter-modal:${tournamentId}`)
-    .setTitle('代理エントリー')
-  modal.addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId('user').setLabel('ユーザー（@メンション または ID）').setStyle(TextInputStyle.Short).setRequired(true)
-    ),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId('rank').setLabel('ランク（部分入力 / 未指定 / ランダム）').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('例: ダイヤ２、未指定')
-    ),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId('character').setLabel('キャラ（部分入力 / 未指定 / ランダム）').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('例: ソル、未指定')
-    ),
+  const row = new ActionRowBuilder<any>().addComponents(
+    new UserSelectMenuBuilder()
+      .setCustomId(`tnm-admin-user-select:${tournamentId}`)
+      .setPlaceholder('参加させるユーザーを選択...')
+      .setMinValues(1)
+      .setMaxValues(1)
   )
-  await interaction.showModal(modal)
+  await interaction.reply({
+    content: '👤 代理エントリーするユーザーを選択してください。',
+    components: [row],
+    flags: MessageFlags.Ephemeral,
+  })
+  return true
+}
+
+async function handleAdminUserSelect(interaction: UserSelectMenuInteraction, tournamentId: number): Promise<boolean> {
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.update({ content: '❌ 大会が見つかりません。', components: [] }); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.update({ content: '❌ 権限がありません。', components: [] }); return true
+  }
+
+  const userId = interaction.values[0]
+  await interaction.update({
+    content: `👤 <@${userId}> のランクを選択してください。`,
+    components: [buildRankSelectRow(`tnm-admin-enter-rank:${tournamentId}:${userId}`)],
+  })
   return true
 }
 
@@ -2443,6 +2446,65 @@ async function handleAdminEnterModal(interaction: ModalSubmitInteraction, tourna
     const count = await TournamentParticipantModel.count(tournamentId)
     if (interaction.guild) await updateAnnouncementEmbed(interaction.guild, tournament, count)
     await interaction.editReply(`✅ **${targetName}** をエントリーしました。\nランク: **${rank ?? '未指定'}** / キャラ: **${character ?? '未指定'}**`)
+  }
+  return true
+}
+
+async function handleAdminEnterRank(interaction: StringSelectMenuInteraction, tournamentId: number, userId: string): Promise<boolean> {
+  const selectedRank = interaction.values[0]
+  const modal = new ModalBuilder()
+    .setCustomId(`tnm-admin-enter-char:${tournamentId}:${userId}:${selectedRank}`)
+    .setTitle('代理エントリー — キャラ入力')
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId('character')
+        .setLabel('使用キャラ（部分入力可 / 未指定）')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setPlaceholder('例: ソル、未指定')
+    )
+  )
+  await interaction.showModal(modal)
+  return true
+}
+
+async function handleAdminEnterCharModal(
+  interaction: ModalSubmitInteraction,
+  tournamentId: number,
+  userId: string,
+  rawRank: string
+): Promise<boolean> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) { await interaction.editReply('❌ 大会が見つかりません。'); return true }
+  if (!await checkAdminPermission(interaction, tournament)) {
+    await interaction.editReply('❌ 権限がありません。'); return true
+  }
+
+  const rank = resolveRank(rawRank)
+  const character = resolveCharacter(interaction.fields.getTextInputValue('character'))
+
+  let targetName = userId
+  try {
+    const gm = await interaction.guild?.members.fetch(userId)
+    targetName = gm?.displayName ?? gm?.user.username ?? userId
+  } catch { /* fallback */ }
+
+  const existing = await TournamentParticipantModel.getByDiscordId(tournament.id, userId)
+  if (existing) {
+    await TournamentParticipantModel.setRankAndCharacter(existing.id, rank, character)
+    await interaction.editReply(`✅ **${targetName}** のエントリー情報を更新しました。${rank ? ` ランク: ${rank}` : ''}${character ? ` キャラ: ${character}` : ''}`)
+  } else {
+    await TournamentParticipantModel.create({
+      tournament_id: tournament.id,
+      discord_id: userId,
+      discord_name: targetName,
+      rank: rank ?? null,
+      character: character ?? null,
+    })
+    await interaction.editReply(`✅ **${targetName}** を代理エントリーしました。${rank ? ` ランク: ${rank}` : ''}${character ? ` キャラ: ${character}` : ''}`)
   }
   return true
 }

@@ -216,7 +216,9 @@ export class SwissService {
 
     const lines = [
       `\`#${match.match_code}\`  スイスドロー Round ${round}/${totalRounds}  【${winsLabel}】`,
-      `${p1Display}  vs  ${p2Display}`,
+      p1Display,
+      '**vs**',
+      p2Display,
     ]
 
     if (match.handicap_rounds > 0 && match.handicap_player_name) {

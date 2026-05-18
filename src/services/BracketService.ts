@@ -234,7 +234,9 @@ export class BracketService {
 
     const lines: string[] = [
       `\`#${match.match_code ?? '------'}\`  Round ${match.round} - Match ${match.match_number}  【${winsLabel}】`,
-      `${p1Display}  vs  ${p2Display}`,
+      p1Display,
+      '**vs**',
+      p2Display,
     ]
 
     if (match.handicap_rounds > 0 && match.handicap_player_name) {
@@ -283,55 +285,60 @@ export class BracketService {
 
     const roundsMap = new Map<number, MatchWithParticipants[]>()
     for (const m of matches) {
+      if (m.status === 'bye') continue
       if (!roundsMap.has(m.round)) roundsMap.set(m.round, [])
       roundsMap.get(m.round)!.push(m)
     }
 
-    const totalRounds = roundsMap.size > 0 ? Math.max(...roundsMap.keys()) : 0
+    const sortedRounds = [...roundsMap.keys()].sort((a, b) => a - b)
+    const totalRounds = sortedRounds.length
 
-    for (const [round, roundMatches] of [...roundsMap.entries()].sort((a, b) => a[0] - b[0])) {
-      const roundName =
-        round === totalRounds
-          ? '決勝'
-          : round === totalRounds - 1 && totalRounds > 2
-          ? '準決勝'
-          : `Round ${round}`
+    function roundName(r: number): string {
+      if (r === totalRounds) return '決勝'
+      if (r === totalRounds - 1 && totalRounds > 2) return '準決勝'
+      if (r === totalRounds - 2 && totalRounds > 3) return '準々決勝'
+      return `Round ${r}`
+    }
 
-      const lines: string[] = []
+    const descLines: string[] = []
+
+    for (const round of sortedRounds) {
+      const roundMatches = [...(roundsMap.get(round) ?? [])].sort((a, b) => a.match_number - b.match_number)
+      if (roundMatches.length === 0) continue
+
+      descLines.push(`**━━ ${roundName(round)} ━━**`)
+
       for (const m of roundMatches) {
-        if (m.status === 'bye') continue
-
         const p1 = m.p1_discord_id
-          ? `<@${m.p1_discord_id}>${m.p1_rank ? `[${m.p1_rank}]` : ''}${m.p1_character ? `(${m.p1_character})` : ''}`
+          ? `<@${m.p1_discord_id}>${m.p1_rank ? ` [${m.p1_rank}]` : ''}`
           : 'TBD'
         const p2 = m.p2_discord_id
-          ? `<@${m.p2_discord_id}>${m.p2_rank ? `[${m.p2_rank}]` : ''}${m.p2_character ? `(${m.p2_character})` : ''}`
+          ? `<@${m.p2_discord_id}>${m.p2_rank ? ` [${m.p2_rank}]` : ''}`
           : 'TBD'
 
-        let line = `\`#${m.match_code ?? '------'}\`  ${p1} vs ${p2}`
-
         if (m.status === 'completed' && m.winner_discord_id) {
-          line += `  ✅ <@${m.winner_discord_id}> の勝利`
-        } else if (m.handicap_rounds > 0 && m.handicap_player_name) {
-          line += `  ⚖️ ${m.handicap_rounds}R落とし(${m.handicap_player_name})`
+          const isP1Winner = m.winner_discord_id === m.p1_discord_id
+          const winner = isP1Winner ? p1 : p2
+          const loser = isP1Winner ? p2 : p1
+          descLines.push(`✅ ${winner}  **def.**  ${loser}`)
+        } else if (!m.p1_discord_id || !m.p2_discord_id) {
+          descLines.push(`⬜ ${p1}  vs  ${p2}`)
+        } else {
+          const handicapSuffix = m.handicap_rounds > 0 && m.handicap_player_name
+            ? `  ⚖️ ${m.handicap_player_name}に${m.handicap_rounds}R落とし`
+            : ''
+          descLines.push(`⚔️ ${p1}  vs  ${p2}${handicapSuffix}`)
         }
-
-        if (m.vc_channel_id && m.status !== 'completed') {
-          line += `  🎤 <#${m.vc_channel_id}>`
-        }
-
-        lines.push(line)
       }
 
-      if (lines.length > 0) {
-        const fieldValue = lines.join('\n')
-        // Discord embed field value limit is 1024 chars
-        embed.addFields({ name: roundName, value: fieldValue.slice(0, 1024) })
-      }
+      descLines.push('')
     }
 
     const active = matches.filter(m => m.status !== 'bye')
     const completed = active.filter(m => m.status === 'completed')
+
+    const description = descLines.join('\n').slice(0, 4000) || '試合はまだありません。'
+    embed.setDescription(description)
     embed.setFooter({
       text: `進行状況: ${completed.length}/${active.length} 試合完了 | ${regulation.winsRequired}先 / ${regulation.roundsRequired ?? 2}ラウンド`,
     })
