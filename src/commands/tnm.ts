@@ -1921,7 +1921,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
       ? await LeagueService.formatLeagueEmbed(tournament.id)
       : await BracketService.formatBracketEmbed(tournament.id)
     await channel.send({ embeds: [bracketEmbed] })
-    await disableAnnouncementButtons(interaction.guild, tournament)
+    await setAnnouncementButtonsDisabled(interaction.guild, tournament, true, '大会開始済み — 受付終了')
     await interaction.editReply('✅ 大会を開始しました！')
     return true
   }
@@ -1946,7 +1946,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
         await TournamentMatchModel.setMessageId(matchId, msg.id)
       } catch (err) { console.error(`[tnm] Failed to post swiss match ${matchId}:`, err) }
     }
-    await disableAnnouncementButtons(interaction.guild, tournament)
+    await setAnnouncementButtonsDisabled(interaction.guild, tournament, true, '大会開始済み — 受付終了')
     await interaction.editReply('✅ 大会を開始しました！')
     return true
   }
@@ -1969,7 +1969,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
         await TournamentMatchModel.setMessageId(matchId, msg.id)
       } catch (err) { console.error(`[tnm] Failed to post league match ${matchId}:`, err) }
     }
-    await disableAnnouncementButtons(interaction.guild, tournament)
+    await setAnnouncementButtonsDisabled(interaction.guild, tournament, true, '大会開始済み — 受付終了')
     await interaction.editReply('✅ 大会を開始しました！')
     return true
   }
@@ -2010,7 +2010,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
     } catch (err) { console.error(`[tnm] Failed to post match ${matchId}:`, err) }
   }
 
-  await disableAnnouncementButtons(interaction.guild, tournament)
+  await setAnnouncementButtonsDisabled(interaction.guild, tournament, true, '大会開始済み — 受付終了')
   await interaction.editReply('✅ 大会を開始しました！')
   return true
 }
@@ -2028,6 +2028,7 @@ async function handleAdminClose(interaction: ButtonInteraction, tournamentId: nu
   }
 
   await TournamentModel.setStatus(tournament.id, 'closed')
+  await setAnnouncementButtonsDisabled(interaction.guild, tournament, true, '参加受付終了')
   const count = await TournamentParticipantModel.count(tournament.id)
   await interaction.editReply(`🔒 **${tournament.name}** の参加受付を終了しました。（${count} 名）\n再開する場合は再度 \`/tnm view\` から「🔓 受付を再開」を押してください。`)
   return true
@@ -2046,14 +2047,17 @@ async function handleAdminReopen(interaction: ButtonInteraction, tournamentId: n
   }
 
   await TournamentModel.setStatus(tournament.id, 'registration')
+  await setAnnouncementButtonsDisabled(interaction.guild, tournament, false, '参加受付中')
   await interaction.editReply(`🔓 **${tournament.name}** の参加受付を再開しました。`)
   return true
 }
 
-// 大会開始時に告知メッセージの参加ボタンを無効化する
-async function disableAnnouncementButtons(
+// 告知メッセージの参加コンポーネント（ボタン・セレクト）の有効/無効を切り替える
+async function setAnnouncementButtonsDisabled(
   guild: Guild | null,
-  tournament: { channel_id: string | null; announcement_message_id: string | null }
+  tournament: { channel_id: string | null; announcement_message_id: string | null },
+  disabled: boolean,
+  footerText?: string
 ): Promise<void> {
   if (!guild || !tournament.channel_id || !tournament.announcement_message_id) return
   try {
@@ -2061,24 +2065,26 @@ async function disableAnnouncementButtons(
     if (!ch || !ch.isTextBased() || ch.isDMBased()) return
     const msg = await ch.messages.fetch(tournament.announcement_message_id)
     if (!msg.editable) return
-    const disabledRows: ActionRowBuilder<ButtonBuilder>[] = []
+    const rows: ActionRowBuilder<any>[] = []
     for (const row of msg.components) {
       const components = (row as any).components
       if (!Array.isArray(components)) continue
-      const r = new ActionRowBuilder<ButtonBuilder>()
+      const r = new ActionRowBuilder<any>()
       for (const c of components) {
         if (c.type === 2) { // Button
-          r.addComponents(ButtonBuilder.from(c).setDisabled(true))
+          r.addComponents(ButtonBuilder.from(c).setDisabled(disabled))
+        } else if (c.type === 3) { // StringSelectMenu
+          r.addComponents(StringSelectMenuBuilder.from(c).setDisabled(disabled))
         }
       }
-      if (r.components.length > 0) disabledRows.push(r)
+      if (r.components.length > 0) rows.push(r)
     }
-    const embed = msg.embeds[0]
-      ? EmbedBuilder.from(msg.embeds[0]).setFooter({ text: '大会開始済み — 受付終了' })
+    const embed = footerText && msg.embeds[0]
+      ? EmbedBuilder.from(msg.embeds[0]).setFooter({ text: footerText })
       : null
     await msg.edit({
       embeds: embed ? [embed] : msg.embeds,
-      components: disabledRows,
+      components: rows,
     })
   } catch { /* ベストエフォート */ }
 }
@@ -2110,6 +2116,7 @@ async function handleAdminDeleteConfirm(interaction: ButtonInteraction, tourname
     await interaction.editReply({ content: '❌ 権限がありません。', components: [] }); return true
   }
   const name = tournament.name
+  await setAnnouncementButtonsDisabled(interaction.guild, tournament, true)
   await TournamentModel.delete(tournament.id)
   await interaction.editReply({ content: `🗑 **${name}** を削除しました。`, components: [] })
   return true
@@ -2526,58 +2533,7 @@ async function handleCombinedModal(interaction: ModalSubmitInteraction): Promise
   const rank = resolveRank(rawRank)
   const character = resolveCharacter(rawChar)
 
-  if (type === 'join') {
-    const tournament = await TournamentModel.getById(tournamentId)
-    if (!tournament || tournament.status !== 'registration') {
-      await interaction.reply({ content: '参加受付は終了しています。', flags: MessageFlags.Ephemeral }); return true
-    }
-    const member = interaction.member as GuildMember | null
-    const displayName = member?.displayName ?? interaction.user.displayName ?? interaction.user.username
-    const result = await TournamentParticipantModel.createIfUnderCap({
-      tournament_id: tournamentId, discord_id: interaction.user.id, discord_name: displayName,
-      rank, character, maxParticipants: tournament.max_participants,
-    })
-    if (result === 'duplicate') { await interaction.reply({ content: 'すでに参加登録済みです。', flags: MessageFlags.Ephemeral }); return true }
-    if (result === 'over_cap') { await interaction.reply({ content: `❌ 定員（${tournament.max_participants}名）に達しています。`, flags: MessageFlags.Ephemeral }); return true }
-    const count = await TournamentParticipantModel.count(tournamentId)
-    if (interaction.guild) await updateAnnouncementEmbed(interaction.guild, tournament, count)
-    await interaction.reply({
-      content: `✅ **${tournament.name}** に参加しました！\nランク: **${rank ?? '未指定'}** / キャラ: **${character ?? '未指定'}**\n現在の参加者: ${count} 名`,
-      flags: MessageFlags.Ephemeral,
-    })
-
-  } else if (type === 'edit') {
-    const participant = await TournamentParticipantModel.getByDiscordId(tournamentId, interaction.user.id)
-    if (!participant) { await interaction.reply({ content: '参加登録が見つかりません。', flags: MessageFlags.Ephemeral }); return true }
-    await TournamentParticipantModel.setRankAndCharacter(participant.id, rank, character)
-    await interaction.reply({ content: `✅ エントリーを更新しました！\nランク: **${rank ?? '未指定'}** / キャラ: **${character ?? '未指定'}**`, flags: MessageFlags.Ephemeral })
-
-  } else if (type === 'admin') {
-    const targetDiscordId = extraId
-    const tournament = await TournamentModel.getById(tournamentId)
-    if (!tournament || tournament.status !== 'registration') { await interaction.reply({ content: '参加受付は終了しています。', flags: MessageFlags.Ephemeral }); return true }
-    let targetName = targetDiscordId
-    try {
-      const gm = await interaction.guild?.members.fetch(targetDiscordId)
-      targetName = gm?.displayName ?? gm?.user.username ?? targetDiscordId
-    } catch { /* fallback */ }
-    const existing = await TournamentParticipantModel.getByDiscordId(tournamentId, targetDiscordId)
-    if (existing) {
-      await TournamentParticipantModel.setRankAndCharacter(existing.id, rank, character)
-      await interaction.reply({ content: `✅ **${targetName}** のエントリーを更新しました。\nランク: **${rank ?? '未指定'}** / キャラ: **${character ?? '未指定'}**`, flags: MessageFlags.Ephemeral })
-    } else {
-      if (tournament.max_participants) {
-        const count = await TournamentParticipantModel.count(tournamentId)
-        if (count >= tournament.max_participants) { await interaction.reply({ content: `❌ 定員（${tournament.max_participants}名）に達しています。`, flags: MessageFlags.Ephemeral }); return true }
-      }
-      const displayName = targetName
-      await TournamentParticipantModel.create({ tournament_id: tournamentId, discord_id: targetDiscordId, discord_name: displayName, rank, character })
-      const count = await TournamentParticipantModel.count(tournamentId)
-      if (interaction.guild) await updateAnnouncementEmbed(interaction.guild, tournament, count)
-      await interaction.reply({ content: `✅ **${targetName}** をエントリーしました。\nランク: **${rank ?? '未指定'}** / キャラ: **${character ?? '未指定'}**`, flags: MessageFlags.Ephemeral })
-    }
-
-  } else if (type === 'team') {
+  if (type === 'team') {
     const teamId = parseInt(extraId)
     const member = await TournamentTeamMemberModel.getByDiscordId(teamId, interaction.user.id)
     if (!member) { await interaction.reply({ content: '❌ メンバーが見つかりません。', flags: MessageFlags.Ephemeral }); return true }
