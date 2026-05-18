@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, REST, Routes, MessageFlags } from 'discord.js';
-import { commandHandler, getAutocompleteHandler, getModalSubmitHandler } from './commands';
+import { commandHandler, getAutocompleteHandler, getModalSubmitHandler, buttonHandler, selectMenuHandler, channelSelectMenuHandler } from './commands';
 
 export function createClient(): Client {
   const client = new Client({
@@ -18,6 +18,45 @@ export function createClient(): Client {
 
   // Interaction イベント（スラッシュコマンド処理）
   client.on('interactionCreate', async (interaction) => {
+    // ボタン処理
+    if (interaction.isButton()) {
+      try {
+        await buttonHandler(interaction);
+      } catch (error) {
+        console.error('[Button] Error:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
+        }
+      }
+      return;
+    }
+
+    // セレクトメニュー処理
+    if (interaction.isStringSelectMenu()) {
+      try {
+        await selectMenuHandler(interaction);
+      } catch (error) {
+        console.error('[SelectMenu] Error:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
+        }
+      }
+      return;
+    }
+
+    // チャンネルセレクトメニュー処理（VC設定など）
+    if (interaction.isChannelSelectMenu()) {
+      try {
+        await channelSelectMenuHandler(interaction);
+      } catch (error) {
+        console.error('[ChannelSelectMenu] Error:', error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'エラーが発生しました。', flags: MessageFlags.Ephemeral });
+        }
+      }
+      return;
+    }
+
     // モーダル送信処理
     if (interaction.isModalSubmit()) {
       try {
