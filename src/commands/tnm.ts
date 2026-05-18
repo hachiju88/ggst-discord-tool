@@ -88,6 +88,7 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand(s => s.setName('view').setDescription('現在の大会状況を表示します（主催者には管理パネルも表示）'))
   .addSubcommand(s => s.setName('list').setDescription('このサーバーの大会一覧を表示します'))
+  .addSubcommand(s => s.setName('help').setDescription('大会ボットの使い方をフロー付きで表示します'))
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand()
@@ -95,6 +96,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (sub === 'create') return handleCreate(interaction)
   if (sub === 'view') return handleView(interaction)
   if (sub === 'list') return handleList(interaction)
+  if (sub === 'help') return handleHelp(interaction)
 }
 
 
@@ -279,6 +281,141 @@ async function handleList(interaction: ChatInputCommandInteraction) {
     .setTimestamp()
 
   await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral })
+}
+
+// ─── Help ─────────────────────────────────────────────────────────────────────
+
+const HELP_PAGES: { title: string; description: string; color: number }[] = [
+  {
+    title: '🏆 大会管理ボット — 使い方ガイド (1/4)',
+    description: [
+      '**━━ 主催者の流れ ━━**',
+      '`/tnm create`',
+      '　　↓ モーダルで大会名・先取数・ハンデを入力',
+      '📢 大会告知メッセージが自動投稿される',
+      '　　↓ 参加者がボタンで参加登録',
+      '🔒 必要に応じて管理パネルから「受付終了」',
+      '　　↓',
+      '▶ 管理パネルから「**大会スタート**」',
+      '　　↓ ブラケット・試合メッセージが自動生成',
+      '🏁 試合完了 → 次ラウンドへ自動進行 → 優勝者発表',
+      '',
+      '**━━ 参加者の流れ ━━**',
+      '🎮 告知メッセージの「**参加する**」ボタンを押す',
+      '　　↓ ランクをドロップダウンで選択',
+      '　　↓ キャラ名を入力して送信',
+      '✅ 参加登録完了',
+      '　　↓ 大会スタート後',
+      '🏆 試合メッセージの「**〇〇の勝利**」ボタンで結果報告',
+    ].join('\n'),
+    color: 0xf5a623,
+  },
+  {
+    title: '👑 主催者ガイド (2/4)',
+    description: [
+      '**コマンド一覧**',
+      '`/tnm create` — 大会を作成（形式・団体戦を選択可）',
+      '`/tnm view` — 大会状況 + 管理パネルを表示',
+      '`/tnm list` — このサーバーの大会一覧',
+      '',
+      '**管理パネル（`/tnm view` 後に表示）**',
+      '▶ **大会スタート** — ブラケット生成・試合開始',
+      '🔒 **受付終了** — 参加受付を締め切る',
+      '🔓 **受付を再開** — 受付終了後に再開する',
+      '👤+ **代理エントリー** — 主催者が代わりに参加者を追加',
+      '✏️ **結果修正** — 間違った勝利報告を修正（進行中のみ）',
+      '👥 **チーム設定** — チーム名を設定（団体戦のみ）',
+      '🎲 **振り分け** — 参加者をチームに自動配分（団体戦のみ）',
+      '🗑 **大会削除** — 大会データをすべて削除',
+    ].join('\n'),
+    color: 0x5865f2,
+  },
+  {
+    title: '🎮 参加者ガイド (3/4)',
+    description: [
+      '**参加登録の流れ**',
+      '1️⃣ 告知メッセージの「参加する 🎮」ボタンを押す',
+      '2️⃣ ランクをドロップダウンから選択する',
+      '　　（未指定・ランダムも選べます）',
+      '3️⃣ 使用キャラ名を入力して送信',
+      '✅ 登録完了！「参加者一覧 📋」ボタンで確認できます',
+      '',
+      '**試合の流れ**',
+      '• 試合メッセージに対戦相手・ハンデ・VCが表示される',
+      '• 試合終了後に「〇〇の勝利」ボタンを押す',
+      '　（誰でも押せます。不正報告はマッチコードで主催者が管理）',
+      '• 勝者が自動的に次ラウンドへ進む',
+      '',
+      '**告知メッセージ上の操作**',
+      '✏️ **エントリー編集** — ランク・キャラを変更する',
+      '❌ **参加取り消し** — 大会開始前に参加をキャンセルする',
+      '📋 **参加者一覧** — 現在の参加者を確認する',
+    ].join('\n'),
+    color: 0x57f287,
+  },
+  {
+    title: '📋 大会形式ガイド (4/4)',
+    description: [
+      '**🗡 シングルエリミネーション（デフォルト）**',
+      '負けたら脱落。勝ち続けた1名が優勝。',
+      '参加人数は2のべき乗に自動調整（Bye処理あり）。最大64名。',
+      '',
+      '**⚖️ リーグ戦（総当たり）**',
+      '全員と1回ずつ対戦してポイントを競う。',
+      '同点の場合は直接対決の結果で順位決定。',
+      '',
+      '**🎲 スイスドロー**',
+      '同じ勝利数の相手とマッチングするペアリング。',
+      '総ラウンド数を事前設定（例: 5ラウンド）。',
+      '',
+      '**⚖️ ハンデルール**',
+      'ランク差に応じて強い側に「ラウンド落とし」を適用。',
+      '入力例: `3:1,7:2` → ランク差3以上で1R落とし、7以上で2R落とし',
+      '「先取2」でハンデ1Rなら、強い側は3勝が必要。',
+      '',
+      '**👥 団体戦モード**',
+      'チームを組んで対戦。ポジション対応または勝ち抜き戦を選択可。',
+    ].join('\n'),
+    color: 0xeb459e,
+  },
+]
+
+function buildHelpEmbed(page: number): EmbedBuilder {
+  const p = HELP_PAGES[page]
+  return new EmbedBuilder().setTitle(p.title).setDescription(p.description).setColor(p.color)
+}
+
+function buildHelpNavRow(page: number): ActionRowBuilder<ButtonBuilder> {
+  const last = HELP_PAGES.length - 1
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`tnm-help-page:${page - 1}`)
+      .setLabel('◀ 前のページ')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page === 0),
+    new ButtonBuilder()
+      .setCustomId(`tnm-help-page:${page + 1}`)
+      .setLabel('次のページ ▶')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page === last),
+  )
+}
+
+async function handleHelp(interaction: ChatInputCommandInteraction): Promise<void> {
+  await interaction.reply({
+    embeds: [buildHelpEmbed(0)],
+    components: [buildHelpNavRow(0)],
+    flags: MessageFlags.Ephemeral,
+  })
+}
+
+async function handleHelpPage(interaction: ButtonInteraction, page: number): Promise<boolean> {
+  if (page < 0 || page >= HELP_PAGES.length) return true
+  await interaction.update({
+    embeds: [buildHelpEmbed(page)],
+    components: [buildHelpNavRow(page)],
+  })
+  return true
 }
 
 // (handleClose / handleLeave / handleFix / handleDelete moved to admin panel button handlers)
@@ -576,6 +713,7 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
   if (prefix === 'tnm-admin-enter')         return handleAdminEnter(interaction, parseInt(parts[1]))
   if (prefix === 'tnm-admin-team-setup')    return handleAdminTeamSetup(interaction, parseInt(parts[1]))
   if (prefix === 'tnm-admin-assign')        return handleAdminAssign(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-help-page')           return handleHelpPage(interaction, parseInt(parts[1]))
 
   return false
 }
