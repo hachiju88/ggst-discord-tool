@@ -852,6 +852,7 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
   if (prefix === 'tnm-battle-win')   return handleBattleWin(interaction, parseInt(parts[1]), parseInt(parts[2]))
   if (prefix === 'tnm-battle-score') return handleBattleScore(interaction, parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3]))
   if (prefix === 'tnm-assign')       return handleAssignButton(interaction, parseInt(parts[1]), parts[2])
+  if (prefix === 'tnm-auto-assign')  return handleAutoAssign(interaction, parseInt(parts[1]), parts[2] as 'balanced' | 'random')
 
   return false
 }
@@ -1806,21 +1807,11 @@ async function handleTeamSetup(interaction: ChatInputCommandInteraction) {
   await interaction.editReply(`✅ チームを作成しました:\n${created.map(n => `• ${n}`).join('\n')}`)
 }
 
-async function handleTeamAssign(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply()
-  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
-  if (!tournament) { await interaction.editReply('❌ アクティブな大会が見つかりません。'); return }
-  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
-  if (!regulation.teamMode || regulation.teamEntryMode !== 'assign') {
-    await interaction.editReply('❌ この大会は「振り分け」エントリー方式ではありません。'); return
-  }
-
-  const teams = await TournamentTeamModel.getByTournament(tournament.id)
-  if (teams.length === 0) { await interaction.editReply('❌ 先に `/tnm team-setup` でチームを作成してください。'); return }
-
-  const allMembers = await TournamentTeamMemberModel.getByTournament(tournament.id)
+async function buildAssignPanel(tournamentId: number): Promise<{ content: string; components: ActionRowBuilder<ButtonBuilder>[] }> {
+  const teams = await TournamentTeamModel.getByTournament(tournamentId)
+  const allMembers = await TournamentTeamMemberModel.getByTournament(tournamentId)
   const assignedIds = new Set(allMembers.map(m => m.discord_id))
-  const participants = await TournamentParticipantModel.getByTournament(tournament.id)
+  const participants = await TournamentParticipantModel.getByTournament(tournamentId)
   const unassigned = participants.filter(p => !isTeamProxy(p.discord_id) && !assignedIds.has(p.discord_id))
 
   const teamLines = await Promise.all(teams.map(async t => {
@@ -1836,30 +1827,67 @@ async function handleTeamAssign(interaction: ChatInputCommandInteraction) {
     '**チーム振り分けパネル**',
     ...teamLines,
     '',
-    `未配置: ${unassigned.length}名`,
+    `未配置: ${unassigned.length}名${unassigned.length > 0 ? '（ボタンで個別配置 / 下の自動振り分けも使えます）' : ' ✅'}`,
   ]
 
   const rows: ActionRowBuilder<ButtonBuilder>[] = []
+  // 未配置プレイヤーボタン（最大20名、5列×4行）
   for (let i = 0; i < unassigned.length && i < 20; i += 5) {
     const row = new ActionRowBuilder<ButtonBuilder>()
     for (let j = i; j < Math.min(i + 5, unassigned.length); j++) {
       const p = unassigned[j]
+      const rankLabel = p.rank ? ` [${p.rank}]` : ''
       row.addComponents(
         new ButtonBuilder()
-          .setCustomId(`tnm-assign:${tournament.id}:${p.discord_id}`)
-          .setLabel(p.discord_name.slice(0, 20))
+          .setCustomId(`tnm-assign:${tournamentId}:${p.discord_id}`)
+          .setLabel(`${p.discord_name.slice(0, 15)}${rankLabel}`.slice(0, 20))
           .setStyle(ButtonStyle.Secondary)
       )
     }
     rows.push(row)
   }
 
-  const msg = await interaction.editReply({ content: lines.join('\n'), components: rows })
+  // 自動振り分けボタン行（常に末尾に表示、最大5行制限を守る）
+  if (rows.length < 5 && unassigned.length > 0) {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`tnm-auto-assign:${tournamentId}:balanced`)
+        .setLabel('🎯 ランクバランス自動振り分け')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`tnm-auto-assign:${tournamentId}:random`)
+        .setLabel('🎲 完全ランダム振り分け')
+        .setStyle(ButtonStyle.Secondary),
+    ))
+  }
+
+  return { content: lines.join('\n'), components: rows }
+}
+
+async function handleTeamAssign(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply()
+  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
+  if (!tournament) { await interaction.editReply('❌ アクティブな大会が見つかりません。'); return }
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+  if (!regulation.teamMode || regulation.teamEntryMode !== 'assign') {
+    await interaction.editReply('❌ この大会は「振り分け」エントリー方式ではありません。'); return
+  }
+
+  const teams = await TournamentTeamModel.getByTournament(tournament.id)
+  if (teams.length === 0) { await interaction.editReply('❌ 先に `/tnm team-setup` でチームを作成してください。'); return }
+
+  const { content, components } = await buildAssignPanel(tournament.id)
+  await interaction.editReply({ content, components })
 }
 
 async function handleAssignButton(interaction: ButtonInteraction, tournamentId: number, discordId: string): Promise<boolean> {
   const tournament = await TournamentModel.getById(tournamentId)
   if (!tournament) { await interaction.reply({ content: '❌', flags: MessageFlags.Ephemeral }); return true }
+
+  // 名前を participant から引く
+  const participant = await TournamentParticipantModel.getByDiscordId(tournamentId, discordId)
+  const displayName = participant?.discord_name ?? discordId
+
   const teams = await TournamentTeamModel.getByTournament(tournamentId)
 
   const options: StringSelectMenuOptionBuilder[] = []
@@ -1887,7 +1915,7 @@ async function handleAssignButton(interaction: ButtonInteraction, tournamentId: 
     .addOptions(options.slice(0, 25))
 
   await interaction.reply({
-    content: `**${discordId}** をどのポジションに配置しますか？`,
+    content: `**${displayName}** をどのポジションに配置しますか？`,
     components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select) as any],
     flags: MessageFlags.Ephemeral,
   })
@@ -1921,33 +1949,8 @@ async function handleAssignSlotSelect(interaction: StringSelectMenuInteraction, 
     const channel = interaction.channel
     if (channel && channel.isTextBased() && !channel.isDMBased()) {
       const mainMsg = await channel.messages.fetch(mainMsgId)
-      const tournament = await TournamentModel.getById(tournamentId)!
-      const teams = await TournamentTeamModel.getByTournament(tournamentId)
-      const allMembers2 = await TournamentTeamMemberModel.getByTournament(tournamentId)
-      const assignedIds2 = new Set(allMembers2.map(m => m.discord_id))
-      const participants2 = await TournamentParticipantModel.getByTournament(tournamentId)
-      const unassigned2 = participants2.filter(p => !isTeamProxy(p.discord_id) && !assignedIds2.has(p.discord_id))
-
-      const teamLines2 = await Promise.all(teams.map(async t => {
-        const members = await TournamentTeamMemberModel.getByTeam(t.id)
-        const slots = POSITION_NAMES.map((pos, i) => {
-          const m = members.find(mb => mb.position === i + 1)
-          return m ? `${pos}: ${m.discord_name}` : `${pos}: ___`
-        }).join(' | ')
-        return `**${t.name}**: ${slots}`
-      }))
-
-      const lines2 = ['**チーム振り分けパネル**', ...teamLines2, '', `未配置: ${unassigned2.length}名`]
-      const rows2: ActionRowBuilder<ButtonBuilder>[] = []
-      for (let i = 0; i < unassigned2.length && i < 20; i += 5) {
-        const row = new ActionRowBuilder<ButtonBuilder>()
-        for (let j = i; j < Math.min(i + 5, unassigned2.length); j++) {
-          const p = unassigned2[j]
-          row.addComponents(new ButtonBuilder().setCustomId(`tnm-assign:${tournamentId}:${p.discord_id}`).setLabel(p.discord_name.slice(0, 20)).setStyle(ButtonStyle.Secondary))
-        }
-        rows2.push(row)
-      }
-      await mainMsg.edit({ content: lines2.join('\n'), components: rows2 })
+      const { content: pc, components: pc2 } = await buildAssignPanel(tournamentId)
+      await mainMsg.edit({ content: pc, components: pc2 })
     }
   } catch { /* ベストエフォート */ }
 
@@ -2179,6 +2182,100 @@ async function handleBattleScore(interaction: ButtonInteraction, battleId: numbe
       }
     }
   }
+
+  return true
+}
+
+// ─── 自動振り分け ──────────────────────────────────────────────────────────────
+
+async function handleAutoAssign(
+  interaction: ButtonInteraction,
+  tournamentId: number,
+  mode: 'balanced' | 'random'
+): Promise<boolean> {
+  await interaction.deferUpdate()
+
+  const teams = await TournamentTeamModel.getByTournament(tournamentId)
+  const allMembers = await TournamentTeamMemberModel.getByTournament(tournamentId)
+  const assignedIds = new Set(allMembers.map(m => m.discord_id))
+  const participants = await TournamentParticipantModel.getByTournament(tournamentId)
+  let unassigned = participants.filter(p => !isTeamProxy(p.discord_id) && !assignedIds.has(p.discord_id))
+
+  if (unassigned.length === 0) {
+    await interaction.followUp({ content: '未配置の参加者がいません。', flags: MessageFlags.Ephemeral })
+    return true
+  }
+
+  if (mode === 'balanced') {
+    // ランク順（強い順）でソート
+    unassigned = [...unassigned].sort((a, b) => {
+      const ai = RANKS.indexOf(a.rank as any)
+      const bi = RANKS.indexOf(b.rank as any)
+      return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi)
+    })
+  } else {
+    // シャッフル
+    for (let i = unassigned.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[unassigned[i], unassigned[j]] = [unassigned[j], unassigned[i]]
+    }
+  }
+
+  // チームごとの現在占有ポジションを把握
+  const occupiedByTeam = new Map<number, Set<number>>()
+  for (const t of teams) {
+    const members = await TournamentTeamMemberModel.getByTeam(t.id)
+    occupiedByTeam.set(t.id, new Set(members.map(m => m.position).filter(Boolean) as number[]))
+  }
+
+  // スネークドラフトで割り当てスロット生成
+  const slots: { teamId: number; position: number }[] = []
+  let ascending = true
+  while (slots.length < unassigned.length) {
+    const order = ascending ? [...teams] : [...teams].reverse()
+    let added = false
+    for (const t of order) {
+      const occ = occupiedByTeam.get(t.id)!
+      for (let pos = 1; pos <= 5; pos++) {
+        if (!occ.has(pos)) {
+          slots.push({ teamId: t.id, position: pos })
+          occ.add(pos)
+          added = true
+          break
+        }
+      }
+      if (slots.length >= unassigned.length) break
+    }
+    if (!added) break  // 全チーム満員
+    ascending = !ascending
+  }
+
+  // 実際に割り当て
+  const assigned: string[] = []
+  for (let i = 0; i < Math.min(unassigned.length, slots.length); i++) {
+    const p = unassigned[i]
+    const slot = slots[i]
+    const team = teams.find(t => t.id === slot.teamId)
+    await TournamentTeamMemberModel.create({
+      team_id: slot.teamId,
+      discord_id: p.discord_id,
+      discord_name: p.discord_name,
+      rank: p.rank,
+      character: p.character,
+      position: slot.position,
+    })
+    assigned.push(`${p.discord_name}${p.rank ? ` [${p.rank}]` : ''} → **${team?.name}** ${POSITION_NAMES[slot.position - 1]}`)
+  }
+
+  // パネルを更新
+  const { content, components } = await buildAssignPanel(tournamentId)
+  await interaction.editReply({ content, components })
+
+  const modeLabel = mode === 'balanced' ? 'ランクバランス' : '完全ランダム'
+  await interaction.followUp({
+    content: `✅ **${modeLabel}**で${assigned.length}名を振り分けました:\n${assigned.map(s => `• ${s}`).join('\n')}`,
+    flags: MessageFlags.Ephemeral,
+  })
 
   return true
 }
