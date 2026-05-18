@@ -271,6 +271,114 @@ export class BracketService {
     }
   }
 
+  // Builds an ASCII bracket art string using box-drawing characters.
+  static buildBracketArt(matches: MatchWithParticipants[]): string {
+    if (matches.length === 0) return '試合データがありません'
+
+    const maxRound = Math.max(...matches.map(m => m.round))
+    const bracketSize = Math.pow(2, maxRound)
+    const totalRows = bracketSize * 2 - 1
+
+    const NAME_W = 12
+    const H_PAD = 2
+    const COL_W = NAME_W + H_PAD + 1 // 15
+
+    const totalCols = maxRound * COL_W + NAME_W + 16
+    const grid: string[][] = Array.from({ length: totalRows }, () =>
+      new Array(totalCols).fill(' ')
+    )
+
+    const set = (row: number, col: number, ch: string) => {
+      if (row >= 0 && row < totalRows && col >= 0 && col < totalCols)
+        grid[row][col] = ch
+    }
+    const setStr = (row: number, colStart: number, s: string) => {
+      for (let i = 0; i < s.length; i++) set(row, colStart + i, s[i])
+    }
+
+    // Row position of ├ for round r (1-indexed), match index m (0-indexed)
+    const getMidRow = (r: number, m: number) =>
+      Math.pow(2, r) - 1 + m * Math.pow(2, r + 1)
+
+    // Column of ├/┐/┘ for round r (1-indexed)
+    const getJoinCol = (r: number) => (r - 1) * COL_W + NAME_W
+
+    const trunc = (s: string) =>
+      s.length > NAME_W ? s.substring(0, NAME_W - 1) + '…' : s
+
+    const matchMap = new Map<string, MatchWithParticipants>()
+    for (const m of matches) matchMap.set(`${m.round}:${m.match_number - 1}`, m)
+    const getMatch = (r: number, mIdx: number) => matchMap.get(`${r}:${mIdx}`)
+
+    const getWinnerName = (m: MatchWithParticipants | undefined): string | null => {
+      if (!m || (m.status !== 'completed' && m.status !== 'bye')) return null
+      if (m.winner_discord_id && m.winner_discord_id === m.p1_discord_id) return m.p1_name ?? null
+      if (m.winner_discord_id && m.winner_discord_id === m.p2_discord_id) return m.p2_name ?? null
+      return null
+    }
+
+    // Round 1: place participant names, ┐/┘, and ├──
+    for (let m = 0; m < bracketSize / 2; m++) {
+      const match = getMatch(1, m)
+      const topRow = m * 4
+      const botRow = m * 4 + 2
+      const mid = getMidRow(1, m)
+      const jc = getJoinCol(1)
+
+      setStr(topRow, 0, trunc(match?.p1_name ?? '').padEnd(NAME_W, '─'))
+      set(topRow, jc, '┐')
+
+      const p2Name = match?.status === 'bye' ? 'BYE' : (match?.p2_name ?? '')
+      setStr(botRow, 0, trunc(p2Name).padEnd(NAME_W, '─'))
+      set(botRow, jc, '┘')
+
+      set(mid, jc, '├')
+      set(mid, jc + 1, '─')
+      set(mid, jc + 2, '─')
+    }
+
+    // All rounds: place winner name → next join char (or champion label)
+    for (let r = 1; r <= maxRound; r++) {
+      const matchCount = bracketSize / Math.pow(2, r)
+      const jc = getJoinCol(r)
+
+      for (let m = 0; m < matchCount; m++) {
+        const mid = getMidRow(r, m)
+        const wName = getWinnerName(getMatch(r, m))
+
+        if (r < maxRound) {
+          // winner name padded with ─, then ┐/┘ for the next round
+          const nameStart = jc + H_PAD + 1
+          const nextJC = getJoinCol(r + 1)
+          setStr(mid, nameStart, (wName ? trunc(wName) : '').padEnd(NAME_W, '─'))
+          set(mid, nextJC, m % 2 === 0 ? '┐' : '┘')
+        } else if (wName) {
+          setStr(mid, jc + H_PAD + 1, '🏆 ' + wName)
+        }
+      }
+    }
+
+    // Rounds 2+: vertical connectors (│) and ├──
+    for (let r = 2; r <= maxRound; r++) {
+      const matchCount = bracketSize / Math.pow(2, r)
+      const jc = getJoinCol(r)
+
+      for (let m = 0; m < matchCount; m++) {
+        const topInRow = getMidRow(r - 1, 2 * m)
+        const botInRow = getMidRow(r - 1, 2 * m + 1)
+        const mid = getMidRow(r, m)
+
+        for (let row = topInRow + 1; row < mid; row++) set(row, jc, '│')
+        set(mid, jc, '├')
+        set(mid, jc + 1, '─')
+        set(mid, jc + 2, '─')
+        for (let row = mid + 1; row < botInRow; row++) set(row, jc, '│')
+      }
+    }
+
+    return grid.map(row => row.join('').trimEnd()).join('\n')
+  }
+
   static async formatBracketEmbed(tournamentId: number): Promise<EmbedBuilder> {
     const tournament = await TournamentModel.getById(tournamentId)
     if (!tournament) throw new Error('Tournament not found')
@@ -283,62 +391,13 @@ export class BracketService {
       .setTitle(`🏆 ${tournament.name}`)
       .setTimestamp()
 
-    const roundsMap = new Map<number, MatchWithParticipants[]>()
-    for (const m of matches) {
-      if (m.status === 'bye') continue
-      if (!roundsMap.has(m.round)) roundsMap.set(m.round, [])
-      roundsMap.get(m.round)!.push(m)
-    }
-
-    const sortedRounds = [...roundsMap.keys()].sort((a, b) => a - b)
-    const totalRounds = sortedRounds.length
-
-    function roundName(r: number): string {
-      if (r === totalRounds) return '決勝'
-      if (r === totalRounds - 1 && totalRounds > 2) return '準決勝'
-      if (r === totalRounds - 2 && totalRounds > 3) return '準々決勝'
-      return `Round ${r}`
-    }
-
-    const descLines: string[] = []
-
-    for (const round of sortedRounds) {
-      const roundMatches = [...(roundsMap.get(round) ?? [])].sort((a, b) => a.match_number - b.match_number)
-      if (roundMatches.length === 0) continue
-
-      descLines.push(`**━━ ${roundName(round)} ━━**`)
-
-      for (const m of roundMatches) {
-        const p1 = m.p1_discord_id
-          ? `<@${m.p1_discord_id}>${m.p1_rank ? ` [${m.p1_rank}]` : ''}`
-          : 'TBD'
-        const p2 = m.p2_discord_id
-          ? `<@${m.p2_discord_id}>${m.p2_rank ? ` [${m.p2_rank}]` : ''}`
-          : 'TBD'
-
-        if (m.status === 'completed' && m.winner_discord_id) {
-          const isP1Winner = m.winner_discord_id === m.p1_discord_id
-          const winner = isP1Winner ? p1 : p2
-          const loser = isP1Winner ? p2 : p1
-          descLines.push(`✅ ${winner}  **def.**  ${loser}`)
-        } else if (!m.p1_discord_id || !m.p2_discord_id) {
-          descLines.push(`⬜ ${p1}  vs  ${p2}`)
-        } else {
-          const handicapSuffix = m.handicap_rounds > 0 && m.handicap_player_name
-            ? `  ⚖️ ${m.handicap_player_name}に${m.handicap_rounds}R落とし`
-            : ''
-          descLines.push(`⚔️ ${p1}  vs  ${p2}${handicapSuffix}`)
-        }
-      }
-
-      descLines.push('')
-    }
+    const bracketArt = BracketService.buildBracketArt(matches)
+    const description = '```\n' + bracketArt + '\n```'
 
     const active = matches.filter(m => m.status !== 'bye')
     const completed = active.filter(m => m.status === 'completed')
 
-    const description = descLines.join('\n').slice(0, 4000) || '試合はまだありません。'
-    embed.setDescription(description)
+    embed.setDescription(description.slice(0, 4096))
     embed.setFooter({
       text: `進行状況: ${completed.length}/${active.length} 試合完了 | ${regulation.winsRequired}先 / ${regulation.roundsRequired ?? 2}ラウンド`,
     })
