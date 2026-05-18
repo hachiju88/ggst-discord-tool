@@ -199,4 +199,24 @@ export class TournamentMatchModel {
       args: [messageId, id],
     })
   }
+
+  static async resetMatch(id: number): Promise<void> {
+    const db = getDatabase()
+    await db.execute({
+      sql: `UPDATE tournament_matches
+            SET winner_id = NULL, status = 'pending', p1_games_won = 0, p2_games_won = 0,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?`,
+      args: [id],
+    })
+  }
+
+  static async clearParticipant(id: number, slot: 'p1' | 'p2'): Promise<void> {
+    const db = getDatabase()
+    const col = slot === 'p1' ? 'participant1_id' : 'participant2_id'
+    await db.execute({
+      sql: `UPDATE tournament_matches SET ${col} = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      args: [id],
+    })
+  }
 }

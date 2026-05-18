@@ -848,11 +848,17 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
   if (prefix === 'tnm-team-create') return handleTeamCreateButton(interaction, parseInt(parts[1]))
   if (prefix === 'tnm-team-list')   return handleTeamListButton(interaction, parseInt(parts[1]))
   if (prefix === 'tnm-team-join')   return handleTeamJoinButton(interaction, parseInt(parts[1]), parseInt(parts[2]))
-  if (prefix === 'tnm-battle-start') return handleBattleStart(interaction, parseInt(parts[1]))
-  if (prefix === 'tnm-battle-win')   return handleBattleWin(interaction, parseInt(parts[1]), parseInt(parts[2]))
-  if (prefix === 'tnm-battle-score') return handleBattleScore(interaction, parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3]))
-  if (prefix === 'tnm-assign')       return handleAssignButton(interaction, parseInt(parts[1]), parts[2])
-  if (prefix === 'tnm-auto-assign')  return handleAutoAssign(interaction, parseInt(parts[1]), parts[2] as 'balanced' | 'random')
+  if (prefix === 'tnm-confirm')        return handleConfirmButton(interaction, parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3]), parseInt(parts[4]))
+  if (prefix === 'tnm-correct')        return handleCorrectButton(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-cancel')         return handleCancelButton(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-battle-start')   return handleBattleStart(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-battle-win')     return handleBattleWin(interaction, parseInt(parts[1]), parseInt(parts[2]))
+  if (prefix === 'tnm-battle-score')   return handleBattleScore(interaction, parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3]))
+  if (prefix === 'tnm-battle-confirm') return handleBattleConfirmButton(interaction, parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3]), parseInt(parts[4]))
+  if (prefix === 'tnm-battle-correct') return handleBattleCorrectButton(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-battle-cancel')  return handleBattleCancelButton(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-assign')         return handleAssignButton(interaction, parseInt(parts[1]), parts[2])
+  if (prefix === 'tnm-auto-assign')    return handleAutoAssign(interaction, parseInt(parts[1]), parts[2] as 'balanced' | 'random')
 
   return false
 }
@@ -879,19 +885,107 @@ async function handleScoreButton(
   const p1Games = p1IsWinner ? regulation.winsRequired : loserGames
   const p2Games = p1IsWinner ? loserGames : regulation.winsRequired
 
-  await TournamentMatchModel.setScore(matchId, winnerId, p1Games, p2Games)
-
   const matchData = await TournamentMatchModel.getWithParticipants(matchId)
   const winnerName = p1IsWinner ? matchData?.p1_name : matchData?.p2_name
 
+  const confirmRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`tnm-confirm:${matchId}:${winnerId}:${p1Games}:${p2Games}`)
+      .setLabel('✅ 結果を送信')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`tnm-cancel:${matchId}`)
+      .setLabel('❌ キャンセル')
+      .setStyle(ButtonStyle.Danger),
+  )
+
   const baseContent = interaction.message.content.split('\n\n')[0]
   await interaction.editReply({
-    content: `${baseContent}\n\n✅ **${winnerName}** の勝利 (${p1Games}-${p2Games})`,
-    components: [],
+    content: `${baseContent}\n\n⚠️ **${winnerName}** の勝利 (${p1Games}-${p2Games}) で確定しますか？`,
+    components: [confirmRow],
   })
+
+  return true
+}
+
+// フォーマット別に試合メッセージを再生成するヘルパー
+async function formatMatchByFormat(
+  format: string, matchId: number, round: number, regulation: TournamentRegulation
+): Promise<{ content: string; components: ActionRowBuilder<ButtonBuilder>[] }> {
+  if (format === 'league') return LeagueService.formatMatchContent(matchId, regulation)
+  if (format === 'swiss') return SwissService.formatMatchContent(matchId, regulation, round, regulation.totalRounds ?? 4)
+  return BracketService.formatMatchContent(matchId, regulation)
+}
+
+async function handleConfirmButton(
+  interaction: ButtonInteraction,
+  matchId: number,
+  winnerId: number,
+  p1Games: number,
+  p2Games: number
+): Promise<boolean> {
+  const match = await TournamentMatchModel.getById(matchId)
+  if (!match || match.status === 'completed') {
+    await interaction.reply({ content: 'この試合はすでに終了しています。', flags: MessageFlags.Ephemeral })
+    return true
+  }
+
+  await interaction.deferUpdate()
+
+  const tournament = await TournamentModel.getById(match.tournament_id)
+  if (!tournament) return true
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+
+  const matchData = await TournamentMatchModel.getWithParticipants(matchId)
+  const p1IsWinner = Number(match.participant1_id) === winnerId
+  const winnerName = p1IsWinner ? matchData?.p1_name : matchData?.p2_name
+
+  const correctRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`tnm-correct:${matchId}`)
+      .setLabel('🖊️ 結果を修正')
+      .setStyle(ButtonStyle.Secondary),
+  )
 
   const channel = interaction.channel
   const isTextChannel = channel && channel.isTextBased() && !channel.isDMBased()
+
+  if (tournament.format === 'single_elim') {
+    const result = await BracketService.advanceWinner(matchId, winnerId, regulation)
+
+    await interaction.editReply({
+      content: `${interaction.message.content.split('\n\n')[0]}\n\n✅ **${winnerName}** の勝利が報告されました。`,
+      components: [correctRow],
+    })
+
+    if (isTextChannel && channel) {
+      if (result.isChampion) {
+        const winner = await TournamentParticipantModel.getById(winnerId)
+        if (winner) {
+          await channel.send(
+            `🏆 **${tournament.name}** 終了！\n優勝: <@${winner.discord_id}> **${winner.discord_name}** さん！おめでとうございます！`
+          )
+        }
+      } else if (result.nextMatchId && result.nextMatchReady) {
+        try {
+          const { content, components } = await BracketService.formatMatchContent(result.nextMatchId, regulation)
+          const msg = await channel.send({ content, components })
+          await TournamentMatchModel.setMessageId(result.nextMatchId, msg.id)
+        } catch (err) {
+          console.error(`[tnm] Failed to post next match ${result.nextMatchId}:`, err)
+        }
+      }
+    }
+    return true
+  }
+
+  // league / swiss
+  await TournamentMatchModel.setScore(matchId, winnerId, p1Games, p2Games)
+
+  await interaction.editReply({
+    content: `${interaction.message.content.split('\n\n')[0]}\n\n✅ **${winnerName}** の勝利 (${p1Games}-${p2Games})`,
+    components: [correctRow],
+  })
 
   if (tournament.format === 'league') {
     const allDone = await LeagueService.checkAllComplete(tournament.id)
@@ -899,7 +993,7 @@ async function handleScoreButton(
       await TournamentModel.setStatus(tournament.id, 'completed')
       const standings = await LeagueService.getStandings(tournament.id)
       const champion = standings[0]?.participant
-      if (isTextChannel && champion) {
+      if (isTextChannel && champion && channel) {
         await channel.send(
           `🏆 **${tournament.name}** 全試合終了！\n優勝: <@${champion.discord_id}> **${champion.discord_name}** さん！おめでとうございます！`
         )
@@ -915,11 +1009,10 @@ async function handleScoreButton(
     if (!roundDone) return true
 
     if (currentRound >= totalRounds) {
-      // Final round complete → announce results
       await TournamentModel.setStatus(tournament.id, 'completed')
       const standings = await SwissService.getStandings(tournament.id)
       const champion = standings[0]?.participant
-      if (isTextChannel) {
+      if (isTextChannel && channel) {
         const embed = await SwissService.formatSwissEmbed(tournament.id)
         await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！`, embeds: [embed] })
         if (champion) {
@@ -931,13 +1024,12 @@ async function handleScoreButton(
       return true
     }
 
-    // Generate next round
     const nextRound = currentRound + 1
     const allMatches = await TournamentMatchModel.getByTournament(tournament.id)
     const participants = await TournamentParticipantModel.getByTournament(tournament.id)
     const nextMatchIds = await SwissService.generateRound(tournament.id, nextRound, participants, regulation, allMatches)
 
-    if (isTextChannel) {
+    if (isTextChannel && channel) {
       await channel.send(`━━━━━━━━━━━━━━━━━━━━━━\n**Round ${nextRound} / ${totalRounds} 開始！**`)
       for (const mid of nextMatchIds) {
         try {
@@ -951,6 +1043,63 @@ async function handleScoreButton(
     }
   }
 
+  return true
+}
+
+async function handleCorrectButton(interaction: ButtonInteraction, matchId: number): Promise<boolean> {
+  const match = await TournamentMatchModel.getById(matchId)
+  if (!match || match.status !== 'completed') {
+    await interaction.reply({ content: '修正できる完了試合がありません。', flags: MessageFlags.Ephemeral })
+    return true
+  }
+
+  const tournament = await TournamentModel.getById(match.tournament_id)
+  if (!tournament) { await interaction.reply({ content: '❌', flags: MessageFlags.Ephemeral }); return true }
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+
+  if (tournament.format === 'single_elim') {
+    const allMatches = await TournamentMatchModel.getByTournament(match.tournament_id)
+    const nextRound = match.round + 1
+    const nextMatchNumber = Math.ceil(match.match_number / 2)
+    const nextMatch = allMatches.find(m => m.round === nextRound && m.match_number === nextMatchNumber)
+
+    if (nextMatch && nextMatch.status === 'completed') {
+      await interaction.reply({
+        content: '❌ 次の試合がすでに終了しているため修正できません。先に次の試合を修正してください。',
+        flags: MessageFlags.Ephemeral,
+      })
+      return true
+    }
+
+    const winnerId = match.winner_id
+    const p1Id = match.participant1_id != null ? Number(match.participant1_id) : null
+    const p2Id = match.participant2_id != null ? Number(match.participant2_id) : null
+    const loserId = p1Id === winnerId ? p2Id : p1Id
+
+    if (nextMatch) {
+      const slot: 'p1' | 'p2' = match.match_number % 2 === 1 ? 'p1' : 'p2'
+      await TournamentMatchModel.clearParticipant(nextMatch.id, slot)
+    }
+    if (loserId) await TournamentParticipantModel.restore(loserId)
+    if (tournament.status === 'completed') await TournamentModel.setStatus(tournament.id, 'in_progress')
+  }
+
+  await TournamentMatchModel.resetMatch(matchId)
+  await interaction.deferUpdate()
+  const { content, components } = await formatMatchByFormat(tournament.format, matchId, match.round, regulation)
+  await interaction.editReply({ content, components })
+  return true
+}
+
+async function handleCancelButton(interaction: ButtonInteraction, matchId: number): Promise<boolean> {
+  const match = await TournamentMatchModel.getById(matchId)
+  if (!match) { await interaction.reply({ content: '❌', flags: MessageFlags.Ephemeral }); return true }
+  const tournament = await TournamentModel.getById(match.tournament_id)
+  if (!tournament) return true
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+  await interaction.deferUpdate()
+  const { content, components } = await formatMatchByFormat(tournament.format, matchId, match.round, regulation)
+  await interaction.editReply({ content, components })
   return true
 }
 
@@ -1113,7 +1262,7 @@ async function handleWinButton(
   const winnerName = p1IdNum === participantId ? matchData?.p1_name : matchData?.p2_name
   const winnerLabel = winnerName ?? `参加者#${participantId}`
 
-  // League / Swiss: show loser game count input before recording
+  // League / Swiss: show loser game count input then confirmation
   if (tournament.format === 'league' || tournament.format === 'swiss') {
     const winsRequired = regulation.winsRequired
     const scoreRow = new ActionRowBuilder<ButtonBuilder>()
@@ -1125,40 +1274,34 @@ async function handleWinButton(
           .setStyle(ButtonStyle.Secondary)
       )
     }
+    const cancelRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`tnm-cancel:${matchId}`)
+        .setLabel('❌ キャンセル')
+        .setStyle(ButtonStyle.Danger),
+    )
     await interaction.editReply({
       content: `${interaction.message.content}\n\n**${winnerLabel}** の勝利が報告されました。\n**${loserName ?? '相手'}** は何ゲーム取りましたか？`,
-      components: [scoreRow],
+      components: [scoreRow, cancelRow],
     })
     return true
   }
 
-  // single_elim: record winner immediately and advance bracket
-  const result = await BracketService.advanceWinner(matchId, participantId, regulation)
-
+  // single_elim: show confirmation before recording
+  const confirmRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`tnm-confirm:${matchId}:${participantId}:0:0`)
+      .setLabel('✅ 結果を送信')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`tnm-cancel:${matchId}`)
+      .setLabel('❌ キャンセル')
+      .setStyle(ButtonStyle.Danger),
+  )
   await interaction.editReply({
-    content: `${interaction.message.content}\n\n✅ **${winnerLabel}** の勝利が報告されました。`,
-    components: [],
+    content: `${interaction.message.content}\n\n⚠️ **${winnerLabel}** の勝利で確定しますか？`,
+    components: [confirmRow],
   })
-
-  const channel = interaction.channel
-  if (!channel || !channel.isTextBased() || channel.isDMBased()) return true
-
-  if (result.isChampion) {
-    const winner = await TournamentParticipantModel.getById(participantId)
-    if (winner) {
-      await channel.send(
-        `🏆 **${tournament.name}** 終了！\n優勝: <@${winner.discord_id}> **${winner.discord_name}** さん！おめでとうございます！`
-      )
-    }
-  } else if (result.nextMatchId && result.nextMatchReady) {
-    try {
-      const { content, components } = await BracketService.formatMatchContent(result.nextMatchId, regulation)
-      const msg = await channel.send({ content, components })
-      await TournamentMatchModel.setMessageId(result.nextMatchId, msg.id)
-    } catch (err) {
-      console.error(`[tnm] Failed to post next match ${result.nextMatchId}:`, err)
-    }
-  }
 
   return true
 }
@@ -1807,6 +1950,8 @@ async function handleTeamSetup(interaction: ChatInputCommandInteraction) {
   await interaction.editReply(`✅ チームを作成しました:\n${created.map(n => `• ${n}`).join('\n')}`)
 }
 
+const TEAM_EMOJIS = ['🔵', '🔴', '🟡', '🟢', '🟠', '🟣', '⚫', '⚪']
+
 async function buildAssignPanel(tournamentId: number): Promise<{ content: string; components: ActionRowBuilder<ButtonBuilder>[] }> {
   const teams = await TournamentTeamModel.getByTournament(tournamentId)
   const allMembers = await TournamentTeamMemberModel.getByTournament(tournamentId)
@@ -1814,20 +1959,27 @@ async function buildAssignPanel(tournamentId: number): Promise<{ content: string
   const participants = await TournamentParticipantModel.getByTournament(tournamentId)
   const unassigned = participants.filter(p => !isTeamProxy(p.discord_id) && !assignedIds.has(p.discord_id))
 
-  const teamLines = await Promise.all(teams.map(async t => {
+  const teamLines = await Promise.all(teams.map(async (t, idx) => {
     const members = await TournamentTeamMemberModel.getByTeam(t.id)
+    const filled = members.filter(m => m.position !== null).length
+    const emoji = TEAM_EMOJIS[idx % TEAM_EMOJIS.length]
     const slots = POSITION_NAMES.map((pos, i) => {
       const m = members.find(mb => mb.position === i + 1)
-      return m ? `${pos}: ${m.discord_name}` : `${pos}: ___`
-    }).join(' | ')
-    return `**${t.name}**: ${slots}`
+      return `${pos}: ${m ? m.discord_name.slice(0, 10) : '───'}`
+    }).join(' ／ ')
+    return `${emoji} **${t.name}** (${filled}/5)\n　　${slots}`
   }))
+
+  const footerText = unassigned.length > 0
+    ? `👥 未配置: ${unassigned.length}名 — ボタンで個別配置、または下の自動振り分けをお使いください`
+    : '✅ 全員配置済みです'
 
   const lines = [
     '**チーム振り分けパネル**',
+    '',
     ...teamLines,
     '',
-    `未配置: ${unassigned.length}名${unassigned.length > 0 ? '（ボタンで個別配置 / 下の自動振り分けも使えます）' : ' ✅'}`,
+    footerText,
   ]
 
   const rows: ActionRowBuilder<ButtonBuilder>[] = []
@@ -1836,27 +1988,27 @@ async function buildAssignPanel(tournamentId: number): Promise<{ content: string
     const row = new ActionRowBuilder<ButtonBuilder>()
     for (let j = i; j < Math.min(i + 5, unassigned.length); j++) {
       const p = unassigned[j]
-      const rankLabel = p.rank ? ` [${p.rank}]` : ''
+      const rankPart = p.rank ? ` [${p.rank}]` : ''
       row.addComponents(
         new ButtonBuilder()
           .setCustomId(`tnm-assign:${tournamentId}:${p.discord_id}`)
-          .setLabel(`${p.discord_name.slice(0, 15)}${rankLabel}`.slice(0, 20))
+          .setLabel(`${p.discord_name.slice(0, 12)}${rankPart}`.slice(0, 20))
           .setStyle(ButtonStyle.Secondary)
       )
     }
     rows.push(row)
   }
 
-  // 自動振り分けボタン行（常に末尾に表示、最大5行制限を守る）
+  // 自動振り分けボタン行（最大5行制限を守る）
   if (rows.length < 5 && unassigned.length > 0) {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`tnm-auto-assign:${tournamentId}:balanced`)
-        .setLabel('🎯 ランクバランス自動振り分け')
+        .setLabel('🎯 ランクバランス')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId(`tnm-auto-assign:${tournamentId}:random`)
-        .setLabel('🎲 完全ランダム振り分け')
+        .setLabel('🎲 ランダム')
         .setStyle(ButtonStyle.Secondary),
     ))
   }
@@ -2028,9 +2180,15 @@ async function handleBattleWin(interaction: ButtonInteraction, battleId: number,
         .setStyle(ButtonStyle.Secondary)
     )
   }
+  const cancelRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`tnm-battle-cancel:${battleId}`)
+      .setLabel('❌ キャンセル')
+      .setStyle(ButtonStyle.Danger),
+  )
   await interaction.editReply({
     content: `${interaction.message.content}\n\n**${member?.discord_name}** の勝利が報告されました。\n**${loserName ?? '相手'}** は何ゲーム取りましたか？`,
-    components: [scoreRow],
+    components: [scoreRow, cancelRow],
   })
   return true
 }
@@ -2056,6 +2214,49 @@ async function handleBattleScore(interaction: ButtonInteraction, battleId: numbe
   const t1Games = isT1Winner ? regulation.winsRequired : loserGames
   const t2Games = isT1Winner ? loserGames : regulation.winsRequired
 
+  const confirmRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`tnm-battle-confirm:${battleId}:${winnerId}:${t1Games}:${t2Games}`)
+      .setLabel('✅ 結果を送信')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`tnm-battle-cancel:${battleId}`)
+      .setLabel('❌ キャンセル')
+      .setStyle(ButtonStyle.Danger),
+  )
+
+  const baseContent = interaction.message.content.split('\n\n')[0]
+  await interaction.editReply({
+    content: `${baseContent}\n\n⚠️ **${winnerMember.discord_name}** の勝利 (${t1Games}-${t2Games}) で確定しますか？`,
+    components: [confirmRow],
+  })
+  return true
+}
+
+async function handleBattleConfirmButton(
+  interaction: ButtonInteraction,
+  battleId: number,
+  winnerId: number,
+  t1Games: number,
+  t2Games: number
+): Promise<boolean> {
+  const battle = await TournamentTeamBattleModel.getById(battleId)
+  if (!battle || battle.status === 'completed') {
+    await interaction.reply({ content: 'この試合はすでに終了しています。', flags: MessageFlags.Ephemeral })
+    return true
+  }
+  await interaction.deferUpdate()
+
+  const match = await TournamentMatchModel.getById(battle.match_id)
+  if (!match) return true
+  const tournament = await TournamentModel.getById(match.tournament_id)
+  if (!tournament) return true
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+
+  const winnerMember = await TournamentTeamMemberModel.getById(winnerId)
+  if (!winnerMember) return true
+
+  const isT1Winner = battle.team1_member_id === winnerId
   const matchData = await TournamentMatchModel.getWithParticipants(battle.match_id)
   const team1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
   const team2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
@@ -2064,21 +2265,25 @@ async function handleBattleScore(interaction: ButtonInteraction, battleId: numbe
 
   await TournamentTeamBattleModel.setWinner(battleId, winnerId, winnerTeamId, t1Games, t2Games)
 
+  const correctRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`tnm-battle-correct:${battleId}`)
+      .setLabel('🖊️ 結果を修正')
+      .setStyle(ButtonStyle.Secondary),
+  )
   const baseContent = interaction.message.content.split('\n\n')[0]
   await interaction.editReply({
     content: `${baseContent}\n\n✅ **${winnerMember.discord_name}** の勝利 (${t1Games}-${t2Games})`,
-    components: [],
+    components: [correctRow],
   })
 
   const channel = interaction.channel
   const isText = channel && channel.isTextBased() && !channel.isDMBased()
 
-  // チームマッチの決着を確認
   const isSurvival = regulation.teamBattleFormat === 'survival'
   let matchWinnerTeamId: number | null = null
 
   if (isSurvival) {
-    // 次の試合を生成（または決着）
     const nextBattleId = await TeamBattleService.generateNextSurvivalBattle(battle.match_id, team1Id, team2Id, battle, regulation)
     if (nextBattleId === null) {
       matchWinnerTeamId = await TeamBattleService.resolveSurvivalMatch(battle.match_id, team1Id, team2Id)
@@ -2095,14 +2300,11 @@ async function handleBattleScore(interaction: ButtonInteraction, battleId: numbe
     matchWinnerTeamId = await TeamBattleService.resolveSequentialMatch(battle.match_id, team1Id, team2Id)
   }
 
-  if (matchWinnerTeamId === null) return true  // まだ決着がついていない
+  if (matchWinnerTeamId === null) return true
 
-  // チームマッチの勝者を登録
   const winnerTeam = await TournamentTeamModel.getById(matchWinnerTeamId)
-  const losingTeamId = matchWinnerTeamId === team1Id ? team2Id : team1Id
   const summary = await TeamBattleService.formatMatchSummary(battle.match_id, team1Id, team2Id)
 
-  // マッチメッセージを更新
   if (match.message_id && isText) {
     try {
       const matchMsg = await channel.messages.fetch(match.message_id)
@@ -2110,16 +2312,15 @@ async function handleBattleScore(interaction: ButtonInteraction, battleId: numbe
     } catch { /* ベストエフォート */ }
   }
 
-  // プロキシ参加者IDを特定してブラケット進行
   const winnerProxyDiscordId = proxyDiscordId(matchWinnerTeamId)
   const winnerProxy = await TournamentParticipantModel.getByDiscordId(match.tournament_id, winnerProxyDiscordId)
   if (!winnerProxy) return true
 
   if (tournament.format === 'single_elim') {
     const result = await BracketService.advanceWinner(battle.match_id, winnerProxy.id, regulation)
-    if (result.isChampion && isText) {
+    if (result.isChampion && isText && channel) {
       await channel.send(`🏆 **${tournament.name}** 終了！\n優勝: **${winnerTeam?.name}** ！おめでとうございます！`)
-    } else if (result.nextMatchId && result.nextMatchReady && isText) {
+    } else if (result.nextMatchId && result.nextMatchReady && isText && channel) {
       try {
         const { content: nc, components: rc } = await TeamBattleService.formatTeamMatchContent(result.nextMatchId, regulation)
         const msg = await channel.send({ content: nc, components: rc })
@@ -2127,7 +2328,6 @@ async function handleBattleScore(interaction: ButtonInteraction, battleId: numbe
       } catch (err) { console.error('[tnm] Failed to post next team match:', err) }
     }
   } else if (tournament.format === 'league') {
-    // ゲーム取得数を集計してスコアを設定
     const battles = await TournamentTeamBattleModel.getByMatch(battle.match_id)
     let t1TotalGames = 0, t2TotalGames = 0
     for (const b of battles) {
@@ -2141,7 +2341,7 @@ async function handleBattleScore(interaction: ButtonInteraction, battleId: numbe
     const allDone = await LeagueService.checkAllComplete(tournament.id)
     if (allDone) {
       await TournamentModel.setStatus(tournament.id, 'completed')
-      if (isText) await channel.send(`🏆 **${tournament.name}** 全試合終了！\n優勝チーム: **${winnerTeam?.name}** ！おめでとうございます！`)
+      if (isText && channel) await channel.send(`🏆 **${tournament.name}** 全試合終了！\n優勝チーム: **${winnerTeam?.name}** ！おめでとうございます！`)
     }
   } else if (tournament.format === 'swiss') {
     const allBattles = await TournamentTeamBattleModel.getByMatch(battle.match_id)
@@ -2160,7 +2360,7 @@ async function handleBattleScore(interaction: ButtonInteraction, battleId: numbe
     const totalRounds = regulation.totalRounds ?? 4
     if (currentRound >= totalRounds) {
       await TournamentModel.setStatus(tournament.id, 'completed')
-      if (isText) {
+      if (isText && channel) {
         const embed = await SwissService.formatSwissEmbed(tournament.id)
         await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！\n優勝チーム: **${winnerTeam?.name}**！`, embeds: [embed] })
       }
@@ -2170,7 +2370,7 @@ async function handleBattleScore(interaction: ButtonInteraction, battleId: numbe
       const proxyParticipants = await TournamentParticipantModel.getByTournament(tournament.id)
         .then(ps => ps.filter(p => isTeamProxy(p.discord_id)))
       const nextMatchIds = await SwissService.generateRound(tournament.id, nextRound, proxyParticipants, regulation, allMatches)
-      if (isText) {
+      if (isText && channel) {
         await channel.send(`━━━━━━━━━━━━━━━━━━━━━━\n**Round ${nextRound} / ${totalRounds} 開始！**`)
         for (const mid of nextMatchIds) {
           try {
@@ -2183,6 +2383,38 @@ async function handleBattleScore(interaction: ButtonInteraction, battleId: numbe
     }
   }
 
+  return true
+}
+
+async function handleBattleCorrectButton(interaction: ButtonInteraction, battleId: number): Promise<boolean> {
+  const battle = await TournamentTeamBattleModel.getById(battleId)
+  if (!battle || battle.status !== 'completed') {
+    await interaction.reply({ content: '修正できる完了済み対戦がありません。', flags: MessageFlags.Ephemeral })
+    return true
+  }
+  await TournamentTeamBattleModel.resetBattle(battleId)
+  await interaction.deferUpdate()
+  const match = await TournamentMatchModel.getById(battle.match_id)
+  if (!match) return true
+  const tournament = await TournamentModel.getById(match.tournament_id)
+  if (!tournament) return true
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+  const { content, components } = await TeamBattleService.formatBattleContent(battleId, regulation)
+  await interaction.editReply({ content, components })
+  return true
+}
+
+async function handleBattleCancelButton(interaction: ButtonInteraction, battleId: number): Promise<boolean> {
+  const battle = await TournamentTeamBattleModel.getById(battleId)
+  if (!battle) { await interaction.reply({ content: '❌', flags: MessageFlags.Ephemeral }); return true }
+  await interaction.deferUpdate()
+  const match = await TournamentMatchModel.getById(battle.match_id)
+  if (!match) return true
+  const tournament = await TournamentModel.getById(match.tournament_id)
+  if (!tournament) return true
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+  const { content, components } = await TeamBattleService.formatBattleContent(battleId, regulation)
+  await interaction.editReply({ content, components })
   return true
 }
 

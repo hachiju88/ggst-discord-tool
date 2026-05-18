@@ -91,4 +91,16 @@ export class TournamentTeamBattleModel {
       args: [messageId, id],
     })
   }
+
+  static async resetBattle(id: number): Promise<void> {
+    const db = getDatabase()
+    await db.execute({
+      sql: `UPDATE tournament_team_battles
+            SET winner_member_id = NULL, winner_team_id = NULL,
+                team1_games_won = 0, team2_games_won = 0,
+                status = 'pending', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?`,
+      args: [id],
+    })
+  }
 }
