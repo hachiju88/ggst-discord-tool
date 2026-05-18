@@ -130,12 +130,13 @@ export class TournamentMatchModel {
     return result.rows as unknown as TournamentMatch[]
   }
 
-  static async setWinner(id: number, winnerId: number): Promise<void> {
+  static async setWinner(id: number, winnerId: number): Promise<boolean> {
     const db = getDatabase()
-    await db.execute({
-      sql: `UPDATE tournament_matches SET winner_id = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    const r = await db.execute({
+      sql: `UPDATE tournament_matches SET winner_id = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'completed'`,
       args: [winnerId, id],
     })
+    return r.rowsAffected > 0
   }
 
   static async setScore(
@@ -143,12 +144,13 @@ export class TournamentMatchModel {
     winnerId: number,
     p1GamesWon: number,
     p2GamesWon: number
-  ): Promise<void> {
+  ): Promise<boolean> {
     const db = getDatabase()
-    await db.execute({
-      sql: `UPDATE tournament_matches SET winner_id = ?, p1_games_won = ?, p2_games_won = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    const r = await db.execute({
+      sql: `UPDATE tournament_matches SET winner_id = ?, p1_games_won = ?, p2_games_won = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'completed'`,
       args: [winnerId, p1GamesWon, p2GamesWon, id],
     })
+    return r.rowsAffected > 0
   }
 
   static async changeWinner(id: number, newWinnerId: number): Promise<void> {

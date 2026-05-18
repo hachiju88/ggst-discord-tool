@@ -97,4 +97,23 @@ export class TournamentParticipantModel {
     })
     return Number(result.rows[0]?.['cnt'] ?? 0)
   }
+
+  static async createIfUnderCap(data: {
+    tournament_id: number
+    discord_id: string
+    discord_name: string
+    rank: string | null
+    character: string | null
+    maxParticipants: number | null
+  }): Promise<TournamentParticipant | 'over_cap' | 'duplicate'> {
+    // Check duplicate first
+    const existing = await this.getByDiscordId(data.tournament_id, data.discord_id)
+    if (existing) return 'duplicate'
+    // Check cap
+    if (data.maxParticipants !== null) {
+      const cnt = await this.count(data.tournament_id)
+      if (cnt >= data.maxParticipants) return 'over_cap'
+    }
+    return this.create(data)
+  }
 }

@@ -13,7 +13,7 @@ export interface TournamentTeamBattle {
   team2_games_won: number
   handicap_member_id: number | null
   handicap_rounds: number
-  status: string
+  status: 'pending' | 'completed'
   message_id: string | null
   created_at: string
   updated_at: string
@@ -72,16 +72,17 @@ export class TournamentTeamBattleModel {
     winnerTeamId: number,
     t1Games: number,
     t2Games: number
-  ): Promise<void> {
+  ): Promise<boolean> {
     const db = getDatabase()
-    await db.execute({
+    const r = await db.execute({
       sql: `UPDATE tournament_team_battles
             SET winner_member_id = ?, winner_team_id = ?,
                 team1_games_won = ?, team2_games_won = ?,
                 status = 'completed', updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?`,
+          WHERE id = ? AND status != 'completed'`,
       args: [winnerMemberId, winnerTeamId, t1Games, t2Games, id],
     })
+    return r.rowsAffected > 0
   }
 
   static async setMessageId(id: number, messageId: string): Promise<void> {

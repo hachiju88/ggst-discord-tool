@@ -4,34 +4,24 @@ import { TournamentParticipant, TournamentParticipantModel } from '../models/Tou
 import { TournamentMatch, TournamentMatchModel } from '../models/TournamentMatch'
 import { BracketService } from './BracketService'
 import { StandingsEntry } from './LeagueService'
+import { generateMatchCode } from '../utils/matchCode'
+import { shuffle } from '../utils/shuffle'
 
 export interface MatchContent {
   content: string
   components: ActionRowBuilder<ButtonBuilder>[]
 }
 
-function generateMatchCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000))
-}
-
 function pairKey(id1: number, id2: number): string {
   return `${Math.min(id1, id2)}:${Math.max(id1, id2)}`
-}
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[a[i], a[j]] = [a[j], a[i]]
-  }
-  return a
 }
 
 // Greedy Swiss pairing: pair players with similar records, avoid rematches.
 // Returns pairs of participant IDs; null in pair means bye.
 function buildPairings(
   sorted: StandingsEntry[],
-  playedPairs: Set<string>
+  playedPairs: Set<string>,
+  byeRecipients: Set<number> = new Set()
 ): Array<[number, number | null]> {
   const result: Array<[number, number | null]> = []
   const used = new Set<number>()

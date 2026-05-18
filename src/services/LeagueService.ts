@@ -3,6 +3,7 @@ import { TournamentModel, TournamentRegulation } from '../models/Tournament'
 import { TournamentParticipant, TournamentParticipantModel } from '../models/TournamentParticipant'
 import { TournamentMatchModel } from '../models/TournamentMatch'
 import { BracketService } from './BracketService'
+import { generateMatchCode } from '../utils/matchCode'
 
 export interface StandingsEntry {
   participant: TournamentParticipant
@@ -15,10 +16,6 @@ export interface StandingsEntry {
 export interface MatchContent {
   content: string
   components: ActionRowBuilder<ButtonBuilder>[]
-}
-
-function generateMatchCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000))
 }
 
 export class LeagueService {

@@ -3,6 +3,8 @@ import { TournamentModel, TournamentRegulation, HandicapRule } from '../models/T
 import { TournamentParticipant, TournamentParticipantModel } from '../models/TournamentParticipant'
 import { TournamentMatchModel, MatchWithParticipants } from '../models/TournamentMatch'
 import { getRankIndex } from '../constants/ranks'
+import { generateMatchCode } from '../utils/matchCode'
+import { shuffle } from '../utils/shuffle'
 
 export interface HandicapResult {
   handicapParticipantId: number | null
@@ -25,19 +27,6 @@ function nextPowerOf2(n: number): number {
   let p = 1
   while (p < n) p <<= 1
   return p
-}
-
-function generateMatchCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000))
-}
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[a[i], a[j]] = [a[j], a[i]]
-  }
-  return a
 }
 
 export class BracketService {
@@ -89,6 +78,7 @@ export class BracketService {
 
     // Round 1 matches. Assign VC only to real (non-bye) matches.
     let vcIdx = 0
+    const matchPromises = []
     for (let i = 0; i < size / 2; i++) {
       const p1 = slots[i * 2]
       const p2 = slots[i * 2 + 1]
@@ -102,7 +92,7 @@ export class BracketService {
         handicap = this.calcHandicap(p1, p2, regulation.handicapRules)
       }
 
-      await TournamentMatchModel.create({
+      matchPromises.push(TournamentMatchModel.create({
         tournament_id: tournamentId,
         round: 1,
         match_number: matchNumber,
@@ -114,8 +104,9 @@ export class BracketService {
         handicap_rounds: handicap.rounds,
         vc_channel_id: vcId,
         status: isBye ? 'bye' : 'pending',
-      })
+      }))
     }
+    await Promise.all(matchPromises)
 
     // Skeleton matches for rounds 2+
     let prevCount = size / 2
