@@ -716,6 +716,9 @@ const characterMovesData: Record<string, Array<{ moveName: string; moveNotation:
     { moveName: 'モノワイヤー・ブレイクアウト', moveNotation: '623S' },
     { moveName: 'ライブワイヤー', moveNotation: '632146H' },
     { moveName: 'クイックハック', moveNotation: '214214P' }
+  ],
+  '蔵土縁紗夢': [
+    // 技データは後で追加予定
   ]
 };
 

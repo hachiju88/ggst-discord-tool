@@ -35,7 +35,8 @@ INSERT OR IGNORE INTO characters (id, name, name_en, display_order) VALUES
 (29, 'ディズィー', 'Dizzy', 29),
 (30, 'ヴェノム', 'Venom', 30),
 (31, 'ユニカ', 'Unika', 31),
-(32, 'ルーシー', 'Lucy', 32);
+(32, 'ルーシー', 'Lucy', 32),
+(33, '蔵土縁紗夢', 'Kuradoberi Jam', 33);
 
 -- 共通敗因マスタ
 INSERT OR IGNORE INTO common_defeat_reasons (id, reason, display_order) VALUES

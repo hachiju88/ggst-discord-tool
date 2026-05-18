@@ -28,6 +28,10 @@ export const CHARACTERS = [
   'A.B.A',
   'スレイヤー',
   'クイーン・ディズィー',
+  'ヴェノム',
+  'ユニカ',
+  'ルーシー',
+  '蔵土縁紗夢',
 ] as const
 
 export type Character = typeof CHARACTERS[number]

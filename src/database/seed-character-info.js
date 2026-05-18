@@ -235,6 +235,13 @@ const characterInfo = [
     invincibleSuper: 'あり（ライブワイヤー）',
     commandGrab: 'なし',
     parry: 'なし'
+  },
+  {
+    name: '蔵土縁紗夢',
+    invincible: '調査中',
+    invincibleSuper: 'あり（超鳥脚昂龍門）',
+    commandGrab: 'なし',
+    parry: 'あり（鳳翔符：当身）'
   }
 ];
 
