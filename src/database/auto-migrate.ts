@@ -152,6 +152,6 @@ export async function autoMigrate() {
     console.log('Database schema check complete');
   } catch (error) {
     console.error('Auto-migration error:', error);
-    // エラーが発生しても起動は続行（既にカラムが存在する場合など）
+    throw error;
   }
 }

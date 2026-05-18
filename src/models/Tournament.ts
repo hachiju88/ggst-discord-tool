@@ -22,7 +22,7 @@ export interface Tournament {
   format: string
   type: string
   max_participants: number | null
-  status: 'registration' | 'in_progress' | 'completed'
+  status: 'registration' | 'closed' | 'in_progress' | 'completed'
   regulation: string
   created_by: string
   channel_id: string | null

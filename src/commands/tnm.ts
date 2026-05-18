@@ -215,7 +215,7 @@ async function handleStart(interaction: ChatInputCommandInteraction) {
     await interaction.editReply('アクティブな大会が見つかりません。`/tnm create` で作成してください。')
     return
   }
-  if (tournament.status !== 'registration') {
+  if (tournament.status !== 'registration' && tournament.status !== 'closed') {
     await interaction.editReply(`大会 **${tournament.name}** はすでに開始済みです。`)
     return
   }
@@ -361,11 +361,12 @@ async function handleStart(interaction: ChatInputCommandInteraction) {
 }
 
 async function handleBracket(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+
   const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
   if (!tournament) {
-    await interaction.reply({
+    await interaction.editReply({
       content: 'アクティブな大会が見つかりません。',
-      flags: MessageFlags.Ephemeral,
     })
     return
   }
@@ -375,15 +376,16 @@ async function handleBracket(interaction: ChatInputCommandInteraction) {
     : tournament.format === 'swiss'
     ? await SwissService.formatSwissEmbed(tournament.id)
     : await BracketService.formatBracketEmbed(tournament.id)
-  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral })
+  await interaction.editReply({ embeds: [embed] })
 }
 
 async function handleStatus(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+
   const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
   if (!tournament) {
-    await interaction.reply({
+    await interaction.editReply({
       content: 'アクティブな大会が見つかりません。',
-      flags: MessageFlags.Ephemeral,
     })
     return
   }
@@ -402,7 +404,7 @@ async function handleStatus(interaction: ChatInputCommandInteraction) {
     .setFooter({ text: `${participants.length} 名参加中 | ステータス: ${statusLabel(tournament.status)}` })
     .setTimestamp()
 
-  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral })
+  await interaction.editReply({ embeds: [embed] })
 }
 
 async function handleList(interaction: ChatInputCommandInteraction) {
@@ -446,7 +448,7 @@ async function handleClose(interaction: ChatInputCommandInteraction) {
     return
   }
 
-  await TournamentModel.setStatus(tournament.id, 'in_progress')
+  await TournamentModel.setStatus(tournament.id, 'closed')
   const count = await TournamentParticipantModel.count(tournament.id)
   await interaction.reply(`🔒 **${tournament.name}** の参加受付を終了しました。（${count} 名）\nブラケットを生成するには \`/tnm start\` を使用してください。`)
 }
@@ -586,12 +588,12 @@ async function handleFix(interaction: ChatInputCommandInteraction) {
             // 既存メッセージを上書き
             const msg = await ch.messages.fetch(nextMatch.message_id)
             if (msg.editable) {
-              const { content, components } = await BracketService.formatMatchContent(nextMatch.id, regulation)
+              const { content, components } = await formatMatchByFormat(tournament.format, nextMatch.id, nextMatch.round, regulation)
               await msg.edit({ content, components })
             }
           } else if (finalized) {
             // 修正をきっかけに次の試合が両方の参加者揃った → 新規投稿
-            const { content, components } = await BracketService.formatMatchContent(nextMatch.id, regulation)
+            const { content, components } = await formatMatchByFormat(tournament.format, nextMatch.id, nextMatch.round, regulation)
             const newMsg = await ch.send({ content, components })
             await TournamentMatchModel.setMessageId(nextMatch.id, newMsg.id)
           }
@@ -869,13 +871,13 @@ async function handleScoreButton(
   winnerId: number,
   loserGames: number
 ): Promise<boolean> {
+  await interaction.deferUpdate()
+
   const match = await TournamentMatchModel.getById(matchId)
   if (!match || match.status === 'completed') {
-    await interaction.reply({ content: 'この試合はすでに終了しています。', flags: MessageFlags.Ephemeral })
+    await interaction.editReply({ content: 'この試合はすでに終了しています。' })
     return true
   }
-
-  await interaction.deferUpdate()
 
   const tournament = await TournamentModel.getById(match.tournament_id)
   if (!tournament) return true
@@ -924,13 +926,13 @@ async function handleConfirmButton(
   p1Games: number,
   p2Games: number
 ): Promise<boolean> {
+  await interaction.deferUpdate()
+
   const match = await TournamentMatchModel.getById(matchId)
   if (!match || match.status === 'completed') {
-    await interaction.reply({ content: 'この試合はすでに終了しています。', flags: MessageFlags.Ephemeral })
+    await interaction.editReply({ content: 'この試合はすでに終了しています。' })
     return true
   }
-
-  await interaction.deferUpdate()
 
   const tournament = await TournamentModel.getById(match.tournament_id)
   if (!tournament) return true
@@ -951,6 +953,11 @@ async function handleConfirmButton(
   const isTextChannel = channel && channel.isTextBased() && !channel.isDMBased()
 
   if (tournament.format === 'single_elim') {
+    const recorded = await TournamentMatchModel.setScore(matchId, winnerId, p1Games, p2Games)
+    if (!recorded) {
+      await interaction.editReply({ content: 'この試合の結果はすでに記録されています。' })
+      return true
+    }
     const result = await BracketService.advanceWinner(matchId, winnerId, regulation)
 
     await interaction.editReply({
@@ -980,7 +987,11 @@ async function handleConfirmButton(
   }
 
   // league / swiss
-  await TournamentMatchModel.setScore(matchId, winnerId, p1Games, p2Games)
+  const scoreRecorded = await TournamentMatchModel.setScore(matchId, winnerId, p1Games, p2Games)
+  if (!scoreRecorded) {
+    await interaction.editReply({ content: 'この試合の結果はすでに記録されています。' })
+    return true
+  }
 
   await interaction.editReply({
     content: `${interaction.message.content.split('\n\n')[0]}\n\n✅ **${winnerName}** の勝利 (${p1Games}-${p2Games})`,
@@ -1047,14 +1058,16 @@ async function handleConfirmButton(
 }
 
 async function handleCorrectButton(interaction: ButtonInteraction, matchId: number): Promise<boolean> {
+  await interaction.deferUpdate()
+
   const match = await TournamentMatchModel.getById(matchId)
   if (!match || match.status !== 'completed') {
-    await interaction.reply({ content: '修正できる完了試合がありません。', flags: MessageFlags.Ephemeral })
+    await interaction.editReply({ content: '修正できる完了試合がありません。' })
     return true
   }
 
   const tournament = await TournamentModel.getById(match.tournament_id)
-  if (!tournament) { await interaction.reply({ content: '❌', flags: MessageFlags.Ephemeral }); return true }
+  if (!tournament) { await interaction.editReply({ content: '❌' }); return true }
   const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
 
   if (tournament.format === 'single_elim') {
@@ -1064,9 +1077,8 @@ async function handleCorrectButton(interaction: ButtonInteraction, matchId: numb
     const nextMatch = allMatches.find(m => m.round === nextRound && m.match_number === nextMatchNumber)
 
     if (nextMatch && nextMatch.status === 'completed') {
-      await interaction.reply({
+      await interaction.editReply({
         content: '❌ 次の試合がすでに終了しているため修正できません。先に次の試合を修正してください。',
-        flags: MessageFlags.Ephemeral,
       })
       return true
     }
@@ -1085,7 +1097,6 @@ async function handleCorrectButton(interaction: ButtonInteraction, matchId: numb
   }
 
   await TournamentMatchModel.resetMatch(matchId)
-  await interaction.deferUpdate()
   const { content, components } = await formatMatchByFormat(tournament.format, matchId, match.round, regulation)
   await interaction.editReply({ content, components })
   return true
@@ -1236,21 +1247,20 @@ async function handleWinButton(
   matchId: number,
   participantId: number
 ): Promise<boolean> {
+  // Defer immediately so multi-step DB work doesn't exceed Discord's 3s interaction window
+  await interaction.deferUpdate()
+
   const match = await TournamentMatchModel.getById(matchId)
   if (!match) {
-    await interaction.reply({ content: '試合が見つかりません。', flags: MessageFlags.Ephemeral })
+    await interaction.editReply({ content: '試合が見つかりません。' })
     return true
   }
   if (match.status === 'completed') {
-    await interaction.reply({
+    await interaction.editReply({
       content: 'この試合はすでに終了しています。',
-      flags: MessageFlags.Ephemeral,
     })
     return true
   }
-
-  // Defer immediately so multi-step DB work doesn't exceed Discord's 3s interaction window
-  await interaction.deferUpdate()
 
   const tournament = await TournamentModel.getById(match.tournament_id)
   if (!tournament) return true
@@ -1570,33 +1580,30 @@ async function handleCharacterSelectMenu(
     return true
   }
 
-  if (tournament.max_participants) {
-    const count = await TournamentParticipantModel.count(tournamentId)
-    if (count >= tournament.max_participants) {
-      await interaction.update({ content: `❌ 定員（${tournament.max_participants}名）に達しています。`, components: [] })
-      return true
-    }
-  }
-
-  const existing = await TournamentParticipantModel.getByDiscordId(tournamentId, interaction.user.id)
-  if (existing) {
-    await interaction.update({
-      content: `すでに参加登録済みです（ランク: ${existing.rank ?? 'なし'}）。`,
-      components: [],
-    })
-    return true
-  }
-
   const member = interaction.member as GuildMember | null
   const displayName = member?.displayName ?? interaction.user.displayName ?? interaction.user.username
 
-  await TournamentParticipantModel.create({
+  const result = await TournamentParticipantModel.createIfUnderCap({
     tournament_id: tournamentId,
     discord_id: interaction.user.id,
     discord_name: displayName,
     rank,
     character,
+    maxParticipants: tournament.max_participants,
   })
+
+  if (result === 'duplicate') {
+    await interaction.update({
+      content: 'すでに参加登録済みです。',
+      components: [],
+    })
+    return true
+  }
+
+  if (result === 'over_cap') {
+    await interaction.update({ content: `❌ 定員（${tournament.max_participants}名）に達しています。`, components: [] })
+    return true
+  }
 
   const count = await TournamentParticipantModel.count(tournamentId)
 
@@ -1666,6 +1673,7 @@ function parseHandicapRules(input: string): HandicapRule[] {
 function statusLabel(status: string): string {
   switch (status) {
     case 'registration': return '参加受付中'
+    case 'closed': return '受付終了'
     case 'in_progress': return '進行中'
     case 'completed': return '終了'
     default: return status
@@ -1862,7 +1870,8 @@ async function handleTeamJoinButton(interaction: ButtonInteraction, tournamentId
   }
   const alreadyMember = await TournamentTeamMemberModel.getByDiscordIdInTournament(tournamentId, interaction.user.id)
   if (alreadyMember) {
-    await interaction.reply({ content: `❌ すでに **${alreadyMember.team_id}** のチームに参加しています。`, flags: MessageFlags.Ephemeral })
+    const existingTeam = await TournamentTeamModel.getById(alreadyMember.team_id)
+    await interaction.reply({ content: `❌ すでに **${existingTeam?.name ?? `チーム#${alreadyMember.team_id}`}** に参加しています。`, flags: MessageFlags.Ephemeral })
     return true
   }
   const team = await TournamentTeamModel.getById(teamId)
@@ -1902,13 +1911,22 @@ async function handleTeamMemberRankSelect(interaction: StringSelectMenuInteracti
 }
 
 async function handleTeamMemberCharSelect(interaction: StringSelectMenuInteraction, tournamentId: number, teamId: number, rankIndex: number): Promise<boolean> {
-  const [pageStr, character] = interaction.values[0].split('|')
-  if (character === '__next__' || character === '__prev__') {
-    const newPage = character === '__next__' ? parseInt(pageStr) + 1 : parseInt(pageStr) - 1
-    const row = buildCharacterSelectRow(`tnm-team-char:${tournamentId}:${teamId}:${rankIndex}`, newPage)
+  const value = interaction.values[0]
+  const parts = interaction.customId.split(':')
+  // customId format: tnm-team-char:tournamentId:teamId:rankIndex:page
+  const page = parseInt(parts[4] ?? '0')
+
+  if (value === '__next__') {
+    const row = buildCharacterSelectRow(`tnm-team-char:${tournamentId}:${teamId}:${rankIndex}`, page + 1)
     await interaction.update({ components: [row] })
     return true
   }
+  if (value === '__prev__') {
+    const row = buildCharacterSelectRow(`tnm-team-char:${tournamentId}:${teamId}:${rankIndex}`, page - 1)
+    await interaction.update({ components: [row] })
+    return true
+  }
+  const character = value
   const member = await TournamentTeamMemberModel.getByDiscordId(teamId, interaction.user.id)
   if (!member) { await interaction.update({ content: '❌ メンバーが見つかりません。', components: [] }); return true }
   await TournamentTeamMemberModel.setCharacter(member.id, character)
@@ -1959,8 +1977,14 @@ async function buildAssignPanel(tournamentId: number): Promise<{ content: string
   const participants = await TournamentParticipantModel.getByTournament(tournamentId)
   const unassigned = participants.filter(p => !isTeamProxy(p.discord_id) && !assignedIds.has(p.discord_id))
 
-  const teamLines = await Promise.all(teams.map(async (t, idx) => {
-    const members = await TournamentTeamMemberModel.getByTeam(t.id)
+  const membersByTeam = new Map<number, typeof allMembers>()
+  for (const m of allMembers) {
+    if (!membersByTeam.has(m.team_id)) membersByTeam.set(m.team_id, [])
+    membersByTeam.get(m.team_id)!.push(m)
+  }
+
+  const teamLines = teams.map((t, idx) => {
+    const members = membersByTeam.get(t.id) ?? []
     const filled = members.filter(m => m.position !== null).length
     const emoji = TEAM_EMOJIS[idx % TEAM_EMOJIS.length]
     const slots = POSITION_NAMES.map((pos, i) => {
@@ -1968,7 +1992,7 @@ async function buildAssignPanel(tournamentId: number): Promise<{ content: string
       return `${pos}: ${m ? m.discord_name.slice(0, 10) : '───'}`
     }).join(' ／ ')
     return `${emoji} **${t.name}** (${filled}/5)\n　　${slots}`
-  }))
+  })
 
   const footerText = unassigned.length > 0
     ? `👥 未配置: ${unassigned.length}名 — ボタンで個別配置、または下の自動振り分けをお使いください`
@@ -2115,14 +2139,21 @@ async function handleBattleStart(interaction: ButtonInteraction, matchId: number
   const match = await TournamentMatchModel.getById(matchId)
   if (!match) { await interaction.reply({ content: '❌ 試合が見つかりません。', flags: MessageFlags.Ephemeral }); return true }
 
+  const existingBattles = await TournamentTeamBattleModel.getByMatch(matchId)
+  if (existingBattles.length > 0) {
+    await interaction.reply({ content: '対戦はすでに開始されています。', flags: MessageFlags.Ephemeral })
+    return true
+  }
+
   await interaction.deferUpdate()
 
   const tournament = await TournamentModel.getById(match.tournament_id)
   if (!tournament) return true
   const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
 
-  const p1Id = await TournamentMatchModel.getWithParticipants(matchId).then(m => m?.p1_discord_id ? teamIdFromProxy(m.p1_discord_id) : null)
-  const p2Id = await TournamentMatchModel.getWithParticipants(matchId).then(m => m?.p2_discord_id ? teamIdFromProxy(m.p2_discord_id) : null)
+  const matchData = await TournamentMatchModel.getWithParticipants(matchId)
+  const p1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
+  const p2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
   if (!p1Id || !p2Id) { return true }
 
   let battleIds: number[]
@@ -2151,12 +2182,13 @@ async function handleBattleStart(interaction: ButtonInteraction, matchId: number
 }
 
 async function handleBattleWin(interaction: ButtonInteraction, battleId: number, memberId: number): Promise<boolean> {
+  await interaction.deferUpdate()
+
   const battle = await TournamentTeamBattleModel.getById(battleId)
   if (!battle || battle.status === 'completed') {
-    await interaction.reply({ content: 'この試合はすでに終了しています。', flags: MessageFlags.Ephemeral })
+    await interaction.editReply({ content: 'この試合はすでに終了しています。' })
     return true
   }
-  await interaction.deferUpdate()
 
   const match = await TournamentMatchModel.getById(battle.match_id)
   if (!match) return true
@@ -2194,12 +2226,13 @@ async function handleBattleWin(interaction: ButtonInteraction, battleId: number,
 }
 
 async function handleBattleScore(interaction: ButtonInteraction, battleId: number, winnerId: number, loserGames: number): Promise<boolean> {
+  await interaction.deferUpdate()
+
   const battle = await TournamentTeamBattleModel.getById(battleId)
   if (!battle || battle.status === 'completed') {
-    await interaction.reply({ content: 'この試合はすでに終了しています。', flags: MessageFlags.Ephemeral })
+    await interaction.editReply({ content: 'この試合はすでに終了しています。' })
     return true
   }
-  await interaction.deferUpdate()
 
   const match = await TournamentMatchModel.getById(battle.match_id)
   if (!match) return true
@@ -2240,12 +2273,13 @@ async function handleBattleConfirmButton(
   t1Games: number,
   t2Games: number
 ): Promise<boolean> {
+  await interaction.deferUpdate()
+
   const battle = await TournamentTeamBattleModel.getById(battleId)
   if (!battle || battle.status === 'completed') {
-    await interaction.reply({ content: 'この試合はすでに終了しています。', flags: MessageFlags.Ephemeral })
+    await interaction.editReply({ content: 'この試合はすでに終了しています。' })
     return true
   }
-  await interaction.deferUpdate()
 
   const match = await TournamentMatchModel.getById(battle.match_id)
   if (!match) return true
@@ -2263,7 +2297,11 @@ async function handleBattleConfirmButton(
   const winnerTeamId = isT1Winner ? team1Id : team2Id
   if (!winnerTeamId || !team1Id || !team2Id) return true
 
-  await TournamentTeamBattleModel.setWinner(battleId, winnerId, winnerTeamId, t1Games, t2Games)
+  const battleRecorded = await TournamentTeamBattleModel.setWinner(battleId, winnerId, winnerTeamId, t1Games, t2Games)
+  if (!battleRecorded) {
+    await interaction.editReply({ content: 'この試合の結果はすでに記録されています。' })
+    return true
+  }
 
   const correctRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()

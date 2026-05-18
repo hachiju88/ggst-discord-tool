@@ -5,10 +5,7 @@ import { TournamentTeamModel } from '../models/TournamentTeam'
 import { TournamentTeamMember, TournamentTeamMemberModel, POSITION_NAMES } from '../models/TournamentTeamMember'
 import { TournamentTeamBattle, TournamentTeamBattleModel } from '../models/TournamentTeamBattle'
 import { BracketService } from './BracketService'
-
-function genCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000))
-}
+import { generateMatchCode } from '../utils/matchCode'
 
 function sortByPosition(members: TournamentTeamMember[]): TournamentTeamMember[] {
   return [...members].sort((a, b) => (a.position ?? 99) - (b.position ?? 99) || a.id - b.id)
@@ -158,7 +155,7 @@ export class TeamBattleService {
       const battle = await TournamentTeamBattleModel.create({
         match_id: matchId,
         battle_order: i + 1,
-        match_code: genCode(),
+        match_code: generateMatchCode(),
         team1_member_id: m1.id,
         team2_member_id: m2.id,
         handicap_member_id: handicap.handicapParticipantId
@@ -195,7 +192,7 @@ export class TeamBattleService {
     const battle = await TournamentTeamBattleModel.create({
       match_id: matchId,
       battle_order: 1,
-      match_code: genCode(),
+      match_code: generateMatchCode(),
       team1_member_id: m1.id,
       team2_member_id: m2.id,
       handicap_member_id: handicap.handicapParticipantId
@@ -260,7 +257,7 @@ export class TeamBattleService {
     const battle = await TournamentTeamBattleModel.create({
       match_id: matchId,
       battle_order: prevBattles.length + 1,
-      match_code: genCode(),
+      match_code: generateMatchCode(),
       team1_member_id: nextM1Id,
       team2_member_id: nextM2Id,
       handicap_member_id: handicap.handicapParticipantId
@@ -293,9 +290,8 @@ export class TeamBattleService {
     // 同点: ゲーム取得数で比較
     let t1Games = 0, t2Games = 0
     for (const b of completed) {
-      const isT1Member = b.team1_member_id != null &&
-        (await TournamentTeamMemberModel.getById(b.team1_member_id))?.team_id === team1Id
-      if (isT1Member) {
+      const isT1Winner = b.winner_team_id === team1Id
+      if (isT1Winner) {
         t1Games += b.team1_games_won
         t2Games += b.team2_games_won
       } else {

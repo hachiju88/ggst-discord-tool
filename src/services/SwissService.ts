@@ -59,8 +59,24 @@ function buildPairings(
 
     if (!found) {
       // Only one player left unpaired → bye
-      result.push([pid, null])
-      used.add(pid)
+      // Prefer a player who has NOT yet received a bye
+      const unpairedRemaining = sorted.filter(e => !used.has(Number(e.participant.id)))
+      const noByeYet = unpairedRemaining.filter(e => !byeRecipients.has(Number(e.participant.id)))
+      const byeCandidate = noByeYet.length > 0 ? noByeYet[noByeYet.length - 1] : unpairedRemaining[unpairedRemaining.length - 1]
+      if (byeCandidate) {
+        const candidateId = Number(byeCandidate.participant.id)
+        if (candidateId !== pid) {
+          // Give bye to the lowest-ranked player who hasn't had one (not the current pid)
+          result.push([candidateId, null])
+          used.add(candidateId)
+        } else {
+          result.push([pid, null])
+          used.add(pid)
+        }
+      } else {
+        result.push([pid, null])
+        used.add(pid)
+      }
     }
   }
 
@@ -126,7 +142,7 @@ export class SwissService {
       shuffled.push(...shuffle(group))
     }
 
-    const pairs = buildPairings(shuffled, playedPairs)
+    const pairs = buildPairings(shuffled, playedPairs, byeRecipients)
     const matchIds: number[] = []
     let matchNumber = 1
 
