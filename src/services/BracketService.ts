@@ -56,15 +56,17 @@ function strDisplayWidth(s: string): number {
   return w
 }
 
-// Truncate s so its display width ≤ maxW.
+// Truncate s so its display width ≤ maxW, always appending … when truncated.
+// Reserves 1 column for … so the result always fits within maxW.
 function truncDisplay(s: string, maxW: number): string {
+  if (strDisplayWidth(s) <= maxW) return s
   let w = 0, result = ''
   for (const ch of s) {
     const cw = charDisplayWidth(ch)
-    if (w + cw > maxW) { if (w + 1 <= maxW) result += '…'; break }
+    if (w + cw > maxW - 1) break  // leave 1 col for …
     result += ch; w += cw
   }
-  return result
+  return result + '…'
 }
 
 // Pad s with pad chars so its display width equals targetW.
@@ -337,7 +339,7 @@ export class BracketService {
     const totalRows = bracketSize * 2 - 1
 
     // NAME_W / COL_W are in **display columns**, not JS string length.
-    const NAME_W = 12
+    const NAME_W = 14
     const H_PAD = 2
     const COL_W = NAME_W + H_PAD + 1  // display cols per bracket section
 
