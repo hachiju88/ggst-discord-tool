@@ -108,16 +108,27 @@ export class BracketService {
     const numRounds = Math.log2(size)
     const numByes = size - shuffled.length
 
-    // Place participants so byes are never paired with byes.
-    // First `numByes` real players are placed in even slots (paired with null);
-    // the rest fill consecutive slots.
-    const slots: (TournamentParticipant | null)[] = new Array(size).fill(null)
-    for (let i = 0; i < numByes; i++) {
-      slots[i * 2] = shuffled[i]
+    // Distribute BYEs evenly throughout the bracket.
+    // Spread BYE match indices using equal intervals so they don't cluster.
+    const matchCount = size / 2
+    const byeMatchIndices = new Set<number>()
+    if (numByes === 1) {
+      byeMatchIndices.add(0)
+    } else {
+      for (let i = 0; i < numByes; i++) {
+        byeMatchIndices.add(Math.round(i * (matchCount - 1) / (numByes - 1)))
+      }
     }
-    let idx = numByes
-    for (let i = numByes * 2; i < size && idx < shuffled.length; i++) {
-      slots[i] = shuffled[idx++]
+
+    const slots: (TournamentParticipant | null)[] = new Array(size).fill(null)
+    let pIdx = 0
+    for (let mi = 0; mi < matchCount; mi++) {
+      if (byeMatchIndices.has(mi)) {
+        slots[mi * 2] = shuffled[pIdx++]  // p1 gets the real participant; p2 stays null (BYE)
+      } else {
+        slots[mi * 2]     = shuffled[pIdx++]
+        slots[mi * 2 + 1] = shuffled[pIdx++]
+      }
     }
 
     // Round 1 matches. Assign VC only to real (non-bye) matches.
@@ -382,8 +393,10 @@ export class BracketService {
       addSeg(topRow, 0,  nameSeg(match?.p1_name ?? ''))
       addSeg(topRow, jc, '┐')
 
-      const p2Raw = match?.status === 'bye' ? 'BYE' : (match?.p2_name ?? '')
-      addSeg(botRow, 0,  nameSeg(p2Raw))
+      // BYE: show only the bracket line (no name), not "BYE" as a participant
+      if (match?.status !== 'bye') {
+        addSeg(botRow, 0,  nameSeg(match?.p2_name ?? ''))
+      }
       addSeg(botRow, jc, '┘')
 
       addSeg(mid, jc, '├' + '─'.repeat(H_PAD))
