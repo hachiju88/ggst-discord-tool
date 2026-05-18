@@ -36,6 +36,7 @@ import { TournamentTeamBattleModel } from '../models/TournamentTeamBattle'
 import { TournamentParticipant } from '../models/TournamentParticipant'
 import { RANKS } from '../constants/ranks'
 import { CHARACTERS } from '../constants/characters'
+import { BracketImageService } from '../services/BracketImageService'
 
 export const data = new SlashCommandBuilder()
   .setName('tnm')
@@ -137,10 +138,6 @@ export const data = new SlashCommandBuilder()
         o.setName('character').setDescription('使用キャラクター').setRequired(true).setAutocomplete(true)
       )
   )
-  .addSubcommand(s =>
-    s.setName('vc-setup')
-      .setDescription('大会で使用するVCチャンネルを設定します')
-  )
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand()
@@ -158,7 +155,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (sub === 'team-setup') return handleTeamSetup(interaction)
   if (sub === 'team-assign') return handleTeamAssign(interaction)
   if (sub === 'join') return handleJoinCmd(interaction)
-  if (sub === 'vc-setup') return handleVcSetup(interaction)
 }
 
 export async function autocomplete(interaction: AutocompleteInteraction) {
@@ -407,10 +403,20 @@ async function handleBracket(interaction: ChatInputCommandInteraction) {
 
   const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
   if (!tournament) {
-    await interaction.editReply({
-      content: 'アクティブな大会が見つかりません。',
-    })
+    await interaction.editReply({ content: 'アクティブな大会が見つかりません。' })
     return
+  }
+
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+
+  if (tournament.format === 'single_elim' && tournament.status === 'in_progress') {
+    try {
+      const { attachment, embed } = await BracketImageService.formatBracketAsAttachment(tournament.id)
+      await interaction.editReply({ embeds: [embed], files: [attachment] })
+      return
+    } catch (err) {
+      console.error('[BracketImage] Failed, falling back to text:', err)
+    }
   }
 
   const embed = tournament.format === 'league'
@@ -847,6 +853,22 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   })
 
   await TournamentModel.setAnnouncementMessage(tournament.id, interaction.channelId!, msg.id)
+
+  // Ephemeral VC setup prompt
+  await interaction.followUp({
+    content: '✅ 大会を作成しました！\n\n**VCチャンネルの設定**（任意）\n対戦で使用するVCチャンネルを選択してください。未設定の場合は「🟦 GGST - ラウンジ #1」がデフォルトになります。',
+    components: [
+      new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
+        new ChannelSelectMenuBuilder()
+          .setCustomId(`tnm-vc-setup:${tournament.id}`)
+          .setPlaceholder('VCチャンネルを選択（複数可）')
+          .addChannelTypes(ChannelType.GuildVoice)
+          .setMinValues(0)
+          .setMaxValues(10)
+      )
+    ],
+    flags: MessageFlags.Ephemeral,
+  })
 
   return true
 }
@@ -2504,52 +2526,27 @@ async function handleJoinCmd(interaction: ChatInputCommandInteraction) {
   })
 }
 
-// ─── /tnm vc-setup ─────────────────────────────────────────────────────────
-
-async function handleVcSetup(interaction: ChatInputCommandInteraction) {
-  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
-  if (!tournament) {
-    await interaction.reply({ content: '❌ アクティブな大会が見つかりません。', flags: MessageFlags.Ephemeral })
-    return
-  }
-  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
-  const currentIds = regulation.vcChannelIds ?? []
-
-  const vcSelect = new ChannelSelectMenuBuilder()
-    .setCustomId('tnm-vc-setup')
-    .setPlaceholder('使用するVCチャンネルを選択（複数可）')
-    .addChannelTypes(ChannelType.GuildVoice)
-    .setMinValues(0)
-    .setMaxValues(10)
-
-  const row = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(vcSelect)
-
-  const currentLabel = currentIds.length > 0
-    ? `現在の設定: ${currentIds.map(id => `<#${id}>`).join(', ')}`
-    : '現在の設定: なし（デフォルト: 🟦 GGST - ラウンジ #1）'
-
-  await interaction.reply({
-    content: `**VC設定 — ${tournament.name}**\n${currentLabel}\n\n使用するVCチャンネルを選択してください。未選択で送信すると「🟦 GGST - ラウンジ #1」がデフォルトとして使われます。`,
-    components: [row as any],
-    flags: MessageFlags.Ephemeral,
-  })
-}
+// ─── VC setup select (triggered from tnm-vc-setup:{tournamentId} in create flow) ──
 
 async function handleVcSetupSelect(interaction: ChannelSelectMenuInteraction): Promise<void> {
-  const tournament = await TournamentModel.getLatestActive(interaction.guildId!)
-  if (!tournament) { await interaction.reply({ content: '❌ 大会が見つかりません。', flags: MessageFlags.Ephemeral }); return }
+  await interaction.deferUpdate()
+  const tournamentId = parseInt(interaction.customId.split(':')[1])
+  const tournament = await TournamentModel.getById(tournamentId)
+  if (!tournament) {
+    await interaction.followUp({ content: '❌ 大会が見つかりません。', flags: MessageFlags.Ephemeral })
+    return
+  }
 
-  const selectedIds = interaction.values
   const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
-  regulation.vcChannelIds = selectedIds
+  regulation.vcChannelIds = interaction.values
   await TournamentModel.setRegulation(tournament.id, regulation)
 
-  const label = selectedIds.length > 0
-    ? selectedIds.map(id => `<#${id}>`).join(', ')
+  const label = interaction.values.length > 0
+    ? interaction.values.map(id => `<#${id}>`).join('、')
     : '未設定（デフォルト: 🟦 GGST - ラウンジ #1）'
 
-  await interaction.update({
-    content: `✅ VC設定を保存しました。\n使用VC: ${label}`,
+  await interaction.editReply({
+    content: `✅ VCチャンネルを設定しました: ${label}`,
     components: [],
   })
 }
