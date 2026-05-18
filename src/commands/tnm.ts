@@ -1,6 +1,7 @@
 import {
   SlashCommandBuilder,
   EmbedBuilder,
+  AttachmentBuilder,
   MessageFlags,
   ModalBuilder,
   TextInputBuilder,
@@ -28,8 +29,11 @@ import { TournamentModel, TournamentRegulation, HandicapRule } from '../models/T
 import { TournamentParticipantModel } from '../models/TournamentParticipant'
 import { TournamentMatchModel } from '../models/TournamentMatch'
 import { BracketService } from '../services/BracketService'
+import { BracketImageService } from '../services/BracketImageService'
 import { LeagueService } from '../services/LeagueService'
+import { LeagueImageService } from '../services/LeagueImageService'
 import { SwissService } from '../services/SwissService'
+import { SwissImageService } from '../services/SwissImageService'
 import { TeamBattleService, isTeamProxy, teamIdFromProxy, proxyDiscordId } from '../services/TeamBattleService'
 import { TournamentTeamModel } from '../models/TournamentTeam'
 import { TournamentTeamMemberModel, POSITION_NAMES } from '../models/TournamentTeamMember'
@@ -37,6 +41,24 @@ import { TournamentTeamBattleModel } from '../models/TournamentTeamBattle'
 import { TournamentParticipant } from '../models/TournamentParticipant'
 import { RANKS } from '../constants/ranks'
 import { CHARACTERS } from '../constants/characters'
+
+// ─── Unified standings helper ─────────────────────────────────────────────────
+// Returns { files, embeds } ready for channel.send() or interaction.editReply()
+async function standingsData(
+  tournamentId: number,
+  format: string
+): Promise<{ files: AttachmentBuilder[]; embeds: EmbedBuilder[] }> {
+  if (format === 'league') {
+    const { attachment, embed } = await LeagueImageService.formatLeagueAsAttachment(tournamentId)
+    return { files: [attachment], embeds: [embed] }
+  }
+  if (format === 'swiss') {
+    const { attachment, embed } = await SwissImageService.formatSwissAsAttachment(tournamentId)
+    return { files: [attachment], embeds: [embed] }
+  }
+  const { attachment, embed } = await BracketImageService.formatBracketAsAttachment(tournamentId)
+  return { files: [attachment], embeds: [embed] }
+}
 
 export const data = new SlashCommandBuilder()
   .setName('tnm')
@@ -185,15 +207,7 @@ async function handleView(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply(showPublic ? {} : { flags: MessageFlags.Ephemeral })
 
   if (tournament.status === 'in_progress' || tournament.status === 'completed') {
-    if (tournament.format === 'single_elim' && !regulation.teamMode) {
-      await interaction.editReply({ embeds: [await BracketService.formatBracketEmbed(tournament.id)] })
-    } else if (tournament.format === 'league') {
-      await interaction.editReply({ embeds: [await LeagueService.formatLeagueEmbed(tournament.id)] })
-    } else if (tournament.format === 'swiss') {
-      await interaction.editReply({ embeds: [await SwissService.formatSwissEmbed(tournament.id)] })
-    } else {
-      await interaction.editReply({ embeds: [await BracketService.formatBracketEmbed(tournament.id)] })
-    }
+    await interaction.editReply(await standingsData(tournament.id, tournament.format))
   } else {
     const participants = await TournamentParticipantModel.getByTournament(tournament.id)
     const embed = new EmbedBuilder()
@@ -859,8 +873,7 @@ async function handleConfirmButton(
           )
         }
         try {
-          const bracketEmbed = await BracketService.formatBracketEmbed(tournament.id)
-          await channel.send({ embeds: [bracketEmbed] })
+          await channel.send(await standingsData(tournament.id, tournament.format))
         } catch (err) { console.error('[tnm] Failed to post final bracket:', err) }
       } else if (result.nextMatchId && result.nextMatchReady) {
         try {
@@ -900,8 +913,7 @@ async function handleConfirmButton(
           )
         }
         try {
-          const leagueEmbed = await LeagueService.formatLeagueEmbed(tournament.id)
-          await channel.send({ embeds: [leagueEmbed] })
+          await channel.send(await standingsData(tournament.id, tournament.format))
         } catch (err) { console.error('[tnm] Failed to post final league standings:', err) }
       }
     }
@@ -919,8 +931,8 @@ async function handleConfirmButton(
       const standings = await SwissService.getStandings(tournament.id)
       const champion = standings[0]?.participant
       if (isTextChannel && channel) {
-        const embed = await SwissService.formatSwissEmbed(tournament.id)
-        await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！`, embeds: [embed] })
+        const sd = await standingsData(tournament.id, tournament.format)
+        await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！`, ...sd })
         if (champion) {
           await channel.send(
             `優勝: <@${champion.discord_id}> **${champion.discord_name}** さん！おめでとうございます！`
@@ -1830,8 +1842,7 @@ async function handleBattleConfirmButton(
     if (result.isChampion && isText && channel) {
       await channel.send(`🏆 **${tournament.name}** 終了！\n優勝: **${winnerTeam?.name}** ！おめでとうございます！`)
       try {
-        const bracketEmbed = await BracketService.formatBracketEmbed(tournament.id)
-        await channel.send({ embeds: [bracketEmbed] })
+        await channel.send(await standingsData(tournament.id, tournament.format))
       } catch (err) { console.error('[tnm] Failed to post final bracket (team):', err) }
     } else if (result.nextMatchId && result.nextMatchReady && isText && channel) {
       try {
@@ -1857,8 +1868,7 @@ async function handleBattleConfirmButton(
       if (isText && channel) {
         await channel.send(`🏆 **${tournament.name}** 全試合終了！\n優勝チーム: **${winnerTeam?.name}** ！おめでとうございます！`)
         try {
-          const leagueEmbed = await LeagueService.formatLeagueEmbed(tournament.id)
-          await channel.send({ embeds: [leagueEmbed] })
+          await channel.send(await standingsData(tournament.id, tournament.format))
         } catch (err) { console.error('[tnm] Failed to post final league standings (team):', err) }
       }
     }
@@ -1880,8 +1890,8 @@ async function handleBattleConfirmButton(
     if (currentRound >= totalRounds) {
       await TournamentModel.setStatus(tournament.id, 'completed')
       if (isText && channel) {
-        const embed = await SwissService.formatSwissEmbed(tournament.id)
-        await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！\n優勝チーム: **${winnerTeam?.name}**！`, embeds: [embed] })
+        const sd = await standingsData(tournament.id, tournament.format)
+        await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！\n優勝チーム: **${winnerTeam?.name}**！`, ...sd })
       }
     } else {
       const nextRound = currentRound + 1
@@ -2102,12 +2112,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
       } catch (err) { console.error(`[tnm] Failed to post team match ${matchId}:`, err) }
     }
 
-    const bracketEmbed = tournament.format === 'swiss'
-      ? await SwissService.formatSwissEmbed(tournament.id)
-      : tournament.format === 'league'
-      ? await LeagueService.formatLeagueEmbed(tournament.id)
-      : await BracketService.formatBracketEmbed(tournament.id)
-    await channel.send({ embeds: [bracketEmbed] })
+    await channel.send(await standingsData(tournament.id, tournament.format))
     await setAnnouncementButtonsDisabled(interaction.guild, tournament, true, '大会開始済み — 受付終了')
     await interaction.editReply('✅ 大会を開始しました！')
     return true
@@ -2118,7 +2123,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
     if (!totalRounds) { await interaction.editReply('❌ スイスドローの総ラウンド数が設定されていません。大会を作り直してください。'); return true }
     const matchIds = await SwissService.generateRound(tournament.id, 1, participants, regulation, [])
     await TournamentModel.setStatus(tournament.id, 'in_progress')
-    await channel.send({ embeds: [await SwissService.formatSwissEmbed(tournament.id)] })
+    await channel.send(await standingsData(tournament.id, 'swiss'))
 
     const swissMatchTarget: any = channel
 
@@ -2137,7 +2142,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
   if (tournament.format === 'league') {
     const matchIds = await LeagueService.generateLeague(tournament.id, participants, regulation)
     await TournamentModel.setStatus(tournament.id, 'in_progress')
-    await channel.send({ embeds: [await LeagueService.formatLeagueEmbed(tournament.id)] })
+    await channel.send(await standingsData(tournament.id, 'league'))
 
     const leagueMatchTarget: any = channel
 
@@ -2166,7 +2171,7 @@ async function handleAdminStart(interaction: ButtonInteraction, tournamentId: nu
   const playableMatchIds = await BracketService.generateBracket(tournament.id, participants, regulation, voiceChannels)
   await TournamentModel.setStatus(tournament.id, 'in_progress')
 
-  await channel.send({ embeds: [await BracketService.formatBracketEmbed(tournament.id)] })
+  await channel.send(await standingsData(tournament.id, 'single_elim'))
 
   if (voiceChannels.length > 0 && voiceChannels.length < playableMatchIds.length) {
     await interaction.followUp({
