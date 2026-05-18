@@ -858,6 +858,10 @@ async function handleConfirmButton(
             `🏆 **${tournament.name}** 終了！\n優勝: <@${winner.discord_id}> **${winner.discord_name}** さん！おめでとうございます！`
           )
         }
+        try {
+          const bracketEmbed = await BracketService.formatBracketEmbed(tournament.id)
+          await channel.send({ embeds: [bracketEmbed] })
+        } catch (err) { console.error('[tnm] Failed to post final bracket:', err) }
       } else if (result.nextMatchId && result.nextMatchReady) {
         try {
           const { content, components } = await BracketService.formatMatchContent(result.nextMatchId, regulation)
@@ -889,10 +893,16 @@ async function handleConfirmButton(
       await TournamentModel.setStatus(tournament.id, 'completed')
       const standings = await LeagueService.getStandings(tournament.id)
       const champion = standings[0]?.participant
-      if (isTextChannel && champion && channel) {
-        await channel.send(
-          `🏆 **${tournament.name}** 全試合終了！\n優勝: <@${champion.discord_id}> **${champion.discord_name}** さん！おめでとうございます！`
-        )
+      if (isTextChannel && channel) {
+        if (champion) {
+          await channel.send(
+            `🏆 **${tournament.name}** 全試合終了！\n優勝: <@${champion.discord_id}> **${champion.discord_name}** さん！おめでとうございます！`
+          )
+        }
+        try {
+          const leagueEmbed = await LeagueService.formatLeagueEmbed(tournament.id)
+          await channel.send({ embeds: [leagueEmbed] })
+        } catch (err) { console.error('[tnm] Failed to post final league standings:', err) }
       }
     }
     return true
@@ -1819,6 +1829,10 @@ async function handleBattleConfirmButton(
     const result = await BracketService.advanceWinner(battle.match_id, winnerProxy.id, regulation)
     if (result.isChampion && isText && channel) {
       await channel.send(`🏆 **${tournament.name}** 終了！\n優勝: **${winnerTeam?.name}** ！おめでとうございます！`)
+      try {
+        const bracketEmbed = await BracketService.formatBracketEmbed(tournament.id)
+        await channel.send({ embeds: [bracketEmbed] })
+      } catch (err) { console.error('[tnm] Failed to post final bracket (team):', err) }
     } else if (result.nextMatchId && result.nextMatchReady && isText && channel) {
       try {
         const { content: nc, components: rc } = await TeamBattleService.formatTeamMatchContent(result.nextMatchId, regulation)
@@ -1840,7 +1854,13 @@ async function handleBattleConfirmButton(
     const allDone = await LeagueService.checkAllComplete(tournament.id)
     if (allDone) {
       await TournamentModel.setStatus(tournament.id, 'completed')
-      if (isText && channel) await channel.send(`🏆 **${tournament.name}** 全試合終了！\n優勝チーム: **${winnerTeam?.name}** ！おめでとうございます！`)
+      if (isText && channel) {
+        await channel.send(`🏆 **${tournament.name}** 全試合終了！\n優勝チーム: **${winnerTeam?.name}** ！おめでとうございます！`)
+        try {
+          const leagueEmbed = await LeagueService.formatLeagueEmbed(tournament.id)
+          await channel.send({ embeds: [leagueEmbed] })
+        } catch (err) { console.error('[tnm] Failed to post final league standings (team):', err) }
+      }
     }
   } else if (tournament.format === 'swiss') {
     const allBattles = await TournamentTeamBattleModel.getByMatch(battle.match_id)

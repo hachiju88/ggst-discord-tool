@@ -29,6 +29,50 @@ function nextPowerOf2(n: number): number {
   return p
 }
 
+// Display-width helpers: full-width (CJK/emoji) chars count as 2 columns.
+function charDisplayWidth(ch: string): number {
+  const cp = ch.codePointAt(0) ?? 0
+  if (
+    (cp >= 0x1100 && cp <= 0x115F) ||  // Hangul Jamo
+    (cp >= 0x2E80 && cp <= 0x303E) ||  // CJK Radicals etc.
+    (cp >= 0x3040 && cp <= 0x33FF) ||  // Hiragana / Katakana / CJK symbols
+    (cp >= 0x3400 && cp <= 0x4DBF) ||  // CJK Extension A
+    (cp >= 0x4E00 && cp <= 0x9FFF) ||  // CJK Unified Ideographs
+    (cp >= 0xA000 && cp <= 0xA4CF) ||  // Yi Syllables
+    (cp >= 0xAC00 && cp <= 0xD7AF) ||  // Hangul Syllables
+    (cp >= 0xF900 && cp <= 0xFAFF) ||  // CJK Compatibility Ideographs
+    (cp >= 0xFE10 && cp <= 0xFE19) ||  // Vertical Forms
+    (cp >= 0xFE30 && cp <= 0xFE6F) ||  // CJK Compatibility Forms
+    (cp >= 0xFF01 && cp <= 0xFF60) ||  // Fullwidth Forms
+    (cp >= 0xFFE0 && cp <= 0xFFE6) ||  // Fullwidth Signs
+    (cp >= 0x1F300 && cp <= 0x1FAFF)   // Emoji
+  ) return 2
+  return 1
+}
+
+function strDisplayWidth(s: string): number {
+  let w = 0
+  for (const ch of s) w += charDisplayWidth(ch)
+  return w
+}
+
+// Truncate s so its display width ≤ maxW.
+function truncDisplay(s: string, maxW: number): string {
+  let w = 0, result = ''
+  for (const ch of s) {
+    const cw = charDisplayWidth(ch)
+    if (w + cw > maxW) { if (w + 1 <= maxW) result += '…'; break }
+    result += ch; w += cw
+  }
+  return result
+}
+
+// Pad s with pad chars so its display width equals targetW.
+function padDisplay(s: string, targetW: number, pad = '─'): string {
+  const cur = strDisplayWidth(s)
+  return cur >= targetW ? s : s + pad.repeat(targetW - cur)
+}
+
 export class BracketService {
   static calcHandicap(
     p1: TournamentParticipant,
@@ -271,7 +315,9 @@ export class BracketService {
     }
   }
 
-  // Builds an ASCII bracket art string using box-drawing characters.
+  // Builds a bracket art string using box-drawing characters.
+  // Positions are tracked in display columns so full-width (Japanese/CJK)
+  // characters align correctly.
   static buildBracketArt(matches: MatchWithParticipants[]): string {
     if (matches.length === 0) return '試合データがありません'
 
@@ -279,32 +325,38 @@ export class BracketService {
     const bracketSize = Math.pow(2, maxRound)
     const totalRows = bracketSize * 2 - 1
 
+    // NAME_W / COL_W are in **display columns**, not JS string length.
     const NAME_W = 12
     const H_PAD = 2
-    const COL_W = NAME_W + H_PAD + 1 // 15
+    const COL_W = NAME_W + H_PAD + 1  // display cols per bracket section
 
-    const totalCols = maxRound * COL_W + NAME_W + 16
-    const grid: string[][] = Array.from({ length: totalRows }, () =>
-      new Array(totalCols).fill(' ')
-    )
+    // Each row is a list of {display-column, text} segments.
+    // buildRow assembles them left-to-right, padding with spaces as needed.
+    type Seg = { pos: number; text: string }
+    const rowSegs: Seg[][] = Array.from({ length: totalRows }, () => [])
 
-    const set = (row: number, col: number, ch: string) => {
-      if (row >= 0 && row < totalRows && col >= 0 && col < totalCols)
-        grid[row][col] = ch
+    const addSeg = (row: number, pos: number, text: string) => {
+      if (row >= 0 && row < totalRows) rowSegs[row].push({ pos, text })
     }
-    const setStr = (row: number, colStart: number, s: string) => {
-      for (let i = 0; i < s.length; i++) set(row, colStart + i, s[i])
+
+    const buildRow = (segs: Seg[]): string => {
+      const sorted = [...segs].sort((a, b) => a.pos - b.pos)
+      let result = '', cur = 0
+      for (const seg of sorted) {
+        if (seg.pos < cur) continue
+        if (seg.pos > cur) result += ' '.repeat(seg.pos - cur)
+        result += seg.text
+        cur = seg.pos + strDisplayWidth(seg.text)
+      }
+      return result.trimEnd()
     }
 
     // Row position of ├ for round r (1-indexed), match index m (0-indexed)
     const getMidRow = (r: number, m: number) =>
       Math.pow(2, r) - 1 + m * Math.pow(2, r + 1)
 
-    // Column of ├/┐/┘ for round r (1-indexed)
+    // Display column of ├/┐/┘ for round r
     const getJoinCol = (r: number) => (r - 1) * COL_W + NAME_W
-
-    const trunc = (s: string) =>
-      s.length > NAME_W ? s.substring(0, NAME_W - 1) + '…' : s
 
     const matchMap = new Map<string, MatchWithParticipants>()
     for (const m of matches) matchMap.set(`${m.round}:${m.match_number - 1}`, m)
@@ -317,27 +369,27 @@ export class BracketService {
       return null
     }
 
-    // Round 1: place participant names, ┐/┘, and ├──
+    // Helper: truncate + pad a name to exactly NAME_W display columns with ─
+    const nameSeg = (name: string) => padDisplay(truncDisplay(name, NAME_W), NAME_W)
+
+    // Round 1: participant names, ┐/┘, ├──
     for (let m = 0; m < bracketSize / 2; m++) {
       const match = getMatch(1, m)
-      const topRow = m * 4
-      const botRow = m * 4 + 2
+      const topRow = m * 4, botRow = m * 4 + 2
       const mid = getMidRow(1, m)
-      const jc = getJoinCol(1)
+      const jc = getJoinCol(1)  // = NAME_W
 
-      setStr(topRow, 0, trunc(match?.p1_name ?? '').padEnd(NAME_W, '─'))
-      set(topRow, jc, '┐')
+      addSeg(topRow, 0,  nameSeg(match?.p1_name ?? ''))
+      addSeg(topRow, jc, '┐')
 
-      const p2Name = match?.status === 'bye' ? 'BYE' : (match?.p2_name ?? '')
-      setStr(botRow, 0, trunc(p2Name).padEnd(NAME_W, '─'))
-      set(botRow, jc, '┘')
+      const p2Raw = match?.status === 'bye' ? 'BYE' : (match?.p2_name ?? '')
+      addSeg(botRow, 0,  nameSeg(p2Raw))
+      addSeg(botRow, jc, '┘')
 
-      set(mid, jc, '├')
-      set(mid, jc + 1, '─')
-      set(mid, jc + 2, '─')
+      addSeg(mid, jc, '├' + '─'.repeat(H_PAD))
     }
 
-    // All rounds: place winner name → next join char (or champion label)
+    // All rounds: winner name → ┐/┘ for next round (or 🏆 for final)
     for (let r = 1; r <= maxRound; r++) {
       const matchCount = bracketSize / Math.pow(2, r)
       const jc = getJoinCol(r)
@@ -347,13 +399,12 @@ export class BracketService {
         const wName = getWinnerName(getMatch(r, m))
 
         if (r < maxRound) {
-          // winner name padded with ─, then ┐/┘ for the next round
-          const nameStart = jc + H_PAD + 1
+          const nameStart = jc + 1 + H_PAD          // display col right after ├──
           const nextJC = getJoinCol(r + 1)
-          setStr(mid, nameStart, (wName ? trunc(wName) : '').padEnd(NAME_W, '─'))
-          set(mid, nextJC, m % 2 === 0 ? '┐' : '┘')
+          addSeg(mid, nameStart, nameSeg(wName ?? ''))
+          addSeg(mid, nextJC, m % 2 === 0 ? '┐' : '┘')
         } else if (wName) {
-          setStr(mid, jc + H_PAD + 1, '🏆 ' + wName)
+          addSeg(mid, jc + 1 + H_PAD, '🏆 ' + wName)
         }
       }
     }
@@ -368,15 +419,13 @@ export class BracketService {
         const botInRow = getMidRow(r - 1, 2 * m + 1)
         const mid = getMidRow(r, m)
 
-        for (let row = topInRow + 1; row < mid; row++) set(row, jc, '│')
-        set(mid, jc, '├')
-        set(mid, jc + 1, '─')
-        set(mid, jc + 2, '─')
-        for (let row = mid + 1; row < botInRow; row++) set(row, jc, '│')
+        for (let row = topInRow + 1; row < mid; row++) addSeg(row, jc, '│')
+        addSeg(mid, jc, '├' + '─'.repeat(H_PAD))
+        for (let row = mid + 1; row < botInRow; row++) addSeg(row, jc, '│')
       }
     }
 
-    return grid.map(row => row.join('').trimEnd()).join('\n')
+    return rowSegs.map(buildRow).join('\n')
   }
 
   static async formatBracketEmbed(tournamentId: number): Promise<EmbedBuilder> {
