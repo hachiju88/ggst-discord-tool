@@ -149,6 +149,54 @@ export async function autoMigrate() {
       console.log('✅ tournament_team_battles table created')
     }
 
+    // ランク追跡テーブル
+    if (!tableNames.includes('tracked_players')) {
+      await db.execute({ sql: `CREATE TABLE IF NOT EXISTS tracked_players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        puddle_player_id INTEGER NOT NULL,
+        display_name TEXT NOT NULL,
+        char_short TEXT NOT NULL,
+        char_long TEXT NOT NULL DEFAULT '',
+        added_by_discord_id TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(guild_id, puddle_player_id, char_short)
+      )` })
+      await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_tracked_guild ON tracked_players(guild_id)' })
+      console.log('✅ tracked_players table created')
+    }
+
+    if (!tableNames.includes('rating_observations')) {
+      await db.execute({ sql: `CREATE TABLE IF NOT EXISTS rating_observations (
+        puddle_player_id INTEGER NOT NULL,
+        char_short TEXT NOT NULL,
+        observed_at TEXT NOT NULL,
+        rating REAL NOT NULL,
+        PRIMARY KEY (puddle_player_id, char_short, observed_at)
+      )` })
+      await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_obs_player_char ON rating_observations(puddle_player_id, char_short)' })
+      console.log('✅ rating_observations table created')
+    }
+
+    if (!tableNames.includes('rank_post_config')) {
+      await db.execute({ sql: `CREATE TABLE IF NOT EXISTS rank_post_config (
+        guild_id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )` })
+      console.log('✅ rank_post_config table created')
+    }
+
+    // char_long カラムが古い tracked_players に存在しない場合の追加
+    if (tableNames.includes('tracked_players')) {
+      const tpInfo = await db.execute({ sql: 'PRAGMA table_info(tracked_players)' })
+      const hasCharLong = tpInfo.rows.some((r: any) => r.name === 'char_long')
+      if (!hasCharLong) {
+        await db.execute({ sql: `ALTER TABLE tracked_players ADD COLUMN char_long TEXT NOT NULL DEFAULT ''` })
+        console.log('✅ char_long column added to tracked_players')
+      }
+    }
+
     console.log('Database schema check complete');
   } catch (error) {
     console.error('Auto-migration error:', error);

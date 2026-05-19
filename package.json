@@ -16,7 +16,8 @@
     "migrate:v2": "tsx src/database/migrate-to-v2.ts",
     "migrate:settings": "tsx src/database/migrate-add-settings-table.ts",
     "migrate:backups": "tsx src/database/migrate-add-backups-table.ts",
-    "migrate:fix-names": "tsx src/database/migrate-fix-character-names.ts"
+    "migrate:fix-names": "tsx src/database/migrate-fix-character-names.ts",
+    "migrate:rank": "tsx src/database/migrate-add-rank-tracking-tables.ts"
   },
   "keywords": [
     "discord",
