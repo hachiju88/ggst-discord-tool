@@ -27,7 +27,7 @@ function formatBackfillResult(
   result: { count: number; error?: string },
 ): string {
   if (result.error) {
-    return `✅ **${name}** を追加しました。\n⚠️ 履歴取得に失敗しました(${result.error})。後ほどパネルの🔄で再取得できます。`;
+    return `✅ **${name}** を追加しました。\n⚠️ 履歴取得に失敗しました(${truncate(result.error, 200)})。後ほどパネルの🔄で再取得できます。`;
   }
   if (result.count === 0) {
     return `✅ **${name}** を追加しました。\n⚠️ puddle.farm に履歴データがありませんでした(非公開アカウント・未プレイ・ID 不正の可能性)。`;
