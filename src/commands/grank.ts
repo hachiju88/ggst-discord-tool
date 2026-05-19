@@ -21,6 +21,20 @@ import { PuddleFarmService } from '../services/PuddleFarmService';
 import { buildPanel } from '../services/RankPanelBuilder';
 import { truncate } from '../utils/text';
 
+function formatBackfillResult(
+  name: string,
+  charLong: string,
+  result: { count: number; error?: string },
+): string {
+  if (result.error) {
+    return `✅ **${name}** を追加しました。\n⚠️ 履歴取得に失敗しました(${truncate(result.error, 200)})。後ほどパネルの🔄で再取得できます。`;
+  }
+  if (result.count === 0) {
+    return `✅ **${name}** を追加しました。\n⚠️ puddle.farm に履歴データがありませんでした(非公開アカウント・未プレイ・ID 不正の可能性)。`;
+  }
+  return `✅ **${name}** (${charLong}) を追加し、**${result.count}件**の履歴を取得しました。\n元のパネルの「🔄 更新」を押すと反映されます。`;
+}
+
 // StringSelectMenu の選択肢上限は25件のため、追跡上限もそれに合わせる。
 const MAX_TRACKED_PER_GUILD = 25;
 
@@ -212,10 +226,14 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       return;
     }
     await interaction.editReply({
-      content: `✅ **${player.name}** (${charInfo.char_long}) を追加しました。\n元のパネルの「🔄 更新」を押すと反映されます。`,
+      content: `✅ **${player.name}** (${charInfo.char_long}) を追加しました。\n⏳ 90日分の履歴を取得中...`,
       components: [],
     });
-    RankTrackingService.backfillPlayer(playerId, canonicalCharShort).catch(console.error);
+    const backfill = await RankTrackingService.backfillPlayer(playerId, canonicalCharShort);
+    await interaction.editReply({
+      content: formatBackfillResult(player.name, charInfo.char_long, backfill),
+      components: [],
+    });
     return;
   }
 }
@@ -272,9 +290,12 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
       return;
     }
     await interaction.editReply({
-      content: `✅ **${r.name}** (${r.char_long}) を追加しました。\n元のパネルの「🔄 更新」を押すと反映されます。`,
+      content: `✅ **${r.name}** (${r.char_long}) を追加しました。\n⏳ 90日分の履歴を取得中...`,
     });
-    RankTrackingService.backfillPlayer(r.id, r.char_short).catch(console.error);
+    const backfill = await RankTrackingService.backfillPlayer(r.id, r.char_short);
+    await interaction.editReply({
+      content: formatBackfillResult(r.name, r.char_long, backfill),
+    });
     return;
   }
 

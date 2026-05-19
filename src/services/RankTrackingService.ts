@@ -149,7 +149,7 @@ export const RankTrackingService = {
     for (const { puddle_player_id, char_short } of pairs) {
       try {
         const points = await PuddleFarmService.getRatings(puddle_player_id, char_short, 1);
-        await RankTrackingService.storeObservations(puddle_player_id, char_short, points);
+        if (points !== null) await RankTrackingService.storeObservations(puddle_player_id, char_short, points);
       } catch (err) {
         console.error(`[RankTracking] Failed to fetch ${puddle_player_id}/${char_short}:`, err);
       }
@@ -157,12 +157,17 @@ export const RankTrackingService = {
     }
   },
 
-  async backfillPlayer(puddlePlayerId: string, charShort: string): Promise<void> {
+  async backfillPlayer(puddlePlayerId: string, charShort: string): Promise<{ count: number; error?: string }> {
     try {
       const points = await PuddleFarmService.getRatings(puddlePlayerId, charShort, 90);
+      if (points === null) {
+        return { count: 0, error: 'puddle.farm API からデータを取得できませんでした' };
+      }
       await RankTrackingService.storeObservations(puddlePlayerId, charShort, points);
-    } catch (err) {
+      return { count: points.length };
+    } catch (err: any) {
       console.error(`[RankTracking] Backfill failed for ${puddlePlayerId}/${charShort}:`, err);
+      return { count: 0, error: err?.message ?? String(err) };
     }
   },
 };

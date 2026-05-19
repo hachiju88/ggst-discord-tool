@@ -107,10 +107,9 @@ export const PuddleFarmService = {
     return { ...result, id: String(result.id) };
   },
 
-  async getRatings(playerId: string, charShort: string, days: number): Promise<RatingPoint[]> {
+  async getRatings(playerId: string, charShort: string, days: number): Promise<RatingPoint[] | null> {
     await sleep(REQUEST_DELAY_MS);
-    const result = await apiFetch<RatingPoint[]>(`/ratings/${playerId}/${charShort}/${days}`);
-    return result ?? [];
+    return apiFetch<RatingPoint[]>(`/ratings/${playerId}/${charShort}/${days}`);
   },
 
   async getCharacters(): Promise<[string, string][]> {
