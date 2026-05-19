@@ -11,6 +11,7 @@ import * as combo from './combo';
 import * as move from './move';
 import * as admin from './admin';
 import * as tnm from './tnm';
+import * as grank from './grank';
 
 // コマンドモジュールの型定義
 interface CommandModule {
@@ -33,6 +34,7 @@ const commandRegistry = new Map<string, CommandModule>([
   ['gmv', move],
   ['admin', admin],
   ['tnm', tnm],
+  ['grank', grank],
 ]);
 
 // コマンドハンドラー
@@ -70,6 +72,7 @@ export function getModalSubmitHandler(customId: string): ((interaction: any) => 
     'tnm-admin-fix-modal': 'tnm',
     'tnm-admin-enter-char': 'tnm',
     'tnm-admin-team-setup-modal': 'tnm',
+    'grank-add': 'grank',
   };
   const commandName = prefixToCommand[prefix];
   if (commandName) {
@@ -83,6 +86,11 @@ export async function buttonHandler(interaction: ButtonInteraction): Promise<voi
   const customId = interaction.customId;
   if (customId.startsWith('tnm-')) {
     await tnm.handleButtonInteract(interaction);
+    return;
+  }
+  if (customId.startsWith('grank:')) {
+    await grank.handleButtonInteract(interaction);
+    return;
   }
 }
 
@@ -91,6 +99,11 @@ export async function selectMenuHandler(interaction: StringSelectMenuInteraction
   const customId = interaction.customId;
   if (customId.startsWith('tnm-')) {
     await tnm.handleSelectMenu(interaction);
+    return;
+  }
+  if (customId.startsWith('grank:') || customId.startsWith('grank-add:')) {
+    await grank.handleSelectMenu(interaction);
+    return;
   }
 }
 
@@ -99,6 +112,7 @@ export async function channelSelectMenuHandler(interaction: ChannelSelectMenuInt
   const customId = interaction.customId;
   if (customId.startsWith('tnm-')) {
     await tnm.handleChannelSelectMenu(interaction);
+    return;
   }
 }
 

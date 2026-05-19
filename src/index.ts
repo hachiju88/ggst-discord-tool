@@ -3,6 +3,7 @@ import express from 'express';
 import { createClient, registerCommands } from './bot';
 import { initDatabase, closeDatabase } from './database';
 import { autoMigrate } from './database/auto-migrate';
+import { startScheduler } from './services/RankScheduler';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -45,9 +46,17 @@ async function main() {
     // Discord Botクライアント作成
     const client = createClient();
 
+    // ランクスケジューラはクライアント準備完了後に開始
+    let stopRankScheduler: (() => void) | null = null;
+    client.once('clientReady', () => {
+      stopRankScheduler = startScheduler(client);
+      console.log('✅ Rank scheduler started');
+    });
+
     // Graceful shutdown
     const shutdown = async () => {
       console.log('Shutting down...');
+      stopRankScheduler?.();
       server.close();
       client.destroy();
       await closeDatabase();
