@@ -157,12 +157,14 @@ export const RankTrackingService = {
     }
   },
 
-  async backfillPlayer(puddlePlayerId: string, charShort: string): Promise<void> {
+  async backfillPlayer(puddlePlayerId: string, charShort: string): Promise<{ count: number; error?: string }> {
     try {
       const points = await PuddleFarmService.getRatings(puddlePlayerId, charShort, 90);
       await RankTrackingService.storeObservations(puddlePlayerId, charShort, points);
-    } catch (err) {
+      return { count: points.length };
+    } catch (err: any) {
       console.error(`[RankTracking] Backfill failed for ${puddlePlayerId}/${charShort}:`, err);
+      return { count: 0, error: err?.message ?? String(err) };
     }
   },
 };
