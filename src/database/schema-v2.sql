@@ -229,10 +229,12 @@ CREATE INDEX IF NOT EXISTS idx_team_battles_match ON tournament_team_battles(mat
 -- ランク追跡テーブル
 -- ======================================
 
+-- puddle_player_id は puddle.farm 側の int64。JS の Number 上限を超える可能性が
+-- あるため TEXT として保存・取り扱う。
 CREATE TABLE IF NOT EXISTS tracked_players (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   guild_id TEXT NOT NULL,
-  puddle_player_id INTEGER NOT NULL,
+  puddle_player_id TEXT NOT NULL,
   display_name TEXT NOT NULL,
   char_short TEXT NOT NULL,
   char_long TEXT NOT NULL DEFAULT '',
@@ -243,7 +245,7 @@ CREATE TABLE IF NOT EXISTS tracked_players (
 CREATE INDEX IF NOT EXISTS idx_tracked_guild ON tracked_players(guild_id);
 
 CREATE TABLE IF NOT EXISTS rating_observations (
-  puddle_player_id INTEGER NOT NULL,
+  puddle_player_id TEXT NOT NULL,
   char_short TEXT NOT NULL,
   observed_at TEXT NOT NULL,
   rating REAL NOT NULL,

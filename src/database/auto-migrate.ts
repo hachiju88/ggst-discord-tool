@@ -149,12 +149,12 @@ export async function autoMigrate() {
       console.log('✅ tournament_team_battles table created')
     }
 
-    // ランク追跡テーブル
+    // ランク追跡テーブル (puddle_player_id は int64 のため TEXT で保存)
     if (!tableNames.includes('tracked_players')) {
       await db.execute({ sql: `CREATE TABLE IF NOT EXISTS tracked_players (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id TEXT NOT NULL,
-        puddle_player_id INTEGER NOT NULL,
+        puddle_player_id TEXT NOT NULL,
         display_name TEXT NOT NULL,
         char_short TEXT NOT NULL,
         char_long TEXT NOT NULL DEFAULT '',
@@ -168,7 +168,7 @@ export async function autoMigrate() {
 
     if (!tableNames.includes('rating_observations')) {
       await db.execute({ sql: `CREATE TABLE IF NOT EXISTS rating_observations (
-        puddle_player_id INTEGER NOT NULL,
+        puddle_player_id TEXT NOT NULL,
         char_short TEXT NOT NULL,
         observed_at TEXT NOT NULL,
         rating REAL NOT NULL,
@@ -194,6 +194,54 @@ export async function autoMigrate() {
       if (!hasCharLong) {
         await db.execute({ sql: `ALTER TABLE tracked_players ADD COLUMN char_long TEXT NOT NULL DEFAULT ''` })
         console.log('✅ char_long column added to tracked_players')
+      }
+
+      // 旧スキーマで puddle_player_id が INTEGER の場合、TEXT に作り直す。
+      // int64 値を libSQL から JS に読み込むと Number 上限超えで RangeError になるため。
+      // CAST は SQLite サーバー側で実行されるので JS への値転送は発生しない。
+      const puddleCol = tpInfo.rows.find((r: any) => r.name === 'puddle_player_id') as any
+      if (puddleCol && typeof puddleCol.type === 'string' && puddleCol.type.toUpperCase() === 'INTEGER') {
+        console.log('Migrating tracked_players.puddle_player_id INTEGER → TEXT...')
+        await db.execute({ sql: `CREATE TABLE tracked_players_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          guild_id TEXT NOT NULL,
+          puddle_player_id TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          char_short TEXT NOT NULL,
+          char_long TEXT NOT NULL DEFAULT '',
+          added_by_discord_id TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(guild_id, puddle_player_id, char_short)
+        )` })
+        await db.execute({ sql: `INSERT INTO tracked_players_new (id, guild_id, puddle_player_id, display_name, char_short, char_long, added_by_discord_id, created_at)
+          SELECT id, guild_id, CAST(puddle_player_id AS TEXT), display_name, char_short, char_long, added_by_discord_id, created_at
+          FROM tracked_players` })
+        await db.execute({ sql: 'DROP TABLE tracked_players' })
+        await db.execute({ sql: 'ALTER TABLE tracked_players_new RENAME TO tracked_players' })
+        await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_tracked_guild ON tracked_players(guild_id)' })
+        console.log('✅ tracked_players.puddle_player_id migrated to TEXT')
+      }
+    }
+
+    if (tableNames.includes('rating_observations')) {
+      const roInfo = await db.execute({ sql: 'PRAGMA table_info(rating_observations)' })
+      const puddleCol = roInfo.rows.find((r: any) => r.name === 'puddle_player_id') as any
+      if (puddleCol && typeof puddleCol.type === 'string' && puddleCol.type.toUpperCase() === 'INTEGER') {
+        console.log('Migrating rating_observations.puddle_player_id INTEGER → TEXT...')
+        await db.execute({ sql: `CREATE TABLE rating_observations_new (
+          puddle_player_id TEXT NOT NULL,
+          char_short TEXT NOT NULL,
+          observed_at TEXT NOT NULL,
+          rating REAL NOT NULL,
+          PRIMARY KEY (puddle_player_id, char_short, observed_at)
+        )` })
+        await db.execute({ sql: `INSERT INTO rating_observations_new (puddle_player_id, char_short, observed_at, rating)
+          SELECT CAST(puddle_player_id AS TEXT), char_short, observed_at, rating
+          FROM rating_observations` })
+        await db.execute({ sql: 'DROP TABLE rating_observations' })
+        await db.execute({ sql: 'ALTER TABLE rating_observations_new RENAME TO rating_observations' })
+        await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_obs_player_char ON rating_observations(puddle_player_id, char_short)' })
+        console.log('✅ rating_observations.puddle_player_id migrated to TEXT')
       }
     }
 

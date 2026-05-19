@@ -1,7 +1,14 @@
+import JSONbig from 'json-bigint';
+
 const BASE_URL = 'https://puddle.farm/api';
 const UA = 'ggst-discord-tool';
 const REQUEST_DELAY_MS = 1000;
 const MAX_RETRIES = 3;
+
+// puddle.farm returns int64 player IDs as JSON numbers. Native JSON.parse loses
+// precision for values > 2^53, so use json-bigint with storeAsString to keep IDs
+// as strings (then we always coerce to string for safety).
+const safeJSON = JSONbig({ storeAsString: true, useNativeBigInt: false });
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
@@ -16,7 +23,10 @@ async function apiFetch<T>(path: string): Promise<T | null> {
           'Accept': 'application/json',
         },
       });
-      if (res.ok) return (await res.json()) as T;
+      if (res.ok) {
+        const text = await res.text();
+        return safeJSON.parse(text) as T;
+      }
       if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES - 1) {
         const wait = Math.pow(2, attempt + 1) * 1000;
         console.warn(`[PuddleFarm] HTTP ${res.status} on ${path}, retry in ${wait}ms`);
@@ -36,8 +46,11 @@ async function apiFetch<T>(path: string): Promise<T | null> {
   return null;
 }
 
+// IDs are string after json-bigint parse (or coerced via String() defensively).
+// All consumers treat them as opaque strings.
+
 export type SearchResult = {
-  id: number;
+  id: string;
   name: string;
   rating: number;
   deviation: number;
@@ -53,7 +66,7 @@ export type PlayerRating = {
 };
 
 export type PlayerResponse = {
-  id: number;
+  id: string;
   name: string;
   ratings: PlayerRating[];
   platform: string;
@@ -83,15 +96,18 @@ export const PuddleFarmService = {
     await sleep(REQUEST_DELAY_MS);
     const params = new URLSearchParams({ search_string: searchString, exact: String(exact) });
     const result = await apiFetch<{ results: SearchResult[] }>(`/player/search?${params}`);
-    return result?.results ?? [];
+    if (!result?.results) return [];
+    return result.results.map(r => ({ ...r, id: String(r.id) }));
   },
 
-  async getPlayer(playerId: number): Promise<PlayerResponse | null> {
+  async getPlayer(playerId: string): Promise<PlayerResponse | null> {
     await sleep(REQUEST_DELAY_MS);
-    return apiFetch<PlayerResponse>(`/player/${playerId}`);
+    const result = await apiFetch<PlayerResponse>(`/player/${playerId}`);
+    if (!result) return null;
+    return { ...result, id: String(result.id) };
   },
 
-  async getRatings(playerId: number, charShort: string, days: number): Promise<RatingPoint[]> {
+  async getRatings(playerId: string, charShort: string, days: number): Promise<RatingPoint[]> {
     await sleep(REQUEST_DELAY_MS);
     const result = await apiFetch<RatingPoint[]>(`/ratings/${playerId}/${charShort}/${days}`);
     return result ?? [];
