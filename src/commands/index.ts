@@ -114,10 +114,6 @@ export async function channelSelectMenuHandler(interaction: ChannelSelectMenuInt
     await tnm.handleChannelSelectMenu(interaction);
     return;
   }
-  if (customId.startsWith('grank:')) {
-    await grank.handleChannelSelectMenu(interaction);
-    return;
-  }
 }
 
 // UserSelectMenuハンドラー

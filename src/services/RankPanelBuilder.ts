@@ -4,11 +4,10 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  MessageFlags,
 } from 'discord.js';
-import type { TextChannel } from 'discord.js';
 import { RankTrackingService, TrackedPlayer, RatingObservation } from './RankTrackingService';
 import { renderHistoryGraph, GraphSeries, PALETTE } from './RankGraphService';
+import { truncate, escapeMarkdown } from '../utils/text';
 
 export type PanelOptions = {
   guildId: string;
@@ -22,10 +21,6 @@ export type PanelPayload = {
   files: AttachmentBuilder[];
   components: ActionRowBuilder<ButtonBuilder>[];
 };
-
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : text.slice(0, max - 1) + '…';
-}
 
 function formatDelta(delta: number | null): string {
   if (delta === null) return '—';
@@ -96,7 +91,7 @@ export async function buildPanel(options: PanelOptions): Promise<PanelPayload> {
   if (allTracked.length === 0) {
     embed.setDescription(
       isMineView
-        ? '追跡しているプレイヤーはありません。'
+        ? 'あなたが登録したプレイヤーはまだありません。'
         : '追跡対象がありません。\n**追加**ボタンから puddle.farm のプレイヤーを登録してください。',
     );
     return { embeds: [embed], files: [], components: buildComponents(days, isMineView) };
@@ -104,10 +99,13 @@ export async function buildPanel(options: PanelOptions): Promise<PanelPayload> {
 
   const { obs, latestRating, delta } = await computeDeltas(allTracked, days);
 
-  // Embed description: one line per tracked player (markdown link)
+  // Embed description: one line per tracked player (markdown link).
+  // display_name / char_long can contain markdown-meaningful chars — escape them.
   const lines = allTracked.map((tp, i) => {
     const url = `https://puddle.farm/player/${tp.puddle_player_id}/${tp.char_short}`;
-    const nameLabel = `${truncate(tp.display_name, 14)} (${tp.char_long || tp.char_short})`;
+    const displayName = escapeMarkdown(truncate(tp.display_name, 14));
+    const charDisplay = escapeMarkdown(tp.char_long || tp.char_short);
+    const nameLabel = `${displayName} (${charDisplay})`;
     const ratingStr = latestRating[i] !== null ? `**${latestRating[i]!.toFixed(0)}** (${formatDelta(delta[i])})` : '*(データなし)*';
     return `[${nameLabel}](${url}) — ${ratingStr}`;
   });
@@ -161,7 +159,6 @@ function buildComponents(
       new ButtonBuilder().setCustomId('grank:period:7').setLabel('7d').setStyle(ButtonStyle.Secondary).setDisabled(days === 7),
       new ButtonBuilder().setCustomId('grank:period:30').setLabel('30d').setStyle(ButtonStyle.Secondary).setDisabled(days === 30),
       new ButtonBuilder().setCustomId('grank:period:90').setLabel('90d').setStyle(ButtonStyle.Secondary).setDisabled(days === 90),
-      new ButtonBuilder().setCustomId('grank:setchannel').setLabel('📍 投稿先=ここ').setStyle(ButtonStyle.Secondary),
     ),
   ];
 }

@@ -47,14 +47,16 @@ async function main() {
     const client = createClient();
 
     // ランクスケジューラはクライアント準備完了後に開始
+    let stopRankScheduler: (() => void) | null = null;
     client.once('clientReady', () => {
-      startScheduler(client);
+      stopRankScheduler = startScheduler(client);
       console.log('✅ Rank scheduler started');
     });
 
     // Graceful shutdown
     const shutdown = async () => {
       console.log('Shutting down...');
+      stopRankScheduler?.();
       server.close();
       client.destroy();
       await closeDatabase();

@@ -11,7 +11,10 @@ async function apiFetch<T>(path: string): Promise<T | null> {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const res = await fetch(`${BASE_URL}${path}`, {
-        headers: { 'User-Agent': UA },
+        headers: {
+          'User-Agent': UA,
+          'Accept': 'application/json',
+        },
       });
       if (res.ok) return (await res.json()) as T;
       if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES - 1) {
@@ -66,7 +69,9 @@ export type RatingPoint = {
 export const PuddleFarmService = {
   async healthCheck(): Promise<boolean> {
     try {
-      const res = await fetch(`${BASE_URL}/health`, { headers: { 'User-Agent': UA } });
+      const res = await fetch(`${BASE_URL}/health`, {
+        headers: { 'User-Agent': UA, 'Accept': 'text/plain' },
+      });
       const text = await res.text();
       return res.ok && text.trim() === 'OK';
     } catch {

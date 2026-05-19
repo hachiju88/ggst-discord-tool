@@ -1,5 +1,6 @@
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 import * as fs from 'fs';
+import { truncate } from '../utils/text';
 
 let fontsRegistered = false;
 function registerFonts(): void {
@@ -40,10 +41,6 @@ const BG = '#2b2d31';
 const GRID = '#3f4147';
 const LABEL_CLR = '#b5bac1';
 const WHITE = '#ffffff';
-
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : text.slice(0, max - 1) + '…';
-}
 
 function snapToStep(value: number, step: number, fn: 'floor' | 'ceil'): number {
   return fn === 'floor' ? Math.floor(value / step) * step : Math.ceil(value / step) * step;

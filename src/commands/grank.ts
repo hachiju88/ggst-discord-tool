@@ -1,30 +1,27 @@
 import {
   SlashCommandBuilder,
-  EmbedBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
-  ChannelSelectMenuBuilder,
-  ChannelType,
   MessageFlags,
+  PermissionFlagsBits,
 } from 'discord.js';
 import type {
   ChatInputCommandInteraction,
   ButtonInteraction,
   StringSelectMenuInteraction,
-  ChannelSelectMenuInteraction,
   ModalSubmitInteraction,
   GuildMember,
 } from 'discord.js';
 import { RankTrackingService } from '../services/RankTrackingService';
 import { PuddleFarmService } from '../services/PuddleFarmService';
 import { buildPanel } from '../services/RankPanelBuilder';
+import { truncate } from '../utils/text';
 
+// StringSelectMenu の選択肢上限は25件のため、追跡上限もそれに合わせる。
 const MAX_TRACKED_PER_GUILD = 25;
 
 export const data = new SlashCommandBuilder()
@@ -40,13 +37,16 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return;
   }
 
-  // Auto-register channel on first use
-  const config = await RankTrackingService.getPostConfig(guildId);
-  if (!config) {
+  await interaction.deferReply();
+
+  // 自動投稿先チャンネルの設定は ManageGuild 権限を持つメンバーがコマンドを
+  // 走らせたときだけ上書きする。閲覧目的の一般ユーザーが /grank を別チャンネルで
+  // 実行しても投稿先は変わらない。
+  const member = interaction.member as GuildMember | null;
+  const isAdmin = !!member?.permissions.has(PermissionFlagsBits.ManageGuild);
+  if (isAdmin) {
     await RankTrackingService.setPostConfig(guildId, interaction.channelId);
   }
-
-  await interaction.deferReply();
 
   const channel = interaction.channel;
   const channelName = channel && 'name' in channel ? `#${channel.name}` : undefined;
@@ -91,7 +91,8 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
           .setLabel('キャラクター短縮コード (2文字)')
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setMaxLength(3)
+          .setMinLength(2)
+          .setMaxLength(2)
           .setPlaceholder('例: SO, KY, MA, AX, CH, PO, FA, MI, ZA, RA, LE, NA, GI'),
       ),
     );
@@ -113,7 +114,7 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
         tracked.map(tp =>
           new StringSelectMenuOptionBuilder()
             .setLabel(`${truncate(tp.display_name, 20)} (${tp.char_short})`)
-            .setDescription(`登録者: <@${tp.added_by_discord_id}>`)
+            .setDescription(`登録者: 本人または管理者のみ解除可`)
             .setValue(String(tp.id)),
         ),
       );
@@ -134,31 +135,13 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
 
   if (action === 'mine') {
     const days = parseInt(parts[2] ?? '7', 10);
-    const isEphemeral = interaction.message.flags.has(MessageFlags.Ephemeral);
+    const isEphemeral = (interaction.message?.flags?.bitfield ?? 0) & MessageFlags.Ephemeral;
     const payload = await buildPanel({ guildId, days, filterByDiscordId: interaction.user.id });
     if (isEphemeral) {
       await interaction.update({ ...payload, attachments: [] });
     } else {
       await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
     }
-    return;
-  }
-
-  if (action === 'setchannel') {
-    const member = interaction.member as GuildMember | null;
-    if (!member?.permissions.has('ManageGuild')) {
-      await interaction.reply({ content: '❌ このボタンはサーバー管理者のみ使用できます。', flags: MessageFlags.Ephemeral });
-      return;
-    }
-    const menu = new ChannelSelectMenuBuilder()
-      .setCustomId('grank:setchannel:select')
-      .setPlaceholder('投稿先チャンネルを選択')
-      .setChannelTypes(ChannelType.GuildText);
-    await interaction.reply({
-      content: '自動投稿先チャンネルを選択してください:',
-      components: [new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(menu)],
-      flags: MessageFlags.Ephemeral,
-    });
     return;
   }
 }
@@ -171,7 +154,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
   if (!guildId) return;
 
   // grank:remove:select
-  if (parts[1] === 'remove' && parts[2] === 'select') {
+  if (parts[0] === 'grank' && parts[1] === 'remove' && parts[2] === 'select') {
     const trackId = parseInt(interaction.values[0], 10);
     const tp = await RankTrackingService.getTracking(trackId);
     if (!tp) {
@@ -181,14 +164,17 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
     const member = interaction.member as GuildMember | null;
     const canRemove =
       interaction.user.id === tp.added_by_discord_id ||
-      member?.permissions.has('ManageGuild');
+      member?.permissions.has(PermissionFlagsBits.ManageGuild);
     if (!canRemove) {
-      await interaction.update({ content: '❌ 解除できるのは登録した本人またはサーバー管理者のみです。', components: [] });
+      await interaction.update({
+        content: '❌ 解除できるのは登録した本人またはサーバー管理者のみです。',
+        components: [],
+      });
       return;
     }
     await RankTrackingService.removeTracking(trackId);
     await interaction.update({
-      content: `✅ **${tp.display_name}** (${tp.char_short}) の追跡を解除しました。`,
+      content: `✅ **${tp.display_name}** (${tp.char_short}) の追跡を解除しました。\n元のパネルの「🔄 更新」を押すと反映されます。`,
       components: [],
     });
     return;
@@ -196,7 +182,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
 
   // grank-add:select:<char_short>
   if (interaction.customId.startsWith('grank-add:select:')) {
-    const charShort = parts[2].toUpperCase();
+    const charShortFromId = parts[2].toUpperCase();
     const playerId = parseInt(interaction.values[0], 10);
     await interaction.deferUpdate();
 
@@ -205,37 +191,33 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       await interaction.editReply({ content: '❌ プレイヤー情報の取得に失敗しました。', components: [] });
       return;
     }
-    const charInfo = player.ratings.find(r => r.char_short.toUpperCase() === charShort);
-    const charLong = charInfo?.char_long ?? charShort;
+    const charInfo = player.ratings.find(r => r.char_short.toUpperCase() === charShortFromId);
+    if (!charInfo) {
+      await interaction.editReply({
+        content: `❌ ${player.name} は ${charShortFromId} の使用記録がありません。`,
+        components: [],
+      });
+      return;
+    }
+    // puddle.farm が返す char_short の表記をそのまま保存(URL生成・履歴取得時の整合性のため)。
+    const canonicalCharShort = charInfo.char_short;
     const result = await RankTrackingService.addTracking(
-      guildId, playerId, player.name, charShort, charLong, interaction.user.id,
+      guildId, playerId, player.name, canonicalCharShort, charInfo.char_long, interaction.user.id,
     );
     if (result === 'duplicate') {
-      await interaction.editReply({ content: `ℹ️ **${player.name}** (${charShort}) はすでに追跡中です。`, components: [] });
+      await interaction.editReply({
+        content: `ℹ️ **${player.name}** (${canonicalCharShort}) はすでに追跡中です。`,
+        components: [],
+      });
       return;
     }
     await interaction.editReply({
-      content: `✅ **${player.name}** (${charLong}) を追加しました。🔄ボタンで反映されます。`,
+      content: `✅ **${player.name}** (${charInfo.char_long}) を追加しました。\n元のパネルの「🔄 更新」を押すと反映されます。`,
       components: [],
     });
-    RankTrackingService.backfillPlayer(playerId, charShort).catch(console.error);
+    RankTrackingService.backfillPlayer(playerId, canonicalCharShort).catch(console.error);
     return;
   }
-}
-
-// ─── Channel select handler ───────────────────────────────────────────────────
-
-export async function handleChannelSelectMenu(interaction: ChannelSelectMenuInteraction): Promise<void> {
-  if (!interaction.customId.startsWith('grank:setchannel:select')) return;
-  const guildId = interaction.guildId;
-  if (!guildId) return;
-
-  const channel = interaction.values[0];
-  await RankTrackingService.setPostConfig(guildId, channel);
-  await interaction.update({
-    content: `✅ 自動投稿先を <#${channel}> に設定しました。`,
-    components: [],
-  });
 }
 
 // ─── Modal submit handler ─────────────────────────────────────────────────────
@@ -249,12 +231,23 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
 
   const count = await RankTrackingService.getGuildTrackingCount(guildId);
   if (count >= MAX_TRACKED_PER_GUILD) {
-    await interaction.editReply({ content: `❌ 追跡上限 (${MAX_TRACKED_PER_GUILD}件) に達しています。先に不要なプレイヤーを解除してください。` });
+    await interaction.editReply({
+      content: `❌ 追跡上限 (${MAX_TRACKED_PER_GUILD}件) に達しています。先に不要なプレイヤーを解除してください。`,
+    });
     return;
   }
 
   const searchString = interaction.fields.getTextInputValue('search_string').trim();
   const charShort = interaction.fields.getTextInputValue('char_short').trim().toUpperCase();
+
+  if (searchString.length === 0) {
+    await interaction.editReply({ content: '❌ 検索名を入力してください。' });
+    return;
+  }
+  if (charShort.length !== 2) {
+    await interaction.editReply({ content: '❌ キャラクター短縮コードは2文字で指定してください (例: SO, KY)。' });
+    return;
+  }
 
   const results = await PuddleFarmService.searchPlayer(searchString);
   const filtered = results.filter(r => r.char_short.toUpperCase() === charShort);
@@ -270,21 +263,22 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
 
   if (filtered.length === 1) {
     const r = filtered[0];
+    // API の char_short 表記を保存。
     const result = await RankTrackingService.addTracking(
-      guildId, r.id, r.name, charShort, r.char_long, interaction.user.id,
+      guildId, r.id, r.name, r.char_short, r.char_long, interaction.user.id,
     );
     if (result === 'duplicate') {
-      await interaction.editReply({ content: `ℹ️ **${r.name}** (${charShort}) はすでに追跡中です。` });
+      await interaction.editReply({ content: `ℹ️ **${r.name}** (${r.char_short}) はすでに追跡中です。` });
       return;
     }
     await interaction.editReply({
-      content: `✅ **${r.name}** (${r.char_long}) を追加しました。🔄ボタンで反映されます。`,
+      content: `✅ **${r.name}** (${r.char_long}) を追加しました。\n元のパネルの「🔄 更新」を押すと反映されます。`,
     });
-    RankTrackingService.backfillPlayer(r.id, charShort).catch(console.error);
+    RankTrackingService.backfillPlayer(r.id, r.char_short).catch(console.error);
     return;
   }
 
-  // Multiple hits — show select menu
+  // 候補が複数ヒット — Select menu に逃がす。
   const options = filtered.slice(0, 25).map(r =>
     new StringSelectMenuOptionBuilder()
       .setLabel(truncate(r.name, 25))
@@ -299,8 +293,4 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
     content: `**${searchString}** (${charShort}) の検索結果が複数見つかりました。登録するプレイヤーを選択してください:`,
     components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
   });
-}
-
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : text.slice(0, max - 1) + '…';
 }

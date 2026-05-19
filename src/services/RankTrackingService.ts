@@ -35,17 +35,12 @@ export const RankTrackingService = {
     addedByDiscordId: string,
   ): Promise<'added' | 'duplicate'> {
     const db = getDatabase();
-    try {
-      await db.execute({
-        sql: `INSERT INTO tracked_players (guild_id, puddle_player_id, display_name, char_short, char_long, added_by_discord_id)
-              VALUES (?, ?, ?, ?, ?, ?)`,
-        args: [guildId, puddlePlayerId, displayName, charShort, charLong, addedByDiscordId],
-      });
-      return 'added';
-    } catch (err: any) {
-      if (err?.message?.includes('UNIQUE constraint')) return 'duplicate';
-      throw err;
-    }
+    const result = await db.execute({
+      sql: `INSERT OR IGNORE INTO tracked_players (guild_id, puddle_player_id, display_name, char_short, char_long, added_by_discord_id)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [guildId, puddlePlayerId, displayName, charShort, charLong, addedByDiscordId],
+    });
+    return result.rowsAffected === 0 ? 'duplicate' : 'added';
   },
 
   async removeTracking(id: number): Promise<void> {
@@ -113,13 +108,13 @@ export const RankTrackingService = {
   ): Promise<void> {
     if (points.length === 0) return;
     const db = getDatabase();
-    for (const p of points) {
-      await db.execute({
-        sql: `INSERT OR IGNORE INTO rating_observations (puddle_player_id, char_short, observed_at, rating)
-              VALUES (?, ?, ?, ?)`,
-        args: [puddlePlayerId, charShort, p.timestamp, p.rating],
-      });
-    }
+    const stmts = points.map(p => ({
+      sql: `INSERT OR IGNORE INTO rating_observations (puddle_player_id, char_short, observed_at, rating)
+            VALUES (?, ?, ?, ?)`,
+      args: [puddlePlayerId, charShort, p.timestamp, p.rating],
+    }));
+    // Single transaction for all inserts (significantly faster on backfill).
+    await db.batch(stmts, 'write');
   },
 
   async getObservations(
@@ -128,15 +123,16 @@ export const RankTrackingService = {
     windowDays: number,
   ): Promise<RatingObservation[]> {
     const db = getDatabase();
+    // puddle.farm returns ISO 8601 timestamps; string comparison is chronological.
+    const cutoff = new Date(Date.now() - windowDays * 24 * 3600 * 1000).toISOString();
     const result = await db.execute({
       sql: `SELECT * FROM rating_observations
             WHERE puddle_player_id = ? AND char_short = ?
+              AND observed_at >= ?
             ORDER BY observed_at ASC`,
-      args: [puddlePlayerId, charShort],
+      args: [puddlePlayerId, charShort, cutoff],
     });
-    const all = result.rows as unknown as RatingObservation[];
-    const cutoff = Date.now() - windowDays * 24 * 3600 * 1000;
-    return all.filter(o => new Date(o.observed_at).getTime() >= cutoff);
+    return result.rows as unknown as RatingObservation[];
   },
 
   // ── Fetch and store all tracked players ───────────────────────────────────
