@@ -32,10 +32,12 @@
     "@napi-rs/canvas": "^1.0.0",
     "discord.js": "^14.14.1",
     "dotenv": "^16.3.1",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "json-bigint": "^1.0.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/json-bigint": "^1.0.4",
     "@types/node": "^20.10.6",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"

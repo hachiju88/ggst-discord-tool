@@ -13,7 +13,7 @@ async function migrate() {
     CREATE TABLE IF NOT EXISTS tracked_players (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       guild_id TEXT NOT NULL,
-      puddle_player_id INTEGER NOT NULL,
+      puddle_player_id TEXT NOT NULL,
       display_name TEXT NOT NULL,
       char_short TEXT NOT NULL,
       char_long TEXT NOT NULL DEFAULT '',
@@ -26,7 +26,7 @@ async function migrate() {
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS rating_observations (
-      puddle_player_id INTEGER NOT NULL,
+      puddle_player_id TEXT NOT NULL,
       char_short TEXT NOT NULL,
       observed_at TEXT NOT NULL,
       rating REAL NOT NULL,

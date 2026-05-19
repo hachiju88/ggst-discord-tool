@@ -183,7 +183,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
   // grank-add:select:<char_short>
   if (interaction.customId.startsWith('grank-add:select:')) {
     const charShortFromId = parts[2].toUpperCase();
-    const playerId = parseInt(interaction.values[0], 10);
+    const playerId = interaction.values[0]; // string (int64 だと Number化で精度欠損するため)
     await interaction.deferUpdate();
 
     const player = await PuddleFarmService.getPlayer(playerId);

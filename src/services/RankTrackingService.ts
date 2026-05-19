@@ -1,10 +1,12 @@
 import { getDatabase } from '../database';
 import { PuddleFarmService } from './PuddleFarmService';
 
+// puddle.farm の player ID は int64 で Number 上限を超えうるため、必ず string で扱う。
+// DB にも TEXT として保存している。
 export type TrackedPlayer = {
   id: number;
   guild_id: string;
-  puddle_player_id: number;
+  puddle_player_id: string;
   display_name: string;
   char_short: string;
   char_long: string;
@@ -13,7 +15,7 @@ export type TrackedPlayer = {
 };
 
 export type RatingObservation = {
-  puddle_player_id: number;
+  puddle_player_id: string;
   char_short: string;
   observed_at: string;
   rating: number;
@@ -28,7 +30,7 @@ export const RankTrackingService = {
 
   async addTracking(
     guildId: string,
-    puddlePlayerId: number,
+    puddlePlayerId: string,
     displayName: string,
     charShort: string,
     charLong: string,
@@ -102,7 +104,7 @@ export const RankTrackingService = {
   // ── rating_observations ───────────────────────────────────────────────────
 
   async storeObservations(
-    puddlePlayerId: number,
+    puddlePlayerId: string,
     charShort: string,
     points: { timestamp: string; rating: number }[],
   ): Promise<void> {
@@ -113,17 +115,15 @@ export const RankTrackingService = {
             VALUES (?, ?, ?, ?)`,
       args: [puddlePlayerId, charShort, p.timestamp, p.rating],
     }));
-    // Single transaction for all inserts (significantly faster on backfill).
     await db.batch(stmts, 'write');
   },
 
   async getObservations(
-    puddlePlayerId: number,
+    puddlePlayerId: string,
     charShort: string,
     windowDays: number,
   ): Promise<RatingObservation[]> {
     const db = getDatabase();
-    // puddle.farm returns ISO 8601 timestamps; string comparison is chronological.
     const cutoff = new Date(Date.now() - windowDays * 24 * 3600 * 1000).toISOString();
     const result = await db.execute({
       sql: `SELECT * FROM rating_observations
@@ -144,7 +144,7 @@ export const RankTrackingService = {
       : 'SELECT DISTINCT puddle_player_id, char_short FROM tracked_players';
     const args = guildId ? [guildId] : [];
     const result = await db.execute({ sql, args });
-    const pairs = result.rows as unknown as { puddle_player_id: number; char_short: string }[];
+    const pairs = result.rows as unknown as { puddle_player_id: string; char_short: string }[];
 
     for (const { puddle_player_id, char_short } of pairs) {
       try {
@@ -157,7 +157,7 @@ export const RankTrackingService = {
     }
   },
 
-  async backfillPlayer(puddlePlayerId: number, charShort: string): Promise<void> {
+  async backfillPlayer(puddlePlayerId: string, charShort: string): Promise<void> {
     try {
       const points = await PuddleFarmService.getRatings(puddlePlayerId, charShort, 90);
       await RankTrackingService.storeObservations(puddlePlayerId, charShort, points);
