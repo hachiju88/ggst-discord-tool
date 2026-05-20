@@ -159,7 +159,7 @@ export const RankTrackingService = {
 
   async backfillPlayer(puddlePlayerId: string, charShort: string): Promise<{ count: number; error?: string }> {
     try {
-      const points = await PuddleFarmService.getRatings(puddlePlayerId, charShort, 90);
+      const points = await PuddleFarmService.getRatings(puddlePlayerId, charShort, 365);
       if (points === null) {
         return { count: 0, error: 'puddle.farm API からデータを取得できませんでした' };
       }

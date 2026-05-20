@@ -154,6 +154,8 @@ function buildComponents(
         new ButtonBuilder().setCustomId('grank:mine:7').setLabel('7d').setStyle(ButtonStyle.Secondary).setDisabled(days === 7),
         new ButtonBuilder().setCustomId('grank:mine:30').setLabel('30d').setStyle(ButtonStyle.Secondary).setDisabled(days === 30),
         new ButtonBuilder().setCustomId('grank:mine:90').setLabel('90d').setStyle(ButtonStyle.Secondary).setDisabled(days === 90),
+        new ButtonBuilder().setCustomId('grank:mine:180').setLabel('180d').setStyle(ButtonStyle.Secondary).setDisabled(days === 180),
+        new ButtonBuilder().setCustomId('grank:mine:365').setLabel('1year').setStyle(ButtonStyle.Secondary).setDisabled(days === 365),
       ),
     ];
   }
@@ -169,6 +171,8 @@ function buildComponents(
       new ButtonBuilder().setCustomId('grank:period:7').setLabel('7d').setStyle(ButtonStyle.Secondary).setDisabled(days === 7),
       new ButtonBuilder().setCustomId('grank:period:30').setLabel('30d').setStyle(ButtonStyle.Secondary).setDisabled(days === 30),
       new ButtonBuilder().setCustomId('grank:period:90').setLabel('90d').setStyle(ButtonStyle.Secondary).setDisabled(days === 90),
+      new ButtonBuilder().setCustomId('grank:period:180').setLabel('180d').setStyle(ButtonStyle.Secondary).setDisabled(days === 180),
+      new ButtonBuilder().setCustomId('grank:period:365').setLabel('1year').setStyle(ButtonStyle.Secondary).setDisabled(days === 365),
     ),
   ];
 }
