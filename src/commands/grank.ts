@@ -226,7 +226,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       return;
     }
     await interaction.editReply({
-      content: `✅ **${player.name}** (${charInfo.char_long}) を追加しました。\n⏳ 365日分の履歴を取得中...`,
+      content: `✅ **${player.name}** (${charInfo.char_long}) を追加しました。\n⏳ 履歴を取得中...`,
       components: [],
     });
     const backfill = await RankTrackingService.backfillPlayer(playerId, canonicalCharShort);
@@ -290,7 +290,7 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
       return;
     }
     await interaction.editReply({
-      content: `✅ **${r.name}** (${r.char_long}) を追加しました。\n⏳ 365日分の履歴を取得中...`,
+      content: `✅ **${r.name}** (${r.char_long}) を追加しました。\n⏳ 履歴を取得中...`,
     });
     const backfill = await RankTrackingService.backfillPlayer(r.id, r.char_short);
     await interaction.editReply({

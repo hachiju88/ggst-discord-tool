@@ -22,6 +22,60 @@ export type PanelPayload = {
   components: ActionRowBuilder<ButtonBuilder>[];
 };
 
+const DAY_MS = 24 * 3600 * 1000;
+
+type PeriodConfig = {
+  intervalDays: number;
+  count: number;
+  startOffsetDays: number; // 最初のバケットが「何日前」か
+};
+
+// bucketEnd_i = now - (startOffsetDays + i * intervalDays) * DAY_MS  (i = 0..count-1)
+const PERIOD_CONFIGS: Record<number, PeriodConfig> = {
+  7:   { intervalDays: 1,  count: 7,  startOffsetDays: 0  },
+  30:  { intervalDays: 5,  count: 6,  startOffsetDays: 5  },
+  90:  { intervalDays: 15, count: 6,  startOffsetDays: 15 },
+  180: { intervalDays: 30, count: 6,  startOffsetDays: 30 },
+  365: { intervalDays: 30, count: 12, startOffsetDays: 30 },
+};
+
+function sampleObservations(
+  obs: RatingObservation[],
+  days: number,
+): { t: Date; rating: number }[] {
+  const config = PERIOD_CONFIGS[days];
+  if (!config) return obs.map(o => ({ t: new Date(o.observed_at), rating: o.rating }));
+
+  const now = Date.now();
+  const windowStartMs = now - days * DAY_MS;
+
+  const sorted = obs
+    .map(o => ({ ms: new Date(o.observed_at).getTime(), rating: o.rating }))
+    .filter(o => o.ms >= windowStartMs)
+    .sort((a, b) => a.ms - b.ms);
+
+  if (sorted.length === 0) return [];
+
+  const result: { t: Date; rating: number }[] = [];
+
+  for (let i = 0; i < config.count; i++) {
+    const bucketEndMs = now - (config.startOffsetDays + i * config.intervalDays) * DAY_MS;
+    let found: { ms: number; rating: number } | undefined;
+    for (let j = sorted.length - 1; j >= 0; j--) {
+      if (sorted[j].ms <= bucketEndMs) { found = sorted[j]; break; }
+    }
+    if (found) result.push({ t: new Date(found.ms), rating: found.rating });
+  }
+
+  // ループは新しい順（i=0が直近）→ グラフ用に古い順へ反転
+  return result.reverse();
+}
+
+function labelForDays(days: number): string {
+  if (days === 365) return '1年';
+  return `${days}日`;
+}
+
 function formatDelta(delta: number | null): string {
   if (delta === null) return '—';
   if (delta > 0) return `+${delta.toFixed(1)}`;
@@ -91,8 +145,8 @@ export async function buildPanel(options: PanelOptions): Promise<PanelPayload> {
 
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle(`📈 ランク追跡 (直近 ${days}日)`)
-    .setFooter({ text: `投稿先: ${postChannel} | 期間: ${days}d` })
+    .setTitle(`📈 ランク追跡 (直近 ${labelForDays(days)})`)
+    .setFooter({ text: `投稿先: ${postChannel} | 期間: ${labelForDays(days)}` })
     .setTimestamp();
 
   const isMineView = !!filterByDiscordId;
@@ -125,7 +179,7 @@ export async function buildPanel(options: PanelOptions): Promise<PanelPayload> {
   const series: GraphSeries[] = allTracked.map((tp, i) => ({
     label: `${truncate(tp.display_name, 10)} (${tp.char_short})`,
     color: PALETTE[i % PALETTE.length],
-    points: obs[i].map(o => ({ t: new Date(o.observed_at), rating: o.rating })),
+    points: sampleObservations(obs[i], days),
   }));
 
   const hasAnyPoints = series.some(s => s.points.length > 0);
