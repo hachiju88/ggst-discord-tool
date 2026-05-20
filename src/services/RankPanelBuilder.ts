@@ -22,6 +22,76 @@ export type PanelPayload = {
   components: ActionRowBuilder<ButtonBuilder>[];
 };
 
+const DAY_MS = 24 * 3600 * 1000;
+const JST_OFFSET_MS = 9 * 3600 * 1000;
+
+type PeriodConfig = {
+  intervalDays: number;
+  count: number;
+};
+
+// 各期間の最初のバケットは「最新時刻」(7dはJSTの今日末、それ以外はnow)。
+// テキスト表示の最新レートとグラフの最新点を必ず一致させる狙い。
+const PERIOD_CONFIGS: Record<number, PeriodConfig> = {
+  7:   { intervalDays: 1,  count: 7  },  // 今日〜6日前 (JST)
+  30:  { intervalDays: 5,  count: 7  },  // 0, 5, 10, 15, 20, 25, 30 日前
+  90:  { intervalDays: 15, count: 7  },  // 0, 15, ..., 90
+  180: { intervalDays: 30, count: 7  },  // 0, 30, ..., 180
+  365: { intervalDays: 30, count: 13 },  // 0, 30, ..., 360
+};
+
+// 「今日のJST末」= 次のJST午前0時の直前。UTC ms に +9h して DAY_MS で
+// floor すれば JST 0:00 (シフト後の UTC ms 表現) が得られる。
+function endOfTodayJstMs(nowMs: number): number {
+  const jstShifted = nowMs + JST_OFFSET_MS;
+  const nextJstMidnightShifted = Math.floor(jstShifted / DAY_MS) * DAY_MS + DAY_MS;
+  return nextJstMidnightShifted - JST_OFFSET_MS;
+}
+
+function sampleObservations(
+  obs: RatingObservation[],
+  days: number,
+): { t: Date; rating: number }[] {
+  const config = PERIOD_CONFIGS[days];
+  if (!config) return obs.map(o => ({ t: new Date(o.observed_at), rating: o.rating }));
+
+  const now = Date.now();
+  const windowStartMs = now - days * DAY_MS;
+
+  const sorted = obs
+    .map(o => ({ ms: new Date(o.observed_at).getTime(), rating: o.rating }))
+    .filter(o => o.ms >= windowStartMs)
+    .sort((a, b) => a.ms - b.ms);
+
+  if (sorted.length === 0) return [];
+
+  const anchorMs = days === 7 ? endOfTodayJstMs(now) : now;
+
+  const result: { t: Date; rating: number }[] = [];
+  let lastPushedMs: number | undefined;
+
+  for (let i = 0; i < config.count; i++) {
+    const bucketEndMs = anchorMs - i * config.intervalDays * DAY_MS;
+    let found: { ms: number; rating: number } | undefined;
+    for (let j = sorted.length - 1; j >= 0; j--) {
+      if (sorted[j].ms <= bucketEndMs) { found = sorted[j]; break; }
+    }
+    // 同じ古い試合が複数バケットで再ヒットしないよう抑止。
+    if (found && found.ms !== lastPushedMs) {
+      result.push({ t: new Date(found.ms), rating: found.rating });
+      lastPushedMs = found.ms;
+    }
+  }
+
+  // ループは新しい順(i=0が直近) → グラフ用に古い順へ反転
+  return result.reverse();
+}
+
+function labelForDays(days: number): string {
+  if (days === 365) return '1年';
+  return `${days}日`;
+}
+
 function formatDelta(delta: number | null): string {
   if (delta === null) return '—';
   if (delta > 0) return `+${delta.toFixed(1)}`;
@@ -91,8 +161,8 @@ export async function buildPanel(options: PanelOptions): Promise<PanelPayload> {
 
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle(`📈 ランク追跡 (直近 ${days}日)`)
-    .setFooter({ text: `投稿先: ${postChannel} | 期間: ${days}d` })
+    .setTitle(`📈 ランク追跡 (直近 ${labelForDays(days)})`)
+    .setFooter({ text: `投稿先: ${postChannel} | 期間: ${labelForDays(days)}` })
     .setTimestamp();
 
   const isMineView = !!filterByDiscordId;
@@ -125,10 +195,12 @@ export async function buildPanel(options: PanelOptions): Promise<PanelPayload> {
   const series: GraphSeries[] = allTracked.map((tp, i) => ({
     label: `${truncate(tp.display_name, 10)} (${tp.char_short})`,
     color: PALETTE[i % PALETTE.length],
-    points: obs[i].map(o => ({ t: new Date(o.observed_at), rating: o.rating })),
+    points: sampleObservations(obs[i], days),
   }));
 
-  const hasAnyPoints = series.some(s => s.points.length > 0);
+  // サンプリング結果ではなく生データの有無で判定 (取得済みデータがあるのに
+  // バケット範囲外で空になり「データ取得中」と誤表示するのを防ぐ)。
+  const hasAnyPoints = obs.some(arr => arr.length > 0);
   if (hasAnyPoints) {
     const buf = renderHistoryGraph(series, days);
     const attachment = new AttachmentBuilder(buf, { name: 'rank-history.png' });
@@ -154,6 +226,8 @@ function buildComponents(
         new ButtonBuilder().setCustomId('grank:mine:7').setLabel('7d').setStyle(ButtonStyle.Secondary).setDisabled(days === 7),
         new ButtonBuilder().setCustomId('grank:mine:30').setLabel('30d').setStyle(ButtonStyle.Secondary).setDisabled(days === 30),
         new ButtonBuilder().setCustomId('grank:mine:90').setLabel('90d').setStyle(ButtonStyle.Secondary).setDisabled(days === 90),
+        new ButtonBuilder().setCustomId('grank:mine:180').setLabel('180d').setStyle(ButtonStyle.Secondary).setDisabled(days === 180),
+        new ButtonBuilder().setCustomId('grank:mine:365').setLabel('1year').setStyle(ButtonStyle.Secondary).setDisabled(days === 365),
       ),
     ];
   }
@@ -169,6 +243,8 @@ function buildComponents(
       new ButtonBuilder().setCustomId('grank:period:7').setLabel('7d').setStyle(ButtonStyle.Secondary).setDisabled(days === 7),
       new ButtonBuilder().setCustomId('grank:period:30').setLabel('30d').setStyle(ButtonStyle.Secondary).setDisabled(days === 30),
       new ButtonBuilder().setCustomId('grank:period:90').setLabel('90d').setStyle(ButtonStyle.Secondary).setDisabled(days === 90),
+      new ButtonBuilder().setCustomId('grank:period:180').setLabel('180d').setStyle(ButtonStyle.Secondary).setDisabled(days === 180),
+      new ButtonBuilder().setCustomId('grank:period:365').setLabel('1year').setStyle(ButtonStyle.Secondary).setDisabled(days === 365),
     ),
   ];
 }

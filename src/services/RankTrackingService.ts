@@ -21,6 +21,10 @@ export type RatingObservation = {
   rating: number;
 };
 
+const BACKFILL_GAME_LIMIT = 3000;
+// GGST 1セット約3分、1時間最大約20試合 → バッファ込みで30
+const HOURLY_GAME_LIMIT = 30;
+
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
@@ -148,7 +152,7 @@ export const RankTrackingService = {
 
     for (const { puddle_player_id, char_short } of pairs) {
       try {
-        const points = await PuddleFarmService.getRatings(puddle_player_id, char_short, 1);
+        const points = await PuddleFarmService.getRatings(puddle_player_id, char_short, HOURLY_GAME_LIMIT);
         if (points !== null) await RankTrackingService.storeObservations(puddle_player_id, char_short, points);
       } catch (err) {
         console.error(`[RankTracking] Failed to fetch ${puddle_player_id}/${char_short}:`, err);
@@ -159,7 +163,7 @@ export const RankTrackingService = {
 
   async backfillPlayer(puddlePlayerId: string, charShort: string): Promise<{ count: number; error?: string }> {
     try {
-      const points = await PuddleFarmService.getRatings(puddlePlayerId, charShort, 90);
+      const points = await PuddleFarmService.getRatings(puddlePlayerId, charShort, BACKFILL_GAME_LIMIT);
       if (points === null) {
         return { count: 0, error: 'puddle.farm API からデータを取得できませんでした' };
       }
