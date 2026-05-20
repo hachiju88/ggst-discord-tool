@@ -30,6 +30,9 @@ export const PALETTE = [
   '#00b0f4', '#f47b67', '#b388ff', '#95a5a6', '#1abc9c',
 ];
 
+// Logical coordinates (drawing code uses these). Output PNG is scaled up by
+// SCALE for higher-resolution rendering — see ctx.scale(SCALE, SCALE) below.
+const SCALE = 2;
 const W = 900;
 const H = 420;
 const PAD_LEFT = 65;
@@ -94,8 +97,9 @@ export function renderHistoryGraph(series: GraphSeries[], windowDays: number): B
   const toY = (r: number) => PAD_TOP + CHART_H - ((r - minRating) / ratingRange) * CHART_H;
   const toX = (t: Date) => PAD_LEFT + Math.max(0, Math.min(1, (t.getTime() - startTime) / windowMs)) * CHART_W;
 
-  const canvas = createCanvas(W, H);
+  const canvas = createCanvas(W * SCALE, H * SCALE);
   const ctx = canvas.getContext('2d');
+  ctx.scale(SCALE, SCALE);
 
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, W, H);
