@@ -42,6 +42,28 @@ const GRID = '#3f4147';
 const LABEL_CLR = '#b5bac1';
 const WHITE = '#ffffff';
 
+// GGST タワーレート換算でのランク境界(各ランクの最低値)。
+const RANK_TIERS: { name: string; min: number; color: string }[] = [
+  { name: 'Vanquisher', min: 45000, color: '#d4a3ff' },
+  { name: 'Diamond 3',  min: 40800, color: '#8ec5ff' },
+  { name: 'Diamond 2',  min: 36000, color: '#8ec5ff' },
+  { name: 'Diamond 1',  min: 32400, color: '#8ec5ff' },
+  { name: 'Platinum 3', min: 28400, color: '#a8e0e8' },
+  { name: 'Platinum 2', min: 24400, color: '#a8e0e8' },
+  { name: 'Platinum 1', min: 20400, color: '#a8e0e8' },
+  { name: 'Gold 3',     min: 18000, color: '#f0d878' },
+  { name: 'Gold 2',     min: 15600, color: '#f0d878' },
+  { name: 'Gold 1',     min: 13200, color: '#f0d878' },
+  { name: 'Silver 3',   min: 11000, color: '#c0c8d0' },
+  { name: 'Silver 2',   min:  8800, color: '#c0c8d0' },
+  { name: 'Silver 1',   min:  6600, color: '#c0c8d0' },
+  { name: 'Bronze 3',   min:  5400, color: '#d49a78' },
+  { name: 'Bronze 2',   min:  4200, color: '#d49a78' },
+  { name: 'Bronze 1',   min:  3000, color: '#d49a78' },
+  { name: 'Iron 3',     min:  2000, color: '#c5b58c' },
+  { name: 'Iron 2',     min:  1000, color: '#c5b58c' },
+];
+
 function snapToStep(value: number, step: number, fn: 'floor' | 'ceil'): number {
   return fn === 'floor' ? Math.floor(value / step) * step : Math.ceil(value / step) * step;
 }
@@ -94,6 +116,28 @@ export function renderHistoryGraph(series: GraphSeries[], windowDays: number): B
     ctx.textAlign = 'right';
     ctx.fillText(Math.round(r).toString(), PAD_LEFT - 6, y + 4);
   }
+
+  // Rank tier boundaries (overlay on the numeric grid)
+  ctx.font = `bold 10px ${ff}`;
+  for (const tier of RANK_TIERS) {
+    if (tier.min <= minRating || tier.min >= maxRating) continue;
+    const y = toY(tier.min);
+    ctx.strokeStyle = tier.color;
+    ctx.globalAlpha = 0.55;
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(PAD_LEFT, y);
+    ctx.lineTo(W - PAD_RIGHT, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = tier.color;
+    ctx.textAlign = 'right';
+    ctx.fillText(tier.name, W - PAD_RIGHT - 4, y - 3);
+  }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left';
 
   // X-axis labels
   const tickCount = Math.min(6, windowDays);
