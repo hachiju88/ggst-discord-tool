@@ -54,14 +54,24 @@ async function computeDeltas(
       continue;
     }
 
-    const sorted = [...observations].sort(
-      (a, b) => new Date(a.observed_at).getTime() - new Date(b.observed_at).getTime(),
-    );
-    const latest = sorted[sorted.length - 1];
+    // getObservations は ORDER BY observed_at ASC で返すのでソート済み。
+    const latest = observations[observations.length - 1];
     latestRating.push(latest.rating);
 
-    const cutoff24h = Date.now() - 24 * 3600 * 1000;
-    const before = [...sorted].reverse().find(o => new Date(o.observed_at).getTime() <= cutoff24h);
+    // 「24h delta」は最新観測が直近24h以内にある場合のみ意味を持つ。
+    // 5日前の観測しか無いプレイヤーで「+0」と出すと「最近変動が無い」と
+    // 誤読されるため、その場合は null(「—」表示) にする。
+    const now = Date.now();
+    const latestTime = new Date(latest.observed_at).getTime();
+    if (now - latestTime > 24 * 3600 * 1000) {
+      delta.push(null);
+      continue;
+    }
+
+    const cutoff24h = now - 24 * 3600 * 1000;
+    const before = [...observations].reverse().find(
+      o => new Date(o.observed_at).getTime() <= cutoff24h,
+    );
     delta.push(before ? latest.rating - before.rating : null);
   }
 
