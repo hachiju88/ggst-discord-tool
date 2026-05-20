@@ -23,21 +23,30 @@ export type PanelPayload = {
 };
 
 const DAY_MS = 24 * 3600 * 1000;
+const JST_OFFSET_MS = 9 * 3600 * 1000;
 
 type PeriodConfig = {
   intervalDays: number;
   count: number;
-  startOffsetDays: number; // 最初のバケットが「何日前」か
 };
 
-// bucketEnd_i = now - (startOffsetDays + i * intervalDays) * DAY_MS  (i = 0..count-1)
+// 各期間の最初のバケットは「最新時刻」(7dはJSTの今日末、それ以外はnow)。
+// テキスト表示の最新レートとグラフの最新点を必ず一致させる狙い。
 const PERIOD_CONFIGS: Record<number, PeriodConfig> = {
-  7:   { intervalDays: 1,  count: 7,  startOffsetDays: 0  },
-  30:  { intervalDays: 5,  count: 6,  startOffsetDays: 5  },
-  90:  { intervalDays: 15, count: 6,  startOffsetDays: 15 },
-  180: { intervalDays: 30, count: 6,  startOffsetDays: 30 },
-  365: { intervalDays: 30, count: 12, startOffsetDays: 30 },
+  7:   { intervalDays: 1,  count: 7  },  // 今日〜6日前 (JST)
+  30:  { intervalDays: 5,  count: 7  },  // 0, 5, 10, 15, 20, 25, 30 日前
+  90:  { intervalDays: 15, count: 7  },  // 0, 15, ..., 90
+  180: { intervalDays: 30, count: 7  },  // 0, 30, ..., 180
+  365: { intervalDays: 30, count: 13 },  // 0, 30, ..., 360
 };
+
+// 「今日のJST末」= 次のJST午前0時の直前。UTC ms に +9h して DAY_MS で
+// floor すれば JST 0:00 (シフト後の UTC ms 表現) が得られる。
+function endOfTodayJstMs(nowMs: number): number {
+  const jstShifted = nowMs + JST_OFFSET_MS;
+  const nextJstMidnightShifted = Math.floor(jstShifted / DAY_MS) * DAY_MS + DAY_MS;
+  return nextJstMidnightShifted - JST_OFFSET_MS;
+}
 
 function sampleObservations(
   obs: RatingObservation[],
@@ -56,18 +65,25 @@ function sampleObservations(
 
   if (sorted.length === 0) return [];
 
+  const anchorMs = days === 7 ? endOfTodayJstMs(now) : now;
+
   const result: { t: Date; rating: number }[] = [];
+  let lastPushedMs: number | undefined;
 
   for (let i = 0; i < config.count; i++) {
-    const bucketEndMs = now - (config.startOffsetDays + i * config.intervalDays) * DAY_MS;
+    const bucketEndMs = anchorMs - i * config.intervalDays * DAY_MS;
     let found: { ms: number; rating: number } | undefined;
     for (let j = sorted.length - 1; j >= 0; j--) {
       if (sorted[j].ms <= bucketEndMs) { found = sorted[j]; break; }
     }
-    if (found) result.push({ t: new Date(found.ms), rating: found.rating });
+    // 同じ古い試合が複数バケットで再ヒットしないよう抑止。
+    if (found && found.ms !== lastPushedMs) {
+      result.push({ t: new Date(found.ms), rating: found.rating });
+      lastPushedMs = found.ms;
+    }
   }
 
-  // ループは新しい順（i=0が直近）→ グラフ用に古い順へ反転
+  // ループは新しい順(i=0が直近) → グラフ用に古い順へ反転
   return result.reverse();
 }
 
@@ -182,7 +198,9 @@ export async function buildPanel(options: PanelOptions): Promise<PanelPayload> {
     points: sampleObservations(obs[i], days),
   }));
 
-  const hasAnyPoints = series.some(s => s.points.length > 0);
+  // サンプリング結果ではなく生データの有無で判定 (取得済みデータがあるのに
+  // バケット範囲外で空になり「データ取得中」と誤表示するのを防ぐ)。
+  const hasAnyPoints = obs.some(arr => arr.length > 0);
   if (hasAnyPoints) {
     const buf = renderHistoryGraph(series, days);
     const attachment = new AttachmentBuilder(buf, { name: 'rank-history.png' });
