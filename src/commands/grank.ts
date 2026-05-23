@@ -20,6 +20,7 @@ import { RankTrackingService } from '../services/RankTrackingService';
 import { PuddleFarmService } from '../services/PuddleFarmService';
 import { buildPanel } from '../services/RankPanelBuilder';
 import { truncate } from '../utils/text';
+import { decodeRating } from '../constants/dr-ranks';
 
 function formatBackfillResult(
   name: string,
@@ -300,12 +301,21 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   }
 
   // 候補が複数ヒット — Select menu に逃がす。
-  const options = filtered.slice(0, 25).map(r =>
-    new StringSelectMenuOptionBuilder()
+  // r.rating は型上 number だが API が null を返すケース(placement/未ランク)に
+  // 備えてガードする。decodeRating(null) は NaN を経由してクラッシュするため。
+  const options = filtered.slice(0, 25).map(r => {
+    let ratingLabel: string;
+    if (typeof r.rating === 'number' && Number.isFinite(r.rating)) {
+      const decoded = decodeRating(r.rating);
+      ratingLabel = decoded.kind === 'DR' ? `DR ${decoded.value.toFixed(0)}` : `RP ${decoded.value.toFixed(0)}`;
+    } else {
+      ratingLabel = 'レート不明';
+    }
+    return new StringSelectMenuOptionBuilder()
       .setLabel(truncate(r.name, 25))
-      .setDescription(`Rating: ${r.rating.toFixed(0)}`)
-      .setValue(String(r.id)),
-  );
+      .setDescription(ratingLabel)
+      .setValue(String(r.id));
+  });
   const menu = new StringSelectMenuBuilder()
     .setCustomId(`grank-add:select:${charShort}`)
     .setPlaceholder('登録するプレイヤーを選択')
