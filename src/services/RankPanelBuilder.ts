@@ -149,13 +149,16 @@ async function computeStats(
       continue;
     }
 
-    // 24h前との比較。最新と同じkindの観測のみ採用(昇格を跨ぐ場合は null)。
+    // 24h前との比較。最新と最も近い「24h以上前」の観測を1つ取り、kindが一致
+    // していれば差分を返す。kind不一致(昇格/降格を跨ぐ)の場合は walk past せず
+    // null を返す ── 数日〜数週間前の観測まで遡って「24h delta」と表示する誤りを防ぐ。
     const cutoff24h = now - 24 * 3600 * 1000;
-    const before = [...observations].reverse().find(o => {
-      if (new Date(o.observed_at).getTime() > cutoff24h) return false;
-      return decodeRating(o.rating).kind === decodedLatest.kind;
-    });
-    const delta = before ? decodedLatest.value - decodeRating(before.rating).value : null;
+    const before = [...observations].reverse().find(
+      o => new Date(o.observed_at).getTime() <= cutoff24h,
+    );
+    const delta = before && decodeRating(before.rating).kind === decodedLatest.kind
+      ? decodedLatest.value - decodeRating(before.rating).value
+      : null;
     stats.push({ obs: observations, kind: decodedLatest.kind, latestValue: decodedLatest.value, delta });
   }
 
@@ -165,7 +168,6 @@ async function computeStats(
 type GroupItem = {
   tp: TrackedPlayer;
   stat: PlayerStat;
-  seriesIndex: number; // PALETTE の色を割り当てるための元配列インデックス
 };
 
 function buildEmbedForGroup(
@@ -197,12 +199,9 @@ function buildEmbedForGroup(
 
   if (hasGraph) {
     embed.setImage(`attachment://${graphFileName}`);
-  } else {
-    embed.addFields({
-      name: '⏳ データ取得中',
-      value: '次回更新(毎時)まで少々お待ちください。',
-    });
   }
+  // hasGraph=false の場合、各行が既に '*(データなし)*' を表示しているので
+  // 別途「⏳ データ取得中」フィールドは追加しない(冗長表示の回避)。
 
   return embed;
 }
@@ -214,14 +213,21 @@ function buildGraphForGroup(
   fileName: string,
   tiers: RankTier[],
 ): AttachmentBuilder | null {
-  const series: GraphSeries[] = items.map(({ tp, stat, seriesIndex }) => ({
+  // サンプリング結果ではなく生データの有無で判定。
+  // 取得済みデータがあるのにバケット範囲外で空になり「データ取得中」と
+  // 誤表示するのを防ぐ(プレイヤーが選択期間より前にだけプレイした場合など)。
+  const hasAnyRaw = items.some(({ stat }) =>
+    stat.obs.some(o => (kind === 'DR' ? o.rating > DR_OFFSET : o.rating <= DR_OFFSET)),
+  );
+  if (!hasAnyRaw) return null;
+
+  // 群内のローカルインデックスで色を割り当てる。元の allTracked のインデックスを
+  // 使うと、群を跨ぐ際に PALETTE スロットが余っていても同色が衝突しうる。
+  const series: GraphSeries[] = items.map(({ tp, stat }, i) => ({
     label: `${truncate(tp.display_name, 10)} (${tp.char_short})`,
-    color: PALETTE[seriesIndex % PALETTE.length],
+    color: PALETTE[i % PALETTE.length],
     points: sampleObservations(stat.obs, days, kind),
   }));
-
-  const hasAny = series.some(s => s.points.length > 0);
-  if (!hasAny) return null;
 
   const buf = renderHistoryGraph(series, days, tiers);
   return new AttachmentBuilder(buf, { name: fileName });
@@ -244,7 +250,7 @@ export async function buildPanel(options: PanelOptions): Promise<PanelPayload> {
   if (allTracked.length === 0) {
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
-      .setTitle(`📈 ランク追跡 (直近 ${labelForDays(days)})`)
+      .setTitle(`📊 ランク追跡 (直近 ${labelForDays(days)})`)
       .setFooter({ text: `投稿先: ${postChannel} | 期間: ${labelForDays(days)}` })
       .setTimestamp()
       .setDescription(
@@ -262,15 +268,19 @@ export async function buildPanel(options: PanelOptions): Promise<PanelPayload> {
   const drItems: GroupItem[] = [];
   allTracked.forEach((tp, i) => {
     const stat = stats[i];
-    const item: GroupItem = { tp, stat, seriesIndex: i };
+    const item: GroupItem = { tp, stat };
     if (stat.kind === 'DR') drItems.push(item);
     else rpItems.push(item);
   });
 
-  // レート値降順ソート。データなしは末尾。
+  // レート値降順ソート。データなし(latestValue===null)は末尾。両者nullの場合は0を返す
+  // (-Infinity 同士の引き算で NaN になりエンジン依存のソートに陥るのを避ける)。
   const byValueDesc = (a: GroupItem, b: GroupItem) => {
-    const av = a.stat.latestValue ?? -Infinity;
-    const bv = b.stat.latestValue ?? -Infinity;
+    const av = a.stat.latestValue;
+    const bv = b.stat.latestValue;
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
     return bv - av;
   };
   rpItems.sort(byValueDesc);

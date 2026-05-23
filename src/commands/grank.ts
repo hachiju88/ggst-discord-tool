@@ -301,9 +301,16 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   }
 
   // 候補が複数ヒット — Select menu に逃がす。
+  // r.rating は型上 number だが API が null を返すケース(placement/未ランク)に
+  // 備えてガードする。decodeRating(null) は NaN を経由してクラッシュするため。
   const options = filtered.slice(0, 25).map(r => {
-    const decoded = decodeRating(r.rating);
-    const ratingLabel = decoded.kind === 'DR' ? `DR ${decoded.value.toFixed(0)}` : `RP ${decoded.value.toFixed(0)}`;
+    let ratingLabel: string;
+    if (typeof r.rating === 'number' && Number.isFinite(r.rating)) {
+      const decoded = decodeRating(r.rating);
+      ratingLabel = decoded.kind === 'DR' ? `DR ${decoded.value.toFixed(0)}` : `RP ${decoded.value.toFixed(0)}`;
+    } else {
+      ratingLabel = 'レート不明';
+    }
     return new StringSelectMenuOptionBuilder()
       .setLabel(truncate(r.name, 25))
       .setDescription(ratingLabel)
