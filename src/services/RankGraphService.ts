@@ -45,8 +45,10 @@ const GRID = '#3f4147';
 const LABEL_CLR = '#b5bac1';
 const WHITE = '#ffffff';
 
-// GGST タワーレート換算でのランク境界(各ランクの最低値)。
-const RANK_TIERS: { name: string; min: number; color: string }[] = [
+export type RankTier = { name: string; min: number; color: string };
+
+// GGST タワーレート換算でのランク境界(各ランクの最低値)。RP 用。
+export const RP_RANK_TIERS: RankTier[] = [
   { name: 'Vanquisher', min: 45000, color: '#d4a3ff' },
   { name: 'Diamond 3',  min: 40800, color: '#8ec5ff' },
   { name: 'Diamond 2',  min: 36000, color: '#8ec5ff' },
@@ -71,7 +73,11 @@ function snapToStep(value: number, step: number, fn: 'floor' | 'ceil'): number {
   return fn === 'floor' ? Math.floor(value / step) * step : Math.ceil(value / step) * step;
 }
 
-export function renderHistoryGraph(series: GraphSeries[], windowDays: number): Buffer {
+export function renderHistoryGraph(
+  series: GraphSeries[],
+  windowDays: number,
+  tiers: RankTier[] = RP_RANK_TIERS,
+): Buffer {
   registerFonts();
   const ff = 'JapaneseGothic, sans-serif';
 
@@ -123,7 +129,7 @@ export function renderHistoryGraph(series: GraphSeries[], windowDays: number): B
 
   // Rank tier boundaries (overlay on the numeric grid)
   ctx.font = `bold 10px ${ff}`;
-  for (const tier of RANK_TIERS) {
+  for (const tier of tiers) {
     if (tier.min <= minRating || tier.min >= maxRating) continue;
     const y = toY(tier.min);
     ctx.strokeStyle = tier.color;

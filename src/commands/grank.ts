@@ -20,6 +20,7 @@ import { RankTrackingService } from '../services/RankTrackingService';
 import { PuddleFarmService } from '../services/PuddleFarmService';
 import { buildPanel } from '../services/RankPanelBuilder';
 import { truncate } from '../utils/text';
+import { decodeRating } from '../constants/dr-ranks';
 
 function formatBackfillResult(
   name: string,
@@ -300,12 +301,14 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   }
 
   // 候補が複数ヒット — Select menu に逃がす。
-  const options = filtered.slice(0, 25).map(r =>
-    new StringSelectMenuOptionBuilder()
+  const options = filtered.slice(0, 25).map(r => {
+    const decoded = decodeRating(r.rating);
+    const ratingLabel = decoded.kind === 'DR' ? `DR ${decoded.value.toFixed(0)}` : `RP ${decoded.value.toFixed(0)}`;
+    return new StringSelectMenuOptionBuilder()
       .setLabel(truncate(r.name, 25))
-      .setDescription(`Rating: ${r.rating.toFixed(0)}`)
-      .setValue(String(r.id)),
-  );
+      .setDescription(ratingLabel)
+      .setValue(String(r.id));
+  });
   const menu = new StringSelectMenuBuilder()
     .setCustomId(`grank-add:select:${charShort}`)
     .setPlaceholder('登録するプレイヤーを選択')
