@@ -13,6 +13,7 @@ export interface TournamentTeamBattle {
   team2_games_won: number
   handicap_member_id: number | null
   handicap_rounds: number
+  is_tiebreaker: number
   status: 'pending' | 'completed'
   message_id: string | null
   created_at: string
@@ -28,13 +29,14 @@ export class TournamentTeamBattleModel {
     team2_member_id: number | null
     handicap_member_id?: number | null
     handicap_rounds?: number
+    is_tiebreaker?: boolean
   }): Promise<TournamentTeamBattle> {
     const db = getDatabase()
     const result = await db.execute({
       sql: `INSERT INTO tournament_team_battles
               (match_id, battle_order, match_code, team1_member_id, team2_member_id,
-               handicap_member_id, handicap_rounds, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+               handicap_member_id, handicap_rounds, is_tiebreaker, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
       args: [
         data.match_id,
         data.battle_order,
@@ -43,6 +45,7 @@ export class TournamentTeamBattleModel {
         data.team2_member_id,
         data.handicap_member_id ?? null,
         data.handicap_rounds ?? 0,
+        data.is_tiebreaker ? 1 : 0,
       ],
     })
     return (await this.getById(Number(result.lastInsertRowid)))!

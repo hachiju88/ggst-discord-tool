@@ -101,7 +101,7 @@ export class LeagueImageService {
     ctx.fillText('#',          CX_RANK,     hY)
     ctx.fillText('プレイヤー', CX_NAME,     hY)
     ctx.fillText('ランク',     CX_RANKTEXT, hY)
-    ctx.fillText('W-L',        CX_WL,       hY)
+    ctx.fillText('W-D-L',      CX_WL,       hY)
     ctx.fillText('G勝',        CX_GAMES,    hY)
 
     // Rank labels for top 3
@@ -138,10 +138,10 @@ export class LeagueImageService {
       ctx.font = `11px ${ff}`
       ctx.fillText(truncate(s.participant.rank ?? '—', 10), CX_RANKTEXT, tY)
 
-      // W-L (coloured)
+      // W-D-L (coloured)
       ctx.fillStyle = s.wins > s.losses ? WIN_CLR : s.losses > s.wins ? LOSS_CLR : WHITE
       ctx.font = `bold 13px ${ff}`
-      ctx.fillText(`${s.wins}-${s.losses}`, CX_WL, tY)
+      ctx.fillText(`${s.wins}-${s.draws}-${s.losses}`, CX_WL, tY)
 
       // Game wins
       ctx.fillStyle = GRAY

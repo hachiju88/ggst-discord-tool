@@ -13,6 +13,7 @@ export interface TournamentMatch {
   handicap_rounds: number
   p1_games_won: number
   p2_games_won: number
+  is_draw: number
   vc_channel_id: string | null
   status: 'pending' | 'in_progress' | 'completed' | 'bye'
   message_id: string | null
@@ -147,8 +148,18 @@ export class TournamentMatchModel {
   ): Promise<boolean> {
     const db = getDatabase()
     const r = await db.execute({
-      sql: `UPDATE tournament_matches SET winner_id = ?, p1_games_won = ?, p2_games_won = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'completed'`,
+      sql: `UPDATE tournament_matches SET winner_id = ?, p1_games_won = ?, p2_games_won = ?, is_draw = 0, status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'completed'`,
       args: [winnerId, p1GamesWon, p2GamesWon, id],
+    })
+    return r.rowsAffected > 0
+  }
+
+  // 引き分けでマッチを確定（団体戦専用）
+  static async setDraw(id: number, p1GamesWon: number, p2GamesWon: number): Promise<boolean> {
+    const db = getDatabase()
+    const r = await db.execute({
+      sql: `UPDATE tournament_matches SET winner_id = NULL, p1_games_won = ?, p2_games_won = ?, is_draw = 1, status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'completed'`,
+      args: [p1GamesWon, p2GamesWon, id],
     })
     return r.rowsAffected > 0
   }
@@ -207,7 +218,7 @@ export class TournamentMatchModel {
     await db.execute({
       sql: `UPDATE tournament_matches
             SET winner_id = NULL, status = 'pending', p1_games_won = 0, p2_games_won = 0,
-                updated_at = CURRENT_TIMESTAMP
+                is_draw = 0, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?`,
       args: [id],
     })

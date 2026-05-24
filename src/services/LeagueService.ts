@@ -9,6 +9,7 @@ export interface StandingsEntry {
   participant: TournamentParticipant
   wins: number
   losses: number
+  draws: number
   gameWins: number
   matchesPlayed: number
 }
@@ -63,17 +64,19 @@ export class LeagueService {
       const myCompleted = completed.filter(
         m => Number(m.participant1_id) === pid || Number(m.participant2_id) === pid
       )
-      const wins = myCompleted.filter(m => Number(m.winner_id) === pid).length
-      const losses = myCompleted.length - wins
+      const draws = myCompleted.filter(m => Number(m.is_draw) === 1).length
+      const wins = myCompleted.filter(m => Number(m.is_draw) !== 1 && Number(m.winner_id) === pid).length
+      const losses = myCompleted.length - wins - draws
       const gameWins = myCompleted.reduce((sum, m) => {
         if (Number(m.participant1_id) === pid) return sum + Number(m.p1_games_won)
         return sum + Number(m.p2_games_won)
       }, 0)
 
-      return { participant: p, wins, losses, gameWins, matchesPlayed: myCompleted.length }
+      return { participant: p, wins, losses, draws, gameWins, matchesPlayed: myCompleted.length }
     })
 
-    entries.sort((a, b) => b.wins - a.wins || b.gameWins - a.gameWins)
+    // 引き分けは 0.5 勝として並び替え（同じ勝点なら G勝で比較）
+    entries.sort((a, b) => (b.wins + b.draws * 0.5) - (a.wins + a.draws * 0.5) || b.gameWins - a.gameWins)
     return entries
   }
 
@@ -146,7 +149,8 @@ export class LeagueService {
         const medal = medals[i] ?? `${i + 1}位`
         const rank = s.participant.rank ? ` [${s.participant.rank}]` : ''
         const char = s.participant.character ? ` (${s.participant.character})` : ''
-        return `${medal} <@${s.participant.discord_id}>${rank}${char} — **${s.wins}勝${s.losses}敗** (${s.gameWins}G)`
+        const drawPart = s.draws > 0 ? `${s.draws}分` : ''
+        return `${medal} <@${s.participant.discord_id}>${rank}${char} — **${s.wins}勝${drawPart}${s.losses}敗** (${s.gameWins}G)`
       })
       .join('\n')
 
@@ -159,6 +163,9 @@ export class LeagueService {
           const p1 = m.p1_name ?? '?'
           const p2 = m.p2_name ?? '?'
           const score = `${m.p1_games_won}-${m.p2_games_won}`
+          if (Number(m.is_draw) === 1) {
+            return `\`#${m.match_code}\` ${p1} ${score} ${p2} 🤝 引き分け`
+          }
           return `\`#${m.match_code}\` ${p1} ${score} ${p2} ✅ ${m.winner_name}`
         })
         .join('\n')

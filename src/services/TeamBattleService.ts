@@ -92,7 +92,8 @@ export class TeamBattleService {
     const t1m = await (m1 ? TournamentTeamModel.getById(m1.team_id) : null)
     const t2m = await (m2 ? TournamentTeamModel.getById(m2.team_id) : null)
 
-    const posLabel = POSITION_NAMES[battle.battle_order - 1] ?? `第${battle.battle_order}戦`
+    const isTb = Number(battle.is_tiebreaker) === 1
+    const posLabel = isTb ? '最終戦' : (POSITION_NAMES[battle.battle_order - 1] ?? `第${battle.battle_order}戦`)
     const winsLabel = `${regulation.winsRequired}先`
 
     const p1 = m1 ? `<@${m1.discord_id}>${m1.rank ? ` [${m1.rank}]` : ''}${m1.character ? ` (${m1.character})` : ''}` : '?'
@@ -269,7 +270,9 @@ export class TeamBattleService {
   }
 
   // sequential: チームマッチの勝者を決定（最多勝数、同点はゲーム取得数）
-  // 戻り値: winnerTeamId or null (未決)
+  // 戻り値: winnerTeamId / null（未決 or 引き分け状態）
+  // 完全な同点（勝敗・ゲーム取得数ともに同じ）の場合は null を返す。
+  // tiebreaker (最終戦) battle がすでに完了していれば、その勝者を返す。
   static async resolveSequentialMatch(
     matchId: number,
     team1Id: number,
@@ -279,8 +282,18 @@ export class TeamBattleService {
     const completed = battles.filter(b => b.status === 'completed')
     if (completed.length < battles.length) return null  // まだ全部終わっていない
 
+    // 最終戦（tiebreaker）が完了していれば、その勝者をマッチ勝者とする
+    const tiebreakerCompleted = completed
+      .filter(b => Number(b.is_tiebreaker) === 1)
+      .sort((a, b) => b.battle_order - a.battle_order)[0]
+    if (tiebreakerCompleted && tiebreakerCompleted.winner_team_id) {
+      return Number(tiebreakerCompleted.winner_team_id)
+    }
+
+    const initial = completed.filter(b => Number(b.is_tiebreaker) !== 1)
+
     let t1Wins = 0, t2Wins = 0
-    for (const b of completed) {
+    for (const b of initial) {
       if (b.winner_team_id === team1Id) t1Wins++
       else if (b.winner_team_id === team2Id) t2Wins++
     }
@@ -289,7 +302,7 @@ export class TeamBattleService {
 
     // 同点: ゲーム取得数で比較
     let t1Games = 0, t2Games = 0
-    for (const b of completed) {
+    for (const b of initial) {
       const isT1Winner = b.winner_team_id === team1Id
       if (isT1Winner) {
         t1Games += b.team1_games_won
@@ -299,8 +312,85 @@ export class TeamBattleService {
         t2Games += b.team1_games_won
       }
     }
-    if (t1Games >= t2Games) return team1Id
-    return team2Id
+    if (t1Games > t2Games) return team1Id
+    if (t2Games > t1Games) return team2Id
+
+    // 勝敗・ゲーム取得数ともに同点 → 引き分け状態（ユーザー判断待ち）
+    return null
+  }
+
+  // sequential: 初期バトル（tiebreaker を除く）がすべて完了しているか
+  static async isInitialBattlesComplete(matchId: number): Promise<boolean> {
+    const battles = await TournamentTeamBattleModel.getByMatch(matchId)
+    const initial = battles.filter(b => Number(b.is_tiebreaker) !== 1)
+    return initial.length > 0 && initial.every(b => b.status === 'completed')
+  }
+
+  // sequential: 引き分け状態かどうか（初期バトル全完了 & 勝者未決）
+  static async isDrawState(
+    matchId: number,
+    team1Id: number,
+    team2Id: number
+  ): Promise<boolean> {
+    if (!(await this.isInitialBattlesComplete(matchId))) return false
+    const winner = await this.resolveSequentialMatch(matchId, team1Id, team2Id)
+    return winner === null
+  }
+
+  // 最終戦（tiebreaker）バトルを生成
+  static async generateTiebreakerBattle(
+    matchId: number,
+    team1MemberId: number,
+    team2MemberId: number,
+    regulation: TournamentRegulation
+  ): Promise<number> {
+    const [m1, m2, existing] = await Promise.all([
+      TournamentTeamMemberModel.getById(team1MemberId),
+      TournamentTeamMemberModel.getById(team2MemberId),
+      TournamentTeamBattleModel.getByMatch(matchId),
+    ])
+    if (!m1 || !m2) throw new Error('Tiebreaker members not found')
+
+    const handicap = BracketService.calcHandicap(
+      { rank: m1.rank } as any,
+      { rank: m2.rank } as any,
+      regulation.handicapRules
+    )
+
+    const battle = await TournamentTeamBattleModel.create({
+      match_id: matchId,
+      battle_order: existing.length + 1,
+      match_code: generateMatchCode(),
+      team1_member_id: m1.id,
+      team2_member_id: m2.id,
+      handicap_member_id: handicap.handicapParticipantId
+        ? (handicap.handicapParticipantId === (m1 as any).id ? m1.id : m2.id)
+        : null,
+      handicap_rounds: handicap.rounds,
+      is_tiebreaker: true,
+    })
+    return battle.id
+  }
+
+  // 引き分け確定時のゲーム取得合計を返す（is_draw マッチのスコア保存用）
+  static async computeTotalGames(
+    matchId: number,
+    team1Id: number
+  ): Promise<{ t1Games: number; t2Games: number }> {
+    const battles = await TournamentTeamBattleModel.getByMatch(matchId)
+    let t1Games = 0, t2Games = 0
+    for (const b of battles) {
+      if (b.status !== 'completed') continue
+      const m1 = b.team1_member_id ? await TournamentTeamMemberModel.getById(b.team1_member_id) : null
+      if (m1?.team_id === team1Id) {
+        t1Games += b.team1_games_won
+        t2Games += b.team2_games_won
+      } else {
+        t1Games += b.team2_games_won
+        t2Games += b.team1_games_won
+      }
+    }
+    return { t1Games, t2Games }
   }
 
   // survival: 全滅したチームの対面が勝者
@@ -336,9 +426,10 @@ export class TeamBattleService {
   static async formatMatchSummary(matchId: number, team1Id: number, team2Id: number): Promise<string> {
     const battles = await TournamentTeamBattleModel.getByMatch(matchId)
     const completed = battles.filter(b => b.status === 'completed')
+    const initial = completed.filter(b => Number(b.is_tiebreaker) !== 1)
 
     let t1Wins = 0, t2Wins = 0
-    for (const b of completed) {
+    for (const b of initial) {
       if (b.winner_team_id === team1Id) t1Wins++
       else if (b.winner_team_id === team2Id) t2Wins++
     }
@@ -349,7 +440,9 @@ export class TeamBattleService {
     ])
 
     const resultLines = completed.map(b => {
-      const pos = POSITION_NAMES[b.battle_order - 1] ?? `第${b.battle_order}戦`
+      const pos = Number(b.is_tiebreaker) === 1
+        ? '最終戦'
+        : (POSITION_NAMES[b.battle_order - 1] ?? `第${b.battle_order}戦`)
       const score = `${b.team1_games_won}-${b.team2_games_won}`
       return `${pos}: ${score}`
     })
@@ -377,10 +470,16 @@ export class TeamBattleService {
     let t1Wins = 0, t2Wins = 0
     const lines: string[] = []
     for (const b of battles) {
-      const pos = POSITION_NAMES[b.battle_order - 1] ?? `第${b.battle_order}戦`
+      const isTb = Number(b.is_tiebreaker) === 1
+      const pos = isTb ? '最終戦' : (POSITION_NAMES[b.battle_order - 1] ?? `第${b.battle_order}戦`)
       if (b.status === 'completed') {
-        if (b.winner_team_id === t1Id) { t1Wins++; lines.push(`✅ ${pos}: **${t1?.name}**勝利 (${b.team1_games_won}-${b.team2_games_won})`) }
-        else { t2Wins++; lines.push(`✅ ${pos}: **${t2?.name}**勝利 (${b.team1_games_won}-${b.team2_games_won})`) }
+        if (b.winner_team_id === t1Id) {
+          if (!isTb) t1Wins++
+          lines.push(`✅ ${pos}: **${t1?.name}**勝利 (${b.team1_games_won}-${b.team2_games_won})`)
+        } else {
+          if (!isTb) t2Wins++
+          lines.push(`✅ ${pos}: **${t2?.name}**勝利 (${b.team1_games_won}-${b.team2_games_won})`)
+        }
       } else {
         lines.push(`⏳ ${pos}: 試合中`)
       }

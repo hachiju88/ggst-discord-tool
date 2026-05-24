@@ -746,6 +746,10 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
   if (prefix === 'tnm-battle-confirm') return handleBattleConfirmButton(interaction, parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3]), parseInt(parts[4]))
   if (prefix === 'tnm-battle-correct') return handleBattleCorrectButton(interaction, parseInt(parts[1]))
   if (prefix === 'tnm-battle-cancel')  return handleBattleCancelButton(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-draw-end')       return handleDrawEndButton(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-draw-tb')        return handleDrawTiebreakerButton(interaction, parseInt(parts[1]))
+  if (prefix === 'tnm-tb-start')       return handleTiebreakerStartButton(interaction, parseInt(parts[1]), parseInt(parts[2]), parseInt(parts[3]))
+  if (prefix === 'tnm-tb-cancel')      return handleTiebreakerCancelButton(interaction, parseInt(parts[1]))
   if (prefix === 'tnm-assign')         return handleAssignButton(interaction, parseInt(parts[1]), parts[2])
   if (prefix === 'tnm-auto-assign')    return handleAutoAssign(interaction, parseInt(parts[1]), parts[2] as 'balanced' | 'random')
 
@@ -1200,6 +1204,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
   if (parts[0] === 'tnm-admin-enter-rank') return handleAdminEnterRank(interaction, parseInt(parts[1]), parts[2])
   if (parts[0] === 'tnm-team-select')  return handleTeamSelectMenu(interaction, parseInt(parts[1]))
   if (parts[0] === 'tnm-assign-slot')  return handleAssignSlotSelect(interaction, parseInt(parts[1]), parts[2], parts[3])
+  if (parts[0] === 'tnm-tb-sel')       return handleTiebreakerMemberSelect(interaction, parseInt(parts[1]), parseInt(parts[2]) as 1 | 2)
   return false
 }
 
@@ -1799,7 +1804,7 @@ async function handleBattleConfirmButton(
   })
 
   const channel = interaction.channel
-  const isText = channel && channel.isTextBased() && !channel.isDMBased()
+  const isText = !!(channel && channel.isTextBased() && !channel.isDMBased())
 
   const isSurvival = regulation.teamBattleFormat === 'survival'
   let matchWinnerTeamId: number | null = null
@@ -1821,24 +1826,67 @@ async function handleBattleConfirmButton(
     matchWinnerTeamId = await TeamBattleService.resolveSequentialMatch(battle.match_id, team1Id, team2Id)
   }
 
-  if (matchWinnerTeamId === null) return true
+  if (matchWinnerTeamId === null) {
+    // 全試合終了かつ勝者未決 → 引き分け状態。ユーザーに選択 UI を提示
+    if (!isSurvival && await TeamBattleService.isInitialBattlesComplete(battle.match_id) && isText && channel) {
+      try {
+        await postDrawChoicePrompt(channel, battle.match_id, team1Id, team2Id, tournament.format)
+      } catch (err) {
+        console.error('[tnm] Failed to post draw prompt:', err)
+      }
+    }
+    return true
+  }
 
-  const winnerTeam = await TournamentTeamModel.getById(matchWinnerTeamId)
-  const summary = await TeamBattleService.formatMatchSummary(battle.match_id, team1Id, team2Id)
+  await finalizeTeamMatch(battle.match_id, matchWinnerTeamId, channel, isText)
+  return true
+}
+
+// 団体戦マッチを確定して次へ進める共通処理（勝者 or 引き分け）
+async function finalizeTeamMatch(
+  matchId: number,
+  matchWinnerTeamId: number | null,
+  channel: any,
+  isText: boolean
+): Promise<void> {
+  const match = await TournamentMatchModel.getById(matchId)
+  if (!match) return
+  const tournament = await TournamentModel.getById(match.tournament_id)
+  if (!tournament) return
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+
+  const matchData = await TournamentMatchModel.getWithParticipants(matchId)
+  const team1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
+  const team2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
+  if (!team1Id || !team2Id) return
+
+  const isDraw = matchWinnerTeamId === null
+  const winnerTeam = matchWinnerTeamId ? await TournamentTeamModel.getById(matchWinnerTeamId) : null
+  const summary = await TeamBattleService.formatMatchSummary(matchId, team1Id, team2Id)
+  const { t1Games, t2Games } = await TeamBattleService.computeTotalGames(matchId, team1Id)
 
   if (match.message_id && isText) {
     try {
       const matchMsg = await channel.messages.fetch(match.message_id)
-      await matchMsg.edit({ content: matchMsg.content + `\n\n🏆 **${winnerTeam?.name}** の勝利！${summary}`, components: [] })
+      const headline = isDraw ? '🤝 **引き分け**' : `🏆 **${winnerTeam?.name}** の勝利！`
+      await matchMsg.edit({ content: matchMsg.content + `\n\n${headline}${summary}`, components: [] })
     } catch { /* ベストエフォート */ }
   }
 
-  const winnerProxyDiscordId = proxyDiscordId(matchWinnerTeamId)
-  const winnerProxy = await TournamentParticipantModel.getByDiscordId(match.tournament_id, winnerProxyDiscordId)
-  if (!winnerProxy) return true
+  // 単一エリミでは引き分けは進出できないため、ここで終了（呼び出し側で防いでいるはず）
+  if (isDraw && tournament.format === 'single_elim') {
+    if (isText && channel) {
+      await channel.send('⚠️ シングルエリミネーションでは引き分けで進出できません。最終戦を実施してください。')
+    }
+    return
+  }
 
   if (tournament.format === 'single_elim') {
-    const result = await BracketService.advanceWinner(battle.match_id, winnerProxy.id, regulation)
+    // 勝者あり前提
+    const winnerProxyDiscordId = proxyDiscordId(matchWinnerTeamId!)
+    const winnerProxy = await TournamentParticipantModel.getByDiscordId(match.tournament_id, winnerProxyDiscordId)
+    if (!winnerProxy) return
+    const result = await BracketService.advanceWinner(matchId, winnerProxy.id, regulation)
     if (result.isChampion && isText && channel) {
       await channel.send(`🏆 **${tournament.name}** 終了！\n優勝: **${winnerTeam?.name}** ！おめでとうございます！`)
       try {
@@ -1852,46 +1900,44 @@ async function handleBattleConfirmButton(
       } catch (err) { console.error('[tnm] Failed to post next team match:', err) }
     }
   } else if (tournament.format === 'league') {
-    const battles = await TournamentTeamBattleModel.getByMatch(battle.match_id)
-    let t1TotalGames = 0, t2TotalGames = 0
-    for (const b of battles) {
-      if (b.status === 'completed') {
-        const m1 = b.team1_member_id ? await TournamentTeamMemberModel.getById(b.team1_member_id) : null
-        if (m1?.team_id === team1Id) { t1TotalGames += b.team1_games_won; t2TotalGames += b.team2_games_won }
-        else { t1TotalGames += b.team2_games_won; t2TotalGames += b.team1_games_won }
-      }
+    if (isDraw) {
+      await TournamentMatchModel.setDraw(matchId, t1Games, t2Games)
+    } else {
+      const winnerProxyDiscordId = proxyDiscordId(matchWinnerTeamId!)
+      const winnerProxy = await TournamentParticipantModel.getByDiscordId(match.tournament_id, winnerProxyDiscordId)
+      if (!winnerProxy) return
+      await TournamentMatchModel.setScore(matchId, winnerProxy.id, t1Games, t2Games)
     }
-    await TournamentMatchModel.setScore(battle.match_id, winnerProxy.id, t1TotalGames, t2TotalGames)
     const allDone = await LeagueService.checkAllComplete(tournament.id)
     if (allDone) {
       await TournamentModel.setStatus(tournament.id, 'completed')
       if (isText && channel) {
-        await channel.send(`🏆 **${tournament.name}** 全試合終了！\n優勝チーム: **${winnerTeam?.name}** ！おめでとうございます！`)
+        const champLine = await teamChampionLine(tournament.id, 'league')
+        await channel.send(`🏆 **${tournament.name}** 全試合終了！${champLine}`)
         try {
           await channel.send(await standingsData(tournament.id, tournament.format))
         } catch (err) { console.error('[tnm] Failed to post final league standings (team):', err) }
       }
     }
   } else if (tournament.format === 'swiss') {
-    const allBattles = await TournamentTeamBattleModel.getByMatch(battle.match_id)
-    let t1TG = 0, t2TG = 0
-    for (const b of allBattles) {
-      if (b.status === 'completed') {
-        const m1 = b.team1_member_id ? await TournamentTeamMemberModel.getById(b.team1_member_id) : null
-        if (m1?.team_id === team1Id) { t1TG += b.team1_games_won; t2TG += b.team2_games_won }
-        else { t1TG += b.team2_games_won; t2TG += b.team1_games_won }
-      }
+    if (isDraw) {
+      await TournamentMatchModel.setDraw(matchId, t1Games, t2Games)
+    } else {
+      const winnerProxyDiscordId = proxyDiscordId(matchWinnerTeamId!)
+      const winnerProxy = await TournamentParticipantModel.getByDiscordId(match.tournament_id, winnerProxyDiscordId)
+      if (!winnerProxy) return
+      await TournamentMatchModel.setScore(matchId, winnerProxy.id, t1Games, t2Games)
     }
-    await TournamentMatchModel.setScore(battle.match_id, winnerProxy.id, t1TG, t2TG)
     const currentRound = match.round
     const roundDone = await SwissService.isRoundComplete(tournament.id, currentRound)
-    if (!roundDone) return true
+    if (!roundDone) return
     const totalRounds = regulation.totalRounds ?? 4
     if (currentRound >= totalRounds) {
       await TournamentModel.setStatus(tournament.id, 'completed')
       if (isText && channel) {
+        const champLine = await teamChampionLine(tournament.id, 'swiss')
         const sd = await standingsData(tournament.id, tournament.format)
-        await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！\n優勝チーム: **${winnerTeam?.name}**！`, ...sd })
+        await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！${champLine}`, ...sd })
       }
     } else {
       const nextRound = currentRound + 1
@@ -1911,7 +1957,260 @@ async function handleBattleConfirmButton(
       }
     }
   }
+}
 
+// 順位表のトップから優勝チーム名を取得して表示文字列を返す
+async function teamChampionLine(tournamentId: number, format: 'league' | 'swiss'): Promise<string> {
+  try {
+    const standings = format === 'league'
+      ? await LeagueService.getStandings(tournamentId)
+      : await SwissService.getStandings(tournamentId)
+    const top = standings[0]
+    if (!top) return ''
+    const teamId = teamIdFromProxy(top.participant.discord_id)
+    if (!teamId) return ''
+    const team = await TournamentTeamModel.getById(teamId)
+    return team ? `\n優勝チーム: **${team.name}** ！おめでとうございます！` : ''
+  } catch {
+    return ''
+  }
+}
+
+// 引き分け状態の選択 UI を post（「引き分けで終了」 / 「最終戦を実施」）
+async function postDrawChoicePrompt(
+  channel: any,
+  matchId: number,
+  team1Id: number,
+  team2Id: number,
+  format: string
+): Promise<void> {
+  const [t1, t2] = await Promise.all([
+    TournamentTeamModel.getById(team1Id),
+    TournamentTeamModel.getById(team2Id),
+  ])
+  const { t1Games, t2Games } = await TeamBattleService.computeTotalGames(matchId, team1Id)
+
+  const row = new ActionRowBuilder<ButtonBuilder>()
+  if (format !== 'single_elim') {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`tnm-draw-end:${matchId}`)
+        .setLabel('🤝 引き分けで終了')
+        .setStyle(ButtonStyle.Secondary),
+    )
+  }
+  row.addComponents(
+    new ButtonBuilder()
+      .setCustomId(`tnm-draw-tb:${matchId}`)
+      .setLabel('⚔️ 最終戦を実施')
+      .setStyle(ButtonStyle.Primary),
+  )
+
+  const noteIfSingle = format === 'single_elim'
+    ? '\nシングルエリミネーションのため、最終戦で決着をつけてください。'
+    : ''
+
+  await channel.send({
+    content: `⚖️ 全試合終了 — **引き分け**です（${t1?.name ?? '?'} ${t1Games}-${t2Games} ${t2?.name ?? '?'}）\nどうしますか？${noteIfSingle}`,
+    components: [row],
+  })
+}
+
+// 「引き分けで終了」ボタン
+async function handleDrawEndButton(interaction: ButtonInteraction, matchId: number): Promise<boolean> {
+  await interaction.deferUpdate()
+
+  const match = await TournamentMatchModel.getById(matchId)
+  if (!match) { return true }
+  if (match.status === 'completed') {
+    await interaction.editReply({ content: 'この試合はすでに終了しています。', components: [] })
+    return true
+  }
+  const tournament = await TournamentModel.getById(match.tournament_id)
+  if (!tournament) return true
+  if (tournament.format === 'single_elim') {
+    await interaction.editReply({ content: 'シングルエリミネーションでは引き分けで終了できません。最終戦を実施してください。', components: [] })
+    return true
+  }
+  const matchData = await TournamentMatchModel.getWithParticipants(matchId)
+  const team1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
+  const team2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
+  if (!team1Id || !team2Id) return true
+
+  // 念のため：引き分け状態でなければ拒否
+  if (!(await TeamBattleService.isDrawState(matchId, team1Id, team2Id))) {
+    await interaction.editReply({ content: '引き分け状態ではありません。', components: [] })
+    return true
+  }
+
+  await interaction.editReply({ content: '🤝 引き分けで確定しました。', components: [] })
+
+  const channel = interaction.channel
+  const isText = !!(channel && channel.isTextBased() && !channel.isDMBased())
+  await finalizeTeamMatch(matchId, null, channel, isText)
+  return true
+}
+
+// 「最終戦を実施」ボタン → メンバー選択 UI を post
+async function handleDrawTiebreakerButton(interaction: ButtonInteraction, matchId: number): Promise<boolean> {
+  await interaction.deferUpdate()
+
+  const match = await TournamentMatchModel.getById(matchId)
+  if (!match || match.status === 'completed') {
+    await interaction.editReply({ content: 'この試合はすでに終了しています。', components: [] })
+    return true
+  }
+  const matchData = await TournamentMatchModel.getWithParticipants(matchId)
+  const team1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
+  const team2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
+  if (!team1Id || !team2Id) return true
+
+  if (!(await TeamBattleService.isDrawState(matchId, team1Id, team2Id))) {
+    await interaction.editReply({ content: '引き分け状態ではありません。', components: [] })
+    return true
+  }
+
+  const [t1, t2, m1Members, m2Members] = await Promise.all([
+    TournamentTeamModel.getById(team1Id),
+    TournamentTeamModel.getById(team2Id),
+    TournamentTeamMemberModel.getByTeam(team1Id),
+    TournamentTeamMemberModel.getByTeam(team2Id),
+  ])
+
+  const { content, components } = buildTiebreakerPickerMessage(matchId, t1?.name ?? '?', t2?.name ?? '?', m1Members, m2Members, 0, 0)
+  // 元のメッセージはボタンを消して、選択 UI は新規メッセージで post
+  await interaction.editReply({ content: '⚔️ 最終戦の出場者を選択してください（下のメッセージ）', components: [] })
+  const channel = interaction.channel
+  if (channel && channel.isTextBased() && !channel.isDMBased()) {
+    await channel.send({ content, components })
+  }
+  return true
+}
+
+function buildTiebreakerPickerMessage(
+  matchId: number,
+  team1Name: string,
+  team2Name: string,
+  team1Members: { id: number; discord_name: string; rank: string | null }[],
+  team2Members: { id: number; discord_name: string; rank: string | null }[],
+  pickedM1: number,
+  pickedM2: number,
+) {
+  const toOptions = (members: { id: number; discord_name: string; rank: string | null }[], pickedId: number) =>
+    members.slice(0, 25).map(m =>
+      new StringSelectMenuOptionBuilder()
+        .setLabel(`${m.discord_name}${m.rank ? ` [${m.rank}]` : ''}`.slice(0, 100))
+        .setValue(String(m.id))
+        .setDefault(m.id === pickedId)
+    )
+
+  const sel1 = new StringSelectMenuBuilder()
+    .setCustomId(`tnm-tb-sel:${matchId}:1`)
+    .setPlaceholder(`【${team1Name}】出場者を選択...`)
+    .addOptions(toOptions(team1Members, pickedM1))
+
+  const sel2 = new StringSelectMenuBuilder()
+    .setCustomId(`tnm-tb-sel:${matchId}:2`)
+    .setPlaceholder(`【${team2Name}】出場者を選択...`)
+    .addOptions(toOptions(team2Members, pickedM2))
+
+  const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`tnm-tb-start:${matchId}:${pickedM1}:${pickedM2}`)
+      .setLabel('✅ 最終戦を開始')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(pickedM1 === 0 || pickedM2 === 0),
+    new ButtonBuilder()
+      .setCustomId(`tnm-tb-cancel:${matchId}`)
+      .setLabel('❌ キャンセル')
+      .setStyle(ButtonStyle.Danger),
+  )
+
+  const picked1 = pickedM1 ? team1Members.find(m => m.id === pickedM1)?.discord_name ?? '?' : '未選択'
+  const picked2 = pickedM2 ? team2Members.find(m => m.id === pickedM2)?.discord_name ?? '?' : '未選択'
+
+  return {
+    content: `⚔️ **最終戦** — 出場者を選択してください\n【${team1Name}】 ${picked1}\n【${team2Name}】 ${picked2}`,
+    components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(sel1),
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(sel2),
+      controls,
+    ],
+  }
+}
+
+// 最終戦の出場者 select
+async function handleTiebreakerMemberSelect(interaction: StringSelectMenuInteraction, matchId: number, side: 1 | 2): Promise<boolean> {
+  await interaction.deferUpdate()
+
+  const matchData = await TournamentMatchModel.getWithParticipants(matchId)
+  const team1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
+  const team2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
+  if (!team1Id || !team2Id) return true
+
+  // Start ボタンから現在の状態を読み取る
+  const startBtn = interaction.message.components
+    .flatMap((row: any) => row.components ?? [])
+    .find((c: any) => typeof c?.customId === 'string' && c.customId.startsWith('tnm-tb-start:')) as any
+  const parts = typeof startBtn?.customId === 'string' ? startBtn.customId.split(':') : []
+  let m1 = parseInt(parts[2] ?? '0') || 0
+  let m2 = parseInt(parts[3] ?? '0') || 0
+
+  const chosen = parseInt(interaction.values[0] ?? '0') || 0
+  if (side === 1) m1 = chosen
+  else m2 = chosen
+
+  const [t1, t2, m1Members, m2Members] = await Promise.all([
+    TournamentTeamModel.getById(team1Id),
+    TournamentTeamModel.getById(team2Id),
+    TournamentTeamMemberModel.getByTeam(team1Id),
+    TournamentTeamMemberModel.getByTeam(team2Id),
+  ])
+
+  const { content, components } = buildTiebreakerPickerMessage(matchId, t1?.name ?? '?', t2?.name ?? '?', m1Members, m2Members, m1, m2)
+  await interaction.editReply({ content, components })
+  return true
+}
+
+// 「最終戦を開始」ボタン
+async function handleTiebreakerStartButton(interaction: ButtonInteraction, matchId: number, m1Id: number, m2Id: number): Promise<boolean> {
+  await interaction.deferUpdate()
+
+  if (!m1Id || !m2Id) {
+    await interaction.editReply({ content: '両チームの出場者を選択してください。' })
+    return true
+  }
+
+  const match = await TournamentMatchModel.getById(matchId)
+  if (!match || match.status === 'completed') {
+    await interaction.editReply({ content: 'この試合はすでに終了しています。', components: [] })
+    return true
+  }
+  const tournament = await TournamentModel.getById(match.tournament_id)
+  if (!tournament) return true
+  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+
+  const battleId = await TeamBattleService.generateTiebreakerBattle(matchId, m1Id, m2Id, regulation)
+
+  await interaction.editReply({ content: '⚔️ 最終戦を開始します。', components: [] })
+
+  const channel = interaction.channel
+  if (channel && channel.isTextBased() && !channel.isDMBased()) {
+    try {
+      const { content: nc, components: rc } = await TeamBattleService.formatBattleContent(battleId, regulation)
+      const msg = await channel.send({ content: nc, components: rc })
+      await TournamentTeamBattleModel.setMessageId(battleId, msg.id)
+    } catch (err) {
+      console.error('[tnm] Failed to post tiebreaker battle:', err)
+    }
+  }
+  return true
+}
+
+// 「キャンセル」ボタン (最終戦選択中)
+async function handleTiebreakerCancelButton(interaction: ButtonInteraction, _matchId: number): Promise<boolean> {
+  await interaction.deferUpdate()
+  await interaction.editReply({ content: '最終戦の準備をキャンセルしました。', components: [] })
   return true
 }
 

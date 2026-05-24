@@ -94,16 +94,18 @@ export class SwissService {
       const mine = completed.filter(
         m => Number(m.participant1_id) === pid || Number(m.participant2_id) === pid
       )
-      const wins = mine.filter(m => Number(m.winner_id) === pid).length
-      const losses = mine.length - wins
+      const draws = mine.filter(m => Number(m.is_draw) === 1).length
+      const wins = mine.filter(m => Number(m.is_draw) !== 1 && Number(m.winner_id) === pid).length
+      const losses = mine.length - wins - draws
       const gameWins = mine.reduce((sum, m) => {
         if (Number(m.participant1_id) === pid) return sum + Number(m.p1_games_won)
         return sum + Number(m.p2_games_won)
       }, 0)
-      return { participant: p, wins, losses, gameWins, matchesPlayed: mine.length }
+      return { participant: p, wins, losses, draws, gameWins, matchesPlayed: mine.length }
     })
 
-    entries.sort((a, b) => b.wins - a.wins || b.gameWins - a.gameWins)
+    // 引き分けは 0.5 勝として並び替え
+    entries.sort((a, b) => (b.wins + b.draws * 0.5) - (a.wins + a.draws * 0.5) || b.gameWins - a.gameWins)
     return entries
   }
 
@@ -131,11 +133,13 @@ export class SwissService {
         .map(m => Number(m.winner_id))
     )
 
-    // Shuffle within same-wins groups to randomize pairing order
+    // Shuffle within same-points groups to randomize pairing order
+    // (draws count as 0.5 wins; group by doubled value to use as integer key)
     const grouped = new Map<number, StandingsEntry[]>()
     for (const e of standings) {
-      if (!grouped.has(e.wins)) grouped.set(e.wins, [])
-      grouped.get(e.wins)!.push(e)
+      const key = e.wins * 2 + e.draws  // doubled points
+      if (!grouped.has(key)) grouped.set(key, [])
+      grouped.get(key)!.push(e)
     }
     const shuffled: StandingsEntry[] = []
     for (const [, group] of [...grouped.entries()].sort((a, b) => b[0] - a[0])) {
@@ -275,7 +279,8 @@ export class SwissService {
         const medal = medals[i] ?? `${i + 1}位`
         const rank = s.participant.rank ? ` [${s.participant.rank}]` : ''
         const char = s.participant.character ? ` (${s.participant.character})` : ''
-        return `${medal} <@${s.participant.discord_id}>${rank}${char} — **${s.wins}勝${s.losses}敗** (${s.gameWins}G)`
+        const drawPart = s.draws > 0 ? `${s.draws}分` : ''
+        return `${medal} <@${s.participant.discord_id}>${rank}${char} — **${s.wins}勝${drawPart}${s.losses}敗** (${s.gameWins}G)`
       })
       .join('\n')
     embed.addFields({ name: '📊 現在の順位', value: standingsText || 'まだ試合結果がありません' })
@@ -287,6 +292,9 @@ export class SwissService {
           const p1 = m.p1_name ?? '?'
           const p2 = m.p2_name ?? '?'
           if (m.status === 'completed') {
+            if (Number(m.is_draw) === 1) {
+              return `\`#${m.match_code}\` ${p1} ${m.p1_games_won}-${m.p2_games_won} ${p2} 🤝 引き分け`
+            }
             return `\`#${m.match_code}\` ${p1} ${m.p1_games_won}-${m.p2_games_won} ${p2} ✅ ${m.winner_name}`
           }
           return `\`#${m.match_code}\` ${p1} vs ${p2} ⏳`
