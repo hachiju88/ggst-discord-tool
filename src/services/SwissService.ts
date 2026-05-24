@@ -87,7 +87,7 @@ export class SwissService {
   static async getStandings(tournamentId: number): Promise<StandingsEntry[]> {
     const participants = await TournamentParticipantModel.getByTournament(tournamentId)
     const matches = await TournamentMatchModel.getByTournament(tournamentId)
-    const completed = matches.filter(m => m.status === 'completed' || m.status === 'bye')
+    const completed = matches.filter(m => (m.status === 'completed' || m.status === 'bye') && Number(m.is_final_tiebreaker) !== 1)
 
     const entries = participants.map(p => {
       const pid = Number(p.id)
@@ -118,9 +118,12 @@ export class SwissService {
   ): Promise<number[]> {
     const standings = await this.getStandings(tournamentId)
 
+    // 通常マッチのみ（優勝決定戦は対戦履歴に含めない）
+    const regularMatches = allMatches.filter(m => Number(m.is_final_tiebreaker) !== 1)
+
     // Build set of already-played pairs
     const playedPairs = new Set<string>()
-    for (const m of allMatches) {
+    for (const m of regularMatches) {
       if (m.participant1_id && m.participant2_id) {
         playedPairs.add(pairKey(Number(m.participant1_id), Number(m.participant2_id)))
       }
@@ -128,7 +131,7 @@ export class SwissService {
 
     // Track who has already received a bye
     const byeRecipients = new Set<number>(
-      allMatches
+      regularMatches
         .filter(m => m.status === 'bye' && m.winner_id)
         .map(m => Number(m.winner_id))
     )
@@ -197,13 +200,18 @@ export class SwissService {
 
   static async isRoundComplete(tournamentId: number, round: number): Promise<boolean> {
     const matches = await TournamentMatchModel.getByRound(tournamentId, round)
-    return matches.every(m => m.status === 'completed' || m.status === 'bye')
+    // 優勝決定戦は集計外
+    return matches.filter(m => Number(m.is_final_tiebreaker) !== 1)
+      .every(m => m.status === 'completed' || m.status === 'bye')
   }
 
   static async getCurrentRound(tournamentId: number): Promise<number> {
     const matches = await TournamentMatchModel.getByTournament(tournamentId)
     if (matches.length === 0) return 0
-    return Math.max(...matches.map(m => m.round))
+    // 優勝決定戦の round は集計外（max round 計算に含めない）
+    const regular = matches.filter(m => Number(m.is_final_tiebreaker) !== 1)
+    if (regular.length === 0) return 0
+    return Math.max(...regular.map(m => m.round))
   }
 
   static async formatMatchContent(matchId: number, regulation: TournamentRegulation, round: number, totalRounds: number): Promise<MatchContent> {
@@ -262,7 +270,7 @@ export class SwissService {
     const standings = await this.getStandings(tournamentId)
     const currentRound = await this.getCurrentRound(tournamentId)
     const allMatches = await TournamentMatchModel.getByTournamentWithParticipants(tournamentId)
-    const currentRoundMatches = allMatches.filter(m => m.round === currentRound && m.status !== 'bye')
+    const currentRoundMatches = allMatches.filter(m => m.round === currentRound && m.status !== 'bye' && Number(m.is_final_tiebreaker) !== 1)
 
     const embed = new EmbedBuilder()
       .setColor(0xe67e22)

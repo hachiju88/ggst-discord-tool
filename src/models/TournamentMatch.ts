@@ -14,6 +14,7 @@ export interface TournamentMatch {
   p1_games_won: number
   p2_games_won: number
   is_draw: number
+  is_final_tiebreaker: number
   vc_channel_id: string | null
   status: 'pending' | 'in_progress' | 'completed' | 'bye'
   message_id: string | null
@@ -231,5 +232,41 @@ export class TournamentMatchModel {
       sql: `UPDATE tournament_matches SET ${col} = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       args: [id],
     })
+  }
+
+  // 大会全体の優勝決定戦マッチを作成（is_final_tiebreaker=1）
+  static async createFinalTiebreaker(data: {
+    tournament_id: number
+    participant1_id: number
+    participant2_id: number
+    match_code: string | null
+    handicap_participant_id: number | null
+    handicap_rounds: number
+  }): Promise<TournamentMatch> {
+    const db = getDatabase()
+    // 既存マッチの最大 round + 1 を採番（is_round_complete などの干渉を避ける）
+    const r = await db.execute({
+      sql: 'SELECT COALESCE(MAX(round), 0) as max_round FROM tournament_matches WHERE tournament_id = ?',
+      args: [data.tournament_id],
+    })
+    const maxRound = Number((r.rows[0] as any)?.max_round ?? 0)
+
+    const result = await db.execute({
+      sql: `INSERT INTO tournament_matches
+              (tournament_id, round, match_number, match_code, participant1_id, participant2_id,
+               winner_id, handicap_participant_id, handicap_rounds, vc_channel_id, status, is_final_tiebreaker)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 'pending', 1)`,
+      args: [
+        data.tournament_id,
+        maxRound + 1,
+        1,
+        data.match_code,
+        data.participant1_id,
+        data.participant2_id,
+        data.handicap_participant_id,
+        data.handicap_rounds,
+      ],
+    })
+    return (await this.getById(Number(result.lastInsertRowid)))!
   }
 }

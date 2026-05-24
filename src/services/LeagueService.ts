@@ -57,7 +57,7 @@ export class LeagueService {
   static async getStandings(tournamentId: number): Promise<StandingsEntry[]> {
     const participants = await TournamentParticipantModel.getByTournament(tournamentId)
     const matches = await TournamentMatchModel.getByTournament(tournamentId)
-    const completed = matches.filter(m => m.status === 'completed')
+    const completed = matches.filter(m => m.status === 'completed' && Number(m.is_final_tiebreaker) !== 1)
 
     const entries = participants.map(p => {
       const pid = Number(p.id)
@@ -156,7 +156,7 @@ export class LeagueService {
 
     embed.addFields({ name: '📊 順位表', value: standingsText || 'まだ試合結果がありません' })
 
-    const recentCompleted = matches.filter(m => m.status === 'completed').slice(-8)
+    const recentCompleted = matches.filter(m => m.status === 'completed' && Number(m.is_final_tiebreaker) !== 1).slice(-8)
     if (recentCompleted.length > 0) {
       const resultText = recentCompleted
         .map(m => {
@@ -181,6 +181,16 @@ export class LeagueService {
 
   static async checkAllComplete(tournamentId: number): Promise<boolean> {
     const matches = await TournamentMatchModel.getByTournament(tournamentId)
-    return matches.every(m => m.status === 'completed')
+    // 優勝決定戦は集計外（別途進行管理）
+    return matches.filter(m => Number(m.is_final_tiebreaker) !== 1).every(m => m.status === 'completed')
   }
+}
+
+// 順位表の1位同率エントリーを返す（wins+0.5*draws と gameWins が完全一致）
+export function findTopTiedEntries(standings: StandingsEntry[]): StandingsEntry[] {
+  if (standings.length === 0) return []
+  const top = standings[0]
+  const topPoints = top.wins + top.draws * 0.5
+  const topGames = top.gameWins
+  return standings.filter(s => (s.wins + s.draws * 0.5) === topPoints && s.gameWins === topGames)
 }

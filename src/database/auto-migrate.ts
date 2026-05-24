@@ -89,6 +89,15 @@ export async function autoMigrate() {
       console.log('✅ tournament_matches.is_draw already exists')
     }
 
+    // tournament_matches.is_final_tiebreaker カラム確認（大会全体の優勝決定戦）
+    const hasIsFinalTb = matchInfo.rows.some((row: any) => row.name === 'is_final_tiebreaker')
+    if (!hasIsFinalTb) {
+      await db.execute({ sql: 'ALTER TABLE tournament_matches ADD COLUMN is_final_tiebreaker INTEGER NOT NULL DEFAULT 0' })
+      console.log('✅ is_final_tiebreaker column added to tournament_matches')
+    } else {
+      console.log('✅ tournament_matches.is_final_tiebreaker already exists')
+    }
+
     // tournament_participants.character カラムの存在確認
     const participantInfo = await db.execute({
       sql: 'PRAGMA table_info(tournament_participants)',
