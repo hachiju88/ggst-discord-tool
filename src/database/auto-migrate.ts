@@ -166,6 +166,8 @@ export async function autoMigrate() {
           console.error('   手動で重複を解消してから再起動してください。')
         } else {
           console.log('Migrating tournament_team_members UNIQUE constraint...')
+          // 前回の途中失敗でテーブルが残っている場合に備えて先に削除
+          await db.execute({ sql: 'DROP TABLE IF EXISTS tournament_team_members_new' })
           await db.execute({ sql: `CREATE TABLE tournament_team_members_new (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             team_id INTEGER NOT NULL REFERENCES tournament_teams(id) ON DELETE CASCADE,
