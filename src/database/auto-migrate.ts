@@ -168,6 +168,7 @@ export async function autoMigrate() {
           console.log('Migrating tournament_team_members UNIQUE constraint...')
           // 前回の途中失敗でテーブルが残っている場合に備えて先に削除
           await db.execute({ sql: 'DROP TABLE IF EXISTS tournament_team_members_new' })
+          await db.execute({ sql: 'DROP TABLE IF EXISTS tournament_team_members_old' })
           await db.execute({ sql: `CREATE TABLE tournament_team_members_new (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             team_id INTEGER NOT NULL REFERENCES tournament_teams(id) ON DELETE CASCADE,
@@ -181,8 +182,11 @@ export async function autoMigrate() {
             UNIQUE(team_id, position)
           )` })
           await db.execute({ sql: 'INSERT INTO tournament_team_members_new SELECT * FROM tournament_team_members' })
-          await db.execute({ sql: 'DROP TABLE tournament_team_members' })
+          // libsql/Turso は FK 制約がデフォルト ON のため、直接 DROP TABLE はできない。
+          // FK 参照はテーブル名で追うので、退避先テーブルを DROP しても制約に触れない。
+          await db.execute({ sql: 'ALTER TABLE tournament_team_members RENAME TO tournament_team_members_old' })
           await db.execute({ sql: 'ALTER TABLE tournament_team_members_new RENAME TO tournament_team_members' })
+          await db.execute({ sql: 'DROP TABLE tournament_team_members_old' })
           await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_team_members_team ON tournament_team_members(team_id)' })
           console.log('✅ tournament_team_members UNIQUE 制約を (team_id, discord_id) → (team_id, position) に変更')
         }
