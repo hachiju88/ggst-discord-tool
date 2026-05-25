@@ -127,6 +127,45 @@ export async function autoMigrate() {
       console.log('✅ tournament_teams table created')
     }
 
+    // ── 回復処理 ──────────────────────────────────────────────────────────────
+    // libsql/Turso は RENAME TABLE 時に FK 参照を自動更新する。
+    // 前回のマイグレーションで RENAME が成功した後 DROP _old が FK エラーで失敗すると、
+    // tournament_team_battles の FK が tournament_team_members_old を向いたまま残る。
+    // 子テーブル (tournament_team_battles) を再構築して FK を正しい名前に戻し、
+    // 参照されなくなった _old を削除する。
+    if (tableNames.includes('tournament_team_members_old') && tableNames.includes('tournament_team_battles')) {
+      console.log('前回のマイグレーション失敗から回復中 (tournament_team_members_old が残存)...')
+      const btColsRec = await db.execute({ sql: 'PRAGMA table_info(tournament_team_battles)' })
+      const hasTbRec = btColsRec.rows.some((r: any) => r.name === 'is_tiebreaker')
+      await db.execute({ sql: 'DROP TABLE IF EXISTS tournament_team_battles_new' })
+      await db.execute({ sql: `CREATE TABLE tournament_team_battles_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        match_id INTEGER NOT NULL REFERENCES tournament_matches(id) ON DELETE CASCADE,
+        battle_order INTEGER NOT NULL,
+        match_code TEXT,
+        team1_member_id INTEGER REFERENCES tournament_team_members(id),
+        team2_member_id INTEGER REFERENCES tournament_team_members(id),
+        winner_member_id INTEGER REFERENCES tournament_team_members(id),
+        winner_team_id INTEGER REFERENCES tournament_teams(id),
+        team1_games_won INTEGER NOT NULL DEFAULT 0,
+        team2_games_won INTEGER NOT NULL DEFAULT 0,
+        handicap_member_id INTEGER REFERENCES tournament_team_members(id),
+        handicap_rounds INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        message_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP${hasTbRec ? ',\n        is_tiebreaker INTEGER NOT NULL DEFAULT 0' : ''}
+      )` })
+      await db.execute({ sql: 'INSERT INTO tournament_team_battles_new SELECT * FROM tournament_team_battles' })
+      // 子テーブル (FK を持つ側) の DROP は FK 有効でも常に可能
+      await db.execute({ sql: 'DROP TABLE tournament_team_battles' })
+      await db.execute({ sql: 'ALTER TABLE tournament_team_battles_new RENAME TO tournament_team_battles' })
+      await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_team_battles_match ON tournament_team_battles(match_id)' })
+      // tournament_team_battles が tournament_team_members を参照するようになったので _old は参照なし
+      await db.execute({ sql: 'DROP TABLE tournament_team_members_old' })
+      console.log('✅ 回復完了: tournament_team_members_old を削除し FK 参照を修正しました')
+    }
+
     if (!tableNames.includes('tournament_team_members')) {
       await db.execute({ sql: `CREATE TABLE IF NOT EXISTS tournament_team_members (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -166,9 +205,9 @@ export async function autoMigrate() {
           console.error('   手動で重複を解消してから再起動してください。')
         } else {
           console.log('Migrating tournament_team_members UNIQUE constraint...')
-          // 前回の途中失敗でテーブルが残っている場合に備えて先に削除
           await db.execute({ sql: 'DROP TABLE IF EXISTS tournament_team_members_new' })
-          await db.execute({ sql: 'DROP TABLE IF EXISTS tournament_team_members_old' })
+          await db.execute({ sql: 'DROP TABLE IF EXISTS tournament_team_battles_new' })
+          // Step1: 新スキーマのメンバーテーブルを作成してデータコピー
           await db.execute({ sql: `CREATE TABLE tournament_team_members_new (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             team_id INTEGER NOT NULL REFERENCES tournament_teams(id) ON DELETE CASCADE,
@@ -182,11 +221,40 @@ export async function autoMigrate() {
             UNIQUE(team_id, position)
           )` })
           await db.execute({ sql: 'INSERT INTO tournament_team_members_new SELECT * FROM tournament_team_members' })
-          // libsql/Turso は FK 制約がデフォルト ON のため、直接 DROP TABLE はできない。
-          // FK 参照はテーブル名で追うので、退避先テーブルを DROP しても制約に触れない。
-          await db.execute({ sql: 'ALTER TABLE tournament_team_members RENAME TO tournament_team_members_old' })
+          // Step2: tournament_team_battles が存在する場合、FK を tournament_team_members_new に向けて再構築
+          // そうすることで DROP tournament_team_members 時に FK 参照がなくなる
+          if (tableNames.includes('tournament_team_battles')) {
+            const btCols = await db.execute({ sql: 'PRAGMA table_info(tournament_team_battles)' })
+            const hasTb = btCols.rows.some((r: any) => r.name === 'is_tiebreaker')
+            await db.execute({ sql: `CREATE TABLE tournament_team_battles_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              match_id INTEGER NOT NULL REFERENCES tournament_matches(id) ON DELETE CASCADE,
+              battle_order INTEGER NOT NULL,
+              match_code TEXT,
+              team1_member_id INTEGER REFERENCES tournament_team_members_new(id),
+              team2_member_id INTEGER REFERENCES tournament_team_members_new(id),
+              winner_member_id INTEGER REFERENCES tournament_team_members_new(id),
+              winner_team_id INTEGER REFERENCES tournament_teams(id),
+              team1_games_won INTEGER NOT NULL DEFAULT 0,
+              team2_games_won INTEGER NOT NULL DEFAULT 0,
+              handicap_member_id INTEGER REFERENCES tournament_team_members_new(id),
+              handicap_rounds INTEGER NOT NULL DEFAULT 0,
+              status TEXT NOT NULL DEFAULT 'pending',
+              message_id TEXT,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              updated_at DATETIME DEFAULT CURRENT_TIMESTAMP${hasTb ? ',\n              is_tiebreaker INTEGER NOT NULL DEFAULT 0' : ''}
+            )` })
+            await db.execute({ sql: 'INSERT INTO tournament_team_battles_new SELECT * FROM tournament_team_battles' })
+            await db.execute({ sql: 'DROP TABLE tournament_team_battles' })  // 子テーブル DROP は常に可
+          }
+          // Step3: 旧メンバーテーブルを削除（もう FK 参照がない）
+          await db.execute({ sql: 'DROP TABLE tournament_team_members' })
+          // Step4: リネーム（libsql が battles_new の FK を tournament_team_members に更新する）
           await db.execute({ sql: 'ALTER TABLE tournament_team_members_new RENAME TO tournament_team_members' })
-          await db.execute({ sql: 'DROP TABLE tournament_team_members_old' })
+          if (tableNames.includes('tournament_team_battles')) {
+            await db.execute({ sql: 'ALTER TABLE tournament_team_battles_new RENAME TO tournament_team_battles' })
+            await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_team_battles_match ON tournament_team_battles(match_id)' })
+          }
           await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_team_members_team ON tournament_team_members(team_id)' })
           console.log('✅ tournament_team_members UNIQUE 制約を (team_id, discord_id) → (team_id, position) に変更')
         }
