@@ -1813,8 +1813,7 @@ async function handleBattleConfirmButton(
   const isText = !!(channel && channel.isTextBased() && !channel.isDMBased())
 
   // 大会全体の優勝決定戦マッチは形式に関係なく単一バトルで決着
-  const matchRow = await TournamentMatchModel.getById(battle.match_id)
-  const isFinalTb = matchRow && Number(matchRow.is_final_tiebreaker) === 1
+  const isFinalTb = Number(match.is_final_tiebreaker) === 1
   const isSurvival = regulation.teamBattleFormat === 'survival' && !isFinalTb
   let matchWinnerTeamId: number | null = null
 
@@ -1873,39 +1872,37 @@ async function finalizeTeamMatch(
   const winnerTeam = matchWinnerTeamId ? await TournamentTeamModel.getById(matchWinnerTeamId) : null
   const summary = await TeamBattleService.formatMatchSummary(matchId, team1Id, team2Id)
   const { t1Games, t2Games } = await TeamBattleService.computeTotalGames(matchId, team1Id)
+  // 大会がすでに終了済みなら、再 finalize（バトル修正経由）は最終アナウンスをスキップ
+  const wasTournamentCompleted = tournament.status === 'completed'
 
   if (match.message_id && isText) {
     try {
       const matchMsg = await channel.messages.fetch(match.message_id)
       const headline = isDraw ? '🤝 **引き分け**' : `🏆 **${winnerTeam?.name}** の勝利！`
-      await matchMsg.edit({ content: matchMsg.content + `\n\n${headline}${summary}`, components: [] })
+      // 既存の結果行（🏆/🤝）を除去してから新しい結果を追記（修正による再 finalize 対策）
+      const baseContent = matchMsg.content.split(/\n\n(?=🏆|🤝)/)[0]
+      await matchMsg.edit({ content: `${baseContent}\n\n${headline}${summary}`, components: [] })
     } catch { /* ベストエフォート */ }
   }
 
   // ─── 大会全体の優勝決定戦が完了した場合 ─────────────────────────
-  if (Number(match.is_final_tiebreaker) === 1) {
-    if (isDraw || !matchWinnerTeamId) {
-      // 優勝決定戦自体が引き分け → さらにもう一度プロンプト
-      if (isText && channel) {
-        await channel.send('⚖️ 優勝決定戦も引き分けです。もう一度実施してください。')
-        try {
-          await postFinalTiebreakerPrompt(channel, tournament.id, tournament.format as 'league' | 'swiss')
-        } catch { /* best effort */ }
-      }
-      return
-    }
+  // 注: 最終戦バトルは1試合で必ず勝者が決まる（handleBattleScore がそれを保証）ため、
+  // isDraw の分岐はここでは不要
+  if (Number(match.is_final_tiebreaker) === 1 && matchWinnerTeamId) {
     // 勝者を tournament_matches.winner_id にも記録
     const winnerProxyDiscordId = proxyDiscordId(matchWinnerTeamId)
     const winnerProxy = await TournamentParticipantModel.getByDiscordId(match.tournament_id, winnerProxyDiscordId)
     if (winnerProxy) {
       await TournamentMatchModel.setScore(matchId, winnerProxy.id, t1Games, t2Games)
     }
-    await TournamentModel.setStatus(tournament.id, 'completed')
-    if (isText && channel) {
-      await channel.send(`🏆 **${tournament.name}** 終了！\n優勝決定戦の結果、優勝チーム: **${winnerTeam?.name}** ！おめでとうございます！`)
-      try {
-        await channel.send(await standingsData(tournament.id, tournament.format))
-      } catch (err) { console.error('[tnm] Failed to post final standings (final-tb):', err) }
+    if (!wasTournamentCompleted) {
+      await TournamentModel.setStatus(tournament.id, 'completed')
+      if (isText && channel) {
+        await channel.send(`🏆 **${tournament.name}** 終了！\n優勝決定戦の結果、優勝チーム: **${winnerTeam?.name}** ！おめでとうございます！`)
+        try {
+          await channel.send(await standingsData(tournament.id, tournament.format))
+        } catch (err) { console.error('[tnm] Failed to post final standings (final-tb):', err) }
+      }
     }
     return
   }
@@ -1924,12 +1921,12 @@ async function finalizeTeamMatch(
     const winnerProxy = await TournamentParticipantModel.getByDiscordId(match.tournament_id, winnerProxyDiscordId)
     if (!winnerProxy) return
     const result = await BracketService.advanceWinner(matchId, winnerProxy.id, regulation)
-    if (result.isChampion && isText && channel) {
+    if (result.isChampion && isText && channel && !wasTournamentCompleted) {
       await channel.send(`🏆 **${tournament.name}** 終了！\n優勝: **${winnerTeam?.name}** ！おめでとうございます！`)
       try {
         await channel.send(await standingsData(tournament.id, tournament.format))
       } catch (err) { console.error('[tnm] Failed to post final bracket (team):', err) }
-    } else if (result.nextMatchId && result.nextMatchReady && isText && channel) {
+    } else if (!result.isChampion && result.nextMatchId && result.nextMatchReady && isText && channel) {
       try {
         const { content: nc, components: rc } = await TeamBattleService.formatTeamMatchContent(result.nextMatchId, regulation)
         const msg = await channel.send({ content: nc, components: rc })
@@ -1946,9 +1943,10 @@ async function finalizeTeamMatch(
       await TournamentMatchModel.setScore(matchId, winnerProxy.id, t1Games, t2Games)
     }
     const allDone = await LeagueService.checkAllComplete(tournament.id)
-    if (allDone) {
-      // 1位同率を検知して優勝決定戦プロンプトを出す
-      const tied = await findTopTiedTeams(tournament.id, 'league')
+    if (allDone && !wasTournamentCompleted) {
+      // 1位同率を検知して優勝決定戦プロンプトを出す（ただし既存最終戦があればスキップ）
+      const hasFinalTb = await TournamentMatchModel.hasExistingFinalTiebreaker(tournament.id)
+      const tied = hasFinalTb ? [] : await findTopTiedTeams(tournament.id, 'league')
       if (tied.length >= 2) {
         if (isText && channel) {
           try {
@@ -1979,9 +1977,10 @@ async function finalizeTeamMatch(
     const roundDone = await SwissService.isRoundComplete(tournament.id, currentRound)
     if (!roundDone) return
     const totalRounds = regulation.totalRounds ?? 4
-    if (currentRound >= totalRounds) {
-      // 1位同率を検知して優勝決定戦プロンプトを出す
-      const tied = await findTopTiedTeams(tournament.id, 'swiss')
+    if (currentRound >= totalRounds && !wasTournamentCompleted) {
+      // 1位同率を検知して優勝決定戦プロンプトを出す（ただし既存最終戦があればスキップ）
+      const hasFinalTb = await TournamentMatchModel.hasExistingFinalTiebreaker(tournament.id)
+      const tied = hasFinalTb ? [] : await findTopTiedTeams(tournament.id, 'swiss')
       if (tied.length >= 2) {
         if (isText && channel) {
           try {
@@ -1996,9 +1995,13 @@ async function finalizeTeamMatch(
         const sd = await standingsData(tournament.id, tournament.format)
         await channel.send({ content: `🏆 **${tournament.name}** 全ラウンド終了！${champLine}`, ...sd })
       }
-    } else {
+    } else if (currentRound < totalRounds) {
       const nextRound = currentRound + 1
       const allMatches = await TournamentMatchModel.getByTournament(tournament.id)
+      // 次ラウンドがすでに生成済みなら重複生成しない（マッチ修正後の再 finalize 対策）
+      if (allMatches.some(m => m.round === nextRound && Number(m.is_final_tiebreaker) !== 1)) {
+        return
+      }
       const proxyParticipants = await TournamentParticipantModel.getByTournament(tournament.id)
         .then(ps => ps.filter(p => isTeamProxy(p.discord_id)))
       const nextMatchIds = await SwissService.generateRound(tournament.id, nextRound, proxyParticipants, regulation, allMatches)
@@ -2243,11 +2246,42 @@ async function handleTiebreakerStartButton(interaction: ButtonInteraction, match
     await interaction.editReply({ content: 'この試合はすでに終了しています。', components: [] })
     return true
   }
+
+  // 重複作成防止（同時クリック対策）
+  if (await TeamBattleService.hasExistingTiebreaker(matchId)) {
+    await interaction.editReply({ content: 'この試合の最終戦はすでに作成されています。', components: [] })
+    return true
+  }
+
+  // 出場メンバーが対応チーム所属かを検証
+  const matchData = await TournamentMatchModel.getWithParticipants(matchId)
+  const team1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
+  const team2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
+  if (!team1Id || !team2Id) {
+    await interaction.editReply({ content: 'チーム情報が見つかりません。', components: [] })
+    return true
+  }
+  const [m1, m2] = await Promise.all([
+    TournamentTeamMemberModel.getById(m1Id),
+    TournamentTeamMemberModel.getById(m2Id),
+  ])
+  if (!m1 || !m2 || Number(m1.team_id) !== team1Id || Number(m2.team_id) !== team2Id) {
+    await interaction.editReply({ content: '選択された出場者がチームに所属していません。最初から選び直してください。', components: [] })
+    return true
+  }
+
   const tournament = await TournamentModel.getById(match.tournament_id)
   if (!tournament) return true
   const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
 
-  const battleId = await TeamBattleService.generateTiebreakerBattle(matchId, m1Id, m2Id, regulation)
+  let battleId: number
+  try {
+    battleId = await TeamBattleService.generateTiebreakerBattle(matchId, m1Id, m2Id, regulation)
+  } catch (err) {
+    console.error('[tnm] generateTiebreakerBattle failed:', err)
+    await interaction.editReply({ content: '最終戦の作成に失敗しました。出場者が存在するか確認してください。', components: [] })
+    return true
+  }
 
   await interaction.editReply({ content: '⚔️ 最終戦を開始します。', components: [] })
 
@@ -2552,43 +2586,68 @@ async function handleFinalTbStartButton(
     await interaction.editReply({ content: 'すでに終了済みです。', components: [] })
     return true
   }
+
+  // 重複作成防止（同時クリック / 連続プロンプト対策）
+  if (await TournamentMatchModel.hasExistingFinalTiebreaker(tournamentId)) {
+    await interaction.editReply({ content: 'この大会の優勝決定戦はすでに作成されています。', components: [] })
+    return true
+  }
+
   const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
 
-  // proxy 参加者を取得
-  const [p1, p2] = await Promise.all([
+  // proxy 参加者とメンバーを取得して、メンバーが指定チームに所属しているか検証
+  const [p1, p2, m1, m2] = await Promise.all([
     TournamentParticipantModel.getByDiscordId(tournamentId, proxyDiscordId(t1Id)),
     TournamentParticipantModel.getByDiscordId(tournamentId, proxyDiscordId(t2Id)),
+    TournamentTeamMemberModel.getById(m1Id),
+    TournamentTeamMemberModel.getById(m2Id),
   ])
   if (!p1 || !p2) {
     await interaction.editReply({ content: 'チーム情報が見つかりません。', components: [] })
     return true
   }
+  if (!m1 || !m2 || Number(m1.team_id) !== t1Id || Number(m2.team_id) !== t2Id) {
+    await interaction.editReply({ content: '選択された出場者がチームに所属していません。最初から選び直してください。', components: [] })
+    return true
+  }
 
-  // ハンデは team の代表メンバーで計算
-  const [m1, m2] = await Promise.all([
-    TournamentTeamMemberModel.getById(m1Id),
-    TournamentTeamMemberModel.getById(m2Id),
-  ])
   const handicap = BracketService.calcHandicap(
-    { rank: m1?.rank } as any,
-    { rank: m2?.rank } as any,
+    { rank: m1.rank } as any,
+    { rank: m2.rank } as any,
     regulation.handicapRules
   )
 
-  // 優勝決定戦マッチを作成
-  const newMatch = await TournamentMatchModel.createFinalTiebreaker({
-    tournament_id: tournamentId,
-    participant1_id: p1.id,
-    participant2_id: p2.id,
-    match_code: null,
-    handicap_participant_id: handicap.handicapParticipantId
-      ? (handicap.handicapParticipantId === (m1 as any)?.id ? p1.id : p2.id)
-      : null,
-    handicap_rounds: handicap.rounds,
-  })
+  // マッチ作成と battle 作成を try/catch で囲み、battle 失敗時はマッチを残さないため
+  // 順序を逆にできないので、battle 作成失敗時はマッチを削除する
+  let newMatch
+  try {
+    newMatch = await TournamentMatchModel.createFinalTiebreaker({
+      tournament_id: tournamentId,
+      participant1_id: p1.id,
+      participant2_id: p2.id,
+      match_code: null,
+      handicap_participant_id: handicap.handicapParticipantId
+        ? (handicap.handicapParticipantId === (m1 as any).id ? p1.id : p2.id)
+        : null,
+      handicap_rounds: handicap.rounds,
+    })
+  } catch (err) {
+    console.error('[tnm] createFinalTiebreaker failed:', err)
+    await interaction.editReply({ content: '優勝決定戦マッチの作成に失敗しました。', components: [] })
+    return true
+  }
 
-  // tiebreaker battle を作成して post
-  const battleId = await TeamBattleService.generateTiebreakerBattle(newMatch.id, m1Id, m2Id, regulation)
+  let battleId: number
+  try {
+    battleId = await TeamBattleService.generateTiebreakerBattle(newMatch.id, m1Id, m2Id, regulation)
+  } catch (err) {
+    console.error('[tnm] generateTiebreakerBattle failed:', err)
+    // 半作成状態を防ぐためマッチを削除
+    try { await TournamentMatchModel.resetMatch(newMatch.id) } catch {}
+    await interaction.editReply({ content: '優勝決定戦バトルの作成に失敗しました。', components: [] })
+    return true
+  }
+
   await interaction.editReply({ content: '⚔️ 優勝決定戦を開始します。', components: [] })
 
   const channel = interaction.channel
@@ -2622,6 +2681,13 @@ async function handleBattleCorrectButton(interaction: ButtonInteraction, battleI
   if (!match) return true
   const tournament = await TournamentModel.getById(match.tournament_id)
   if (!tournament) return true
+  // バトル修正時、親マッチがすでに確定済みなら状態をリセットして再集計可能にする
+  // （未対応だと is_draw=1 や winner_id が残り続け、再 finalize 時に setScore/setDraw が no-op になる）
+  // single_elim では下流マッチへの進出をすでに行っているため、安全に巻き戻せない場合がある。
+  // ここでは league / swiss のみリセットし、single_elim は既存挙動を維持。
+  if (match.status === 'completed' && tournament.format !== 'single_elim') {
+    await TournamentMatchModel.resetMatch(match.id)
+  }
   const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
   const { content, components } = await TeamBattleService.formatBattleContent(battleId, regulation)
   await interaction.editReply({ content, components })

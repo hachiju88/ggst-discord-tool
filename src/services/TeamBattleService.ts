@@ -294,8 +294,9 @@ export class TeamBattleService {
 
     let t1Wins = 0, t2Wins = 0
     for (const b of initial) {
-      if (b.winner_team_id === team1Id) t1Wins++
-      else if (b.winner_team_id === team2Id) t2Wins++
+      const wId = b.winner_team_id != null ? Number(b.winner_team_id) : null
+      if (wId === team1Id) t1Wins++
+      else if (wId === team2Id) t2Wins++
     }
     if (t1Wins > t2Wins) return team1Id
     if (t2Wins > t1Wins) return team2Id
@@ -303,13 +304,14 @@ export class TeamBattleService {
     // 同点: ゲーム取得数で比較
     let t1Games = 0, t2Games = 0
     for (const b of initial) {
-      const isT1Winner = b.winner_team_id === team1Id
+      const wId = b.winner_team_id != null ? Number(b.winner_team_id) : null
+      const isT1Winner = wId === team1Id
       if (isT1Winner) {
-        t1Games += b.team1_games_won
-        t2Games += b.team2_games_won
+        t1Games += Number(b.team1_games_won)
+        t2Games += Number(b.team2_games_won)
       } else {
-        t1Games += b.team2_games_won
-        t2Games += b.team1_games_won
+        t1Games += Number(b.team2_games_won)
+        t2Games += Number(b.team1_games_won)
       }
     }
     if (t1Games > t2Games) return team1Id
@@ -382,15 +384,22 @@ export class TeamBattleService {
     for (const b of battles) {
       if (b.status !== 'completed') continue
       const m1 = b.team1_member_id ? await TournamentTeamMemberModel.getById(b.team1_member_id) : null
-      if (m1?.team_id === team1Id) {
-        t1Games += b.team1_games_won
-        t2Games += b.team2_games_won
+      const m1TeamId = m1?.team_id != null ? Number(m1.team_id) : null
+      if (m1TeamId === team1Id) {
+        t1Games += Number(b.team1_games_won)
+        t2Games += Number(b.team2_games_won)
       } else {
-        t1Games += b.team2_games_won
-        t2Games += b.team1_games_won
+        t1Games += Number(b.team2_games_won)
+        t2Games += Number(b.team1_games_won)
       }
     }
     return { t1Games, t2Games }
+  }
+
+  // 既存の最終戦（tiebreaker）バトルがあるかチェック
+  static async hasExistingTiebreaker(matchId: number): Promise<boolean> {
+    const battles = await TournamentTeamBattleModel.getByMatch(matchId)
+    return battles.some(b => Number(b.is_tiebreaker) === 1)
   }
 
   // survival: 全滅したチームの対面が勝者

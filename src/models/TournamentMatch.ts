@@ -234,6 +234,16 @@ export class TournamentMatchModel {
     })
   }
 
+  // 既存の優勝決定戦マッチがあるかチェック（is_final_tiebreaker=1, status != 'completed' or 完了済み問わず）
+  static async hasExistingFinalTiebreaker(tournamentId: number): Promise<boolean> {
+    const db = getDatabase()
+    const r = await db.execute({
+      sql: 'SELECT 1 FROM tournament_matches WHERE tournament_id = ? AND is_final_tiebreaker = 1 LIMIT 1',
+      args: [tournamentId],
+    })
+    return r.rows.length > 0
+  }
+
   // 大会全体の優勝決定戦マッチを作成（is_final_tiebreaker=1）
   static async createFinalTiebreaker(data: {
     tournament_id: number
