@@ -1716,36 +1716,47 @@ async function handleBattleStart(interaction: ButtonInteraction, matchId: number
 
   await interaction.deferUpdate()
 
-  const tournament = await TournamentModel.getById(match.tournament_id)
-  if (!tournament) return true
-  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
-
-  const matchData = await TournamentMatchModel.getWithParticipants(matchId)
-  const p1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
-  const p2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
-  if (!p1Id || !p2Id) { return true }
-
-  let battleIds: number[]
-  if (regulation.teamBattleFormat === 'survival') {
-    battleIds = [await TeamBattleService.generateFirstSurvivalBattle(matchId, p1Id, p2Id, regulation)]
-  } else {
-    battleIds = await TeamBattleService.generateSequentialBattles(matchId, p1Id, p2Id, regulation)
-  }
-
-  // 「対戦開始」ボタンを削除
-  await interaction.editReply({ content: interaction.message.content, components: [] })
-
-  const channel = interaction.channel
-  if (!channel || !channel.isTextBased() || channel.isDMBased()) return true
-
-  for (const bid of battleIds) {
-    try {
-      const { content, components } = await TeamBattleService.formatBattleContent(bid, regulation)
-      const msg = await channel.send({ content, components })
-      await TournamentTeamBattleModel.setMessageId(bid, msg.id)
-    } catch (err) {
-      console.error(`[tnm] Failed to post battle ${bid}:`, err)
+  try {
+    const tournament = await TournamentModel.getById(match.tournament_id)
+    if (!tournament) {
+      await interaction.editReply({ content: '❌ 大会情報が見つかりません。' })
+      return true
     }
+    const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+
+    const matchData = await TournamentMatchModel.getWithParticipants(matchId)
+    const p1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
+    const p2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
+    if (!p1Id || !p2Id) {
+      await interaction.editReply({ content: '❌ チーム情報が見つかりません。' })
+      return true
+    }
+
+    let battleIds: number[]
+    if (regulation.teamBattleFormat === 'survival') {
+      battleIds = [await TeamBattleService.generateFirstSurvivalBattle(matchId, p1Id, p2Id, regulation)]
+    } else {
+      battleIds = await TeamBattleService.generateSequentialBattles(matchId, p1Id, p2Id, regulation)
+    }
+
+    // 「対戦開始」ボタンを削除
+    await interaction.editReply({ content: interaction.message.content, components: [] })
+
+    const channel = interaction.channel
+    if (!channel || !channel.isTextBased() || channel.isDMBased()) return true
+
+    for (const bid of battleIds) {
+      try {
+        const { content, components } = await TeamBattleService.formatBattleContent(bid, regulation)
+        const msg = await channel.send({ content, components })
+        await TournamentTeamBattleModel.setMessageId(bid, msg.id)
+      } catch (err) {
+        console.error(`[tnm] Failed to post battle ${bid}:`, err)
+      }
+    }
+  } catch (err) {
+    console.error('[handleBattleStart] Error:', err)
+    try { await interaction.editReply({ content: '❌ 対戦開始に失敗しました。管理者にログを確認してもらってください。' }) } catch {}
   }
   return true
 }
