@@ -277,6 +277,8 @@ export async function autoMigrate() {
       const puddleCol = tpInfo.rows.find((r: any) => r.name === 'puddle_player_id') as any
       if (puddleCol && typeof puddleCol.type === 'string' && puddleCol.type.toUpperCase() === 'INTEGER') {
         console.log('Migrating tracked_players.puddle_player_id INTEGER → TEXT...')
+        // 前回の途中失敗でテーブルが残っている場合に備えて先に削除
+        await db.execute({ sql: 'DROP TABLE IF EXISTS tracked_players_new' })
         await db.execute({ sql: `CREATE TABLE tracked_players_new (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           guild_id TEXT NOT NULL,
@@ -303,6 +305,8 @@ export async function autoMigrate() {
       const puddleCol = roInfo.rows.find((r: any) => r.name === 'puddle_player_id') as any
       if (puddleCol && typeof puddleCol.type === 'string' && puddleCol.type.toUpperCase() === 'INTEGER') {
         console.log('Migrating rating_observations.puddle_player_id INTEGER → TEXT...')
+        // 前回の途中失敗でテーブルが残っている場合に備えて先に削除
+        await db.execute({ sql: 'DROP TABLE IF EXISTS rating_observations_new' })
         await db.execute({ sql: `CREATE TABLE rating_observations_new (
           puddle_player_id TEXT NOT NULL,
           char_short TEXT NOT NULL,
