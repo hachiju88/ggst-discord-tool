@@ -9,6 +9,7 @@ export interface StandingsEntry {
   participant: TournamentParticipant
   wins: number
   losses: number
+  draws: number
   gameWins: number
   matchesPlayed: number
 }
@@ -56,24 +57,26 @@ export class LeagueService {
   static async getStandings(tournamentId: number): Promise<StandingsEntry[]> {
     const participants = await TournamentParticipantModel.getByTournament(tournamentId)
     const matches = await TournamentMatchModel.getByTournament(tournamentId)
-    const completed = matches.filter(m => m.status === 'completed')
+    const completed = matches.filter(m => m.status === 'completed' && Number(m.is_final_tiebreaker) !== 1)
 
     const entries = participants.map(p => {
       const pid = Number(p.id)
       const myCompleted = completed.filter(
         m => Number(m.participant1_id) === pid || Number(m.participant2_id) === pid
       )
-      const wins = myCompleted.filter(m => Number(m.winner_id) === pid).length
-      const losses = myCompleted.length - wins
+      const draws = myCompleted.filter(m => Number(m.is_draw) === 1).length
+      const wins = myCompleted.filter(m => Number(m.is_draw) !== 1 && Number(m.winner_id) === pid).length
+      const losses = myCompleted.length - wins - draws
       const gameWins = myCompleted.reduce((sum, m) => {
         if (Number(m.participant1_id) === pid) return sum + Number(m.p1_games_won)
         return sum + Number(m.p2_games_won)
       }, 0)
 
-      return { participant: p, wins, losses, gameWins, matchesPlayed: myCompleted.length }
+      return { participant: p, wins, losses, draws, gameWins, matchesPlayed: myCompleted.length }
     })
 
-    entries.sort((a, b) => b.wins - a.wins || b.gameWins - a.gameWins)
+    // 引き分けは 0.5 勝として並び替え（同じ勝点なら G勝で比較）
+    entries.sort((a, b) => (b.wins + b.draws * 0.5) - (a.wins + a.draws * 0.5) || b.gameWins - a.gameWins)
     return entries
   }
 
@@ -146,19 +149,23 @@ export class LeagueService {
         const medal = medals[i] ?? `${i + 1}位`
         const rank = s.participant.rank ? ` [${s.participant.rank}]` : ''
         const char = s.participant.character ? ` (${s.participant.character})` : ''
-        return `${medal} <@${s.participant.discord_id}>${rank}${char} — **${s.wins}勝${s.losses}敗** (${s.gameWins}G)`
+        const drawPart = s.draws > 0 ? `${s.draws}分` : ''
+        return `${medal} <@${s.participant.discord_id}>${rank}${char} — **${s.wins}勝${drawPart}${s.losses}敗** (${s.gameWins}G)`
       })
       .join('\n')
 
     embed.addFields({ name: '📊 順位表', value: standingsText || 'まだ試合結果がありません' })
 
-    const recentCompleted = matches.filter(m => m.status === 'completed').slice(-8)
+    const recentCompleted = matches.filter(m => m.status === 'completed' && Number(m.is_final_tiebreaker) !== 1).slice(-8)
     if (recentCompleted.length > 0) {
       const resultText = recentCompleted
         .map(m => {
           const p1 = m.p1_name ?? '?'
           const p2 = m.p2_name ?? '?'
           const score = `${m.p1_games_won}-${m.p2_games_won}`
+          if (Number(m.is_draw) === 1) {
+            return `\`#${m.match_code}\` ${p1} ${score} ${p2} 🤝 引き分け`
+          }
           return `\`#${m.match_code}\` ${p1} ${score} ${p2} ✅ ${m.winner_name}`
         })
         .join('\n')
@@ -174,6 +181,16 @@ export class LeagueService {
 
   static async checkAllComplete(tournamentId: number): Promise<boolean> {
     const matches = await TournamentMatchModel.getByTournament(tournamentId)
-    return matches.every(m => m.status === 'completed')
+    // 優勝決定戦は集計外（別途進行管理）
+    return matches.filter(m => Number(m.is_final_tiebreaker) !== 1).every(m => m.status === 'completed')
   }
+}
+
+// 順位表の1位同率エントリーを返す（wins+0.5*draws と gameWins が完全一致）
+export function findTopTiedEntries(standings: StandingsEntry[]): StandingsEntry[] {
+  if (standings.length === 0) return []
+  const top = standings[0]
+  const topPoints = top.wins + top.draws * 0.5
+  const topGames = top.gameWins
+  return standings.filter(s => (s.wins + s.draws * 0.5) === topPoints && s.gameWins === topGames)
 }

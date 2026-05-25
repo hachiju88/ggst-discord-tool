@@ -80,6 +80,24 @@ export async function autoMigrate() {
       console.log('✅ tournament_matches.p1/p2_games_won already exists')
     }
 
+    // tournament_matches.is_draw カラム確認（団体戦の引き分け対応）
+    const hasIsDraw = matchInfo.rows.some((row: any) => row.name === 'is_draw')
+    if (!hasIsDraw) {
+      await db.execute({ sql: 'ALTER TABLE tournament_matches ADD COLUMN is_draw INTEGER NOT NULL DEFAULT 0' })
+      console.log('✅ is_draw column added to tournament_matches')
+    } else {
+      console.log('✅ tournament_matches.is_draw already exists')
+    }
+
+    // tournament_matches.is_final_tiebreaker カラム確認（大会全体の優勝決定戦）
+    const hasIsFinalTb = matchInfo.rows.some((row: any) => row.name === 'is_final_tiebreaker')
+    if (!hasIsFinalTb) {
+      await db.execute({ sql: 'ALTER TABLE tournament_matches ADD COLUMN is_final_tiebreaker INTEGER NOT NULL DEFAULT 0' })
+      console.log('✅ is_final_tiebreaker column added to tournament_matches')
+    } else {
+      console.log('✅ tournament_matches.is_final_tiebreaker already exists')
+    }
+
     // tournament_participants.character カラムの存在確認
     const participantInfo = await db.execute({
       sql: 'PRAGMA table_info(tournament_participants)',
@@ -147,6 +165,18 @@ export async function autoMigrate() {
       )` })
       await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_team_battles_match ON tournament_team_battles(match_id)' })
       console.log('✅ tournament_team_battles table created')
+    }
+
+    // tournament_team_battles.is_tiebreaker カラム確認（最終戦判定）
+    if (tableNames.includes('tournament_team_battles')) {
+      const battleInfo = await db.execute({ sql: 'PRAGMA table_info(tournament_team_battles)' })
+      const hasIsTiebreaker = battleInfo.rows.some((row: any) => row.name === 'is_tiebreaker')
+      if (!hasIsTiebreaker) {
+        await db.execute({ sql: 'ALTER TABLE tournament_team_battles ADD COLUMN is_tiebreaker INTEGER NOT NULL DEFAULT 0' })
+        console.log('✅ is_tiebreaker column added to tournament_team_battles')
+      } else {
+        console.log('✅ tournament_team_battles.is_tiebreaker already exists')
+      }
     }
 
     // ランク追跡テーブル (puddle_player_id は int64 のため TEXT で保存)

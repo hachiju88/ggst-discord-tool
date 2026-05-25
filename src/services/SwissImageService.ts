@@ -119,7 +119,7 @@ export class SwissImageService {
     ctx.fillText('#',          CX_RANK,      hY)
     ctx.fillText('プレイヤー', CX_NAME,      hY)
     ctx.fillText('ランク',     CX_RANKTEXT,  hY)
-    ctx.fillText('W-L',        CX_WL,        hY)
+    ctx.fillText('W-D-L',      CX_WL,        hY)
     ctx.fillText('G勝',        CX_GAMES,     hY)
 
     // ── Standings rows ─────────────────────────────────────────────────────────
@@ -153,7 +153,7 @@ export class SwissImageService {
 
       ctx.fillStyle = s.wins > s.losses ? WIN_CLR : s.losses > s.wins ? LOSS_CLR : WHITE
       ctx.font = `bold 13px ${ff}`
-      ctx.fillText(`${s.wins}-${s.losses}`, CX_WL, tY)
+      ctx.fillText(`${s.wins}-${s.draws}-${s.losses}`, CX_WL, tY)
 
       ctx.fillStyle = GRAY
       ctx.font = `12px ${ff}`

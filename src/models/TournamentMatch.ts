@@ -13,6 +13,8 @@ export interface TournamentMatch {
   handicap_rounds: number
   p1_games_won: number
   p2_games_won: number
+  is_draw: number
+  is_final_tiebreaker: number
   vc_channel_id: string | null
   status: 'pending' | 'in_progress' | 'completed' | 'bye'
   message_id: string | null
@@ -147,8 +149,18 @@ export class TournamentMatchModel {
   ): Promise<boolean> {
     const db = getDatabase()
     const r = await db.execute({
-      sql: `UPDATE tournament_matches SET winner_id = ?, p1_games_won = ?, p2_games_won = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'completed'`,
+      sql: `UPDATE tournament_matches SET winner_id = ?, p1_games_won = ?, p2_games_won = ?, is_draw = 0, status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'completed'`,
       args: [winnerId, p1GamesWon, p2GamesWon, id],
+    })
+    return r.rowsAffected > 0
+  }
+
+  // 引き分けでマッチを確定（団体戦専用）
+  static async setDraw(id: number, p1GamesWon: number, p2GamesWon: number): Promise<boolean> {
+    const db = getDatabase()
+    const r = await db.execute({
+      sql: `UPDATE tournament_matches SET winner_id = NULL, p1_games_won = ?, p2_games_won = ?, is_draw = 1, status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'completed'`,
+      args: [p1GamesWon, p2GamesWon, id],
     })
     return r.rowsAffected > 0
   }
@@ -207,7 +219,7 @@ export class TournamentMatchModel {
     await db.execute({
       sql: `UPDATE tournament_matches
             SET winner_id = NULL, status = 'pending', p1_games_won = 0, p2_games_won = 0,
-                updated_at = CURRENT_TIMESTAMP
+                is_draw = 0, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?`,
       args: [id],
     })
@@ -220,5 +232,51 @@ export class TournamentMatchModel {
       sql: `UPDATE tournament_matches SET ${col} = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       args: [id],
     })
+  }
+
+  // 既存の優勝決定戦マッチがあるかチェック（is_final_tiebreaker=1, status != 'completed' or 完了済み問わず）
+  static async hasExistingFinalTiebreaker(tournamentId: number): Promise<boolean> {
+    const db = getDatabase()
+    const r = await db.execute({
+      sql: 'SELECT 1 FROM tournament_matches WHERE tournament_id = ? AND is_final_tiebreaker = 1 LIMIT 1',
+      args: [tournamentId],
+    })
+    return r.rows.length > 0
+  }
+
+  // 大会全体の優勝決定戦マッチを作成（is_final_tiebreaker=1）
+  static async createFinalTiebreaker(data: {
+    tournament_id: number
+    participant1_id: number
+    participant2_id: number
+    match_code: string | null
+    handicap_participant_id: number | null
+    handicap_rounds: number
+  }): Promise<TournamentMatch> {
+    const db = getDatabase()
+    // 既存マッチの最大 round + 1 を採番（is_round_complete などの干渉を避ける）
+    const r = await db.execute({
+      sql: 'SELECT COALESCE(MAX(round), 0) as max_round FROM tournament_matches WHERE tournament_id = ?',
+      args: [data.tournament_id],
+    })
+    const maxRound = Number((r.rows[0] as any)?.max_round ?? 0)
+
+    const result = await db.execute({
+      sql: `INSERT INTO tournament_matches
+              (tournament_id, round, match_number, match_code, participant1_id, participant2_id,
+               winner_id, handicap_participant_id, handicap_rounds, vc_channel_id, status, is_final_tiebreaker)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, 'pending', 1)`,
+      args: [
+        data.tournament_id,
+        maxRound + 1,
+        1,
+        data.match_code,
+        data.participant1_id,
+        data.participant2_id,
+        data.handicap_participant_id,
+        data.handicap_rounds,
+      ],
+    })
+    return (await this.getById(Number(result.lastInsertRowid)))!
   }
 }

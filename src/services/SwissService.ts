@@ -87,23 +87,25 @@ export class SwissService {
   static async getStandings(tournamentId: number): Promise<StandingsEntry[]> {
     const participants = await TournamentParticipantModel.getByTournament(tournamentId)
     const matches = await TournamentMatchModel.getByTournament(tournamentId)
-    const completed = matches.filter(m => m.status === 'completed' || m.status === 'bye')
+    const completed = matches.filter(m => (m.status === 'completed' || m.status === 'bye') && Number(m.is_final_tiebreaker) !== 1)
 
     const entries = participants.map(p => {
       const pid = Number(p.id)
       const mine = completed.filter(
         m => Number(m.participant1_id) === pid || Number(m.participant2_id) === pid
       )
-      const wins = mine.filter(m => Number(m.winner_id) === pid).length
-      const losses = mine.length - wins
+      const draws = mine.filter(m => Number(m.is_draw) === 1).length
+      const wins = mine.filter(m => Number(m.is_draw) !== 1 && Number(m.winner_id) === pid).length
+      const losses = mine.length - wins - draws
       const gameWins = mine.reduce((sum, m) => {
         if (Number(m.participant1_id) === pid) return sum + Number(m.p1_games_won)
         return sum + Number(m.p2_games_won)
       }, 0)
-      return { participant: p, wins, losses, gameWins, matchesPlayed: mine.length }
+      return { participant: p, wins, losses, draws, gameWins, matchesPlayed: mine.length }
     })
 
-    entries.sort((a, b) => b.wins - a.wins || b.gameWins - a.gameWins)
+    // 引き分けは 0.5 勝として並び替え
+    entries.sort((a, b) => (b.wins + b.draws * 0.5) - (a.wins + a.draws * 0.5) || b.gameWins - a.gameWins)
     return entries
   }
 
@@ -116,9 +118,12 @@ export class SwissService {
   ): Promise<number[]> {
     const standings = await this.getStandings(tournamentId)
 
+    // 通常マッチのみ（優勝決定戦は対戦履歴に含めない）
+    const regularMatches = allMatches.filter(m => Number(m.is_final_tiebreaker) !== 1)
+
     // Build set of already-played pairs
     const playedPairs = new Set<string>()
-    for (const m of allMatches) {
+    for (const m of regularMatches) {
       if (m.participant1_id && m.participant2_id) {
         playedPairs.add(pairKey(Number(m.participant1_id), Number(m.participant2_id)))
       }
@@ -126,16 +131,18 @@ export class SwissService {
 
     // Track who has already received a bye
     const byeRecipients = new Set<number>(
-      allMatches
+      regularMatches
         .filter(m => m.status === 'bye' && m.winner_id)
         .map(m => Number(m.winner_id))
     )
 
-    // Shuffle within same-wins groups to randomize pairing order
+    // Shuffle within same-points groups to randomize pairing order
+    // (draws count as 0.5 wins; group by doubled value to use as integer key)
     const grouped = new Map<number, StandingsEntry[]>()
     for (const e of standings) {
-      if (!grouped.has(e.wins)) grouped.set(e.wins, [])
-      grouped.get(e.wins)!.push(e)
+      const key = e.wins * 2 + e.draws  // doubled points
+      if (!grouped.has(key)) grouped.set(key, [])
+      grouped.get(key)!.push(e)
     }
     const shuffled: StandingsEntry[] = []
     for (const [, group] of [...grouped.entries()].sort((a, b) => b[0] - a[0])) {
@@ -193,13 +200,18 @@ export class SwissService {
 
   static async isRoundComplete(tournamentId: number, round: number): Promise<boolean> {
     const matches = await TournamentMatchModel.getByRound(tournamentId, round)
-    return matches.every(m => m.status === 'completed' || m.status === 'bye')
+    // 優勝決定戦は集計外
+    return matches.filter(m => Number(m.is_final_tiebreaker) !== 1)
+      .every(m => m.status === 'completed' || m.status === 'bye')
   }
 
   static async getCurrentRound(tournamentId: number): Promise<number> {
     const matches = await TournamentMatchModel.getByTournament(tournamentId)
     if (matches.length === 0) return 0
-    return Math.max(...matches.map(m => m.round))
+    // 優勝決定戦の round は集計外（max round 計算に含めない）
+    const regular = matches.filter(m => Number(m.is_final_tiebreaker) !== 1)
+    if (regular.length === 0) return 0
+    return Math.max(...regular.map(m => m.round))
   }
 
   static async formatMatchContent(matchId: number, regulation: TournamentRegulation, round: number, totalRounds: number): Promise<MatchContent> {
@@ -258,7 +270,7 @@ export class SwissService {
     const standings = await this.getStandings(tournamentId)
     const currentRound = await this.getCurrentRound(tournamentId)
     const allMatches = await TournamentMatchModel.getByTournamentWithParticipants(tournamentId)
-    const currentRoundMatches = allMatches.filter(m => m.round === currentRound && m.status !== 'bye')
+    const currentRoundMatches = allMatches.filter(m => m.round === currentRound && m.status !== 'bye' && Number(m.is_final_tiebreaker) !== 1)
 
     const embed = new EmbedBuilder()
       .setColor(0xe67e22)
@@ -275,7 +287,8 @@ export class SwissService {
         const medal = medals[i] ?? `${i + 1}位`
         const rank = s.participant.rank ? ` [${s.participant.rank}]` : ''
         const char = s.participant.character ? ` (${s.participant.character})` : ''
-        return `${medal} <@${s.participant.discord_id}>${rank}${char} — **${s.wins}勝${s.losses}敗** (${s.gameWins}G)`
+        const drawPart = s.draws > 0 ? `${s.draws}分` : ''
+        return `${medal} <@${s.participant.discord_id}>${rank}${char} — **${s.wins}勝${drawPart}${s.losses}敗** (${s.gameWins}G)`
       })
       .join('\n')
     embed.addFields({ name: '📊 現在の順位', value: standingsText || 'まだ試合結果がありません' })
@@ -287,6 +300,9 @@ export class SwissService {
           const p1 = m.p1_name ?? '?'
           const p2 = m.p2_name ?? '?'
           if (m.status === 'completed') {
+            if (Number(m.is_draw) === 1) {
+              return `\`#${m.match_code}\` ${p1} ${m.p1_games_won}-${m.p2_games_won} ${p2} 🤝 引き分け`
+            }
             return `\`#${m.match_code}\` ${p1} ${m.p1_games_won}-${m.p2_games_won} ${p2} ✅ ${m.winner_name}`
           }
           return `\`#${m.match_code}\` ${p1} vs ${p2} ⏳`
