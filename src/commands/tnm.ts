@@ -1483,12 +1483,20 @@ async function buildAssignPanel(tournamentId: number): Promise<{ content: string
   const allMembers = await TournamentTeamMemberModel.getByTournament(tournamentId)
   const assignedIds = new Set(allMembers.map(m => m.discord_id))
   const participants = await TournamentParticipantModel.getByTournament(tournamentId)
-  const unassigned = participants.filter(p => !isTeamProxy(p.discord_id) && !assignedIds.has(p.discord_id))
+  const realParticipants = participants.filter(p => !isTeamProxy(p.discord_id))
+  const unassigned = realParticipants.filter(p => !assignedIds.has(p.discord_id))
 
   const membersByTeam = new Map<number, typeof allMembers>()
   for (const m of allMembers) {
     if (!membersByTeam.has(m.team_id)) membersByTeam.set(m.team_id, [])
     membersByTeam.get(m.team_id)!.push(m)
+  }
+
+  // 同一プレイヤーの全配置をまとめる
+  const assignmentsByDiscordId = new Map<string, typeof allMembers>()
+  for (const m of allMembers) {
+    if (!assignmentsByDiscordId.has(m.discord_id)) assignmentsByDiscordId.set(m.discord_id, [])
+    assignmentsByDiscordId.get(m.discord_id)!.push(m)
   }
 
   const teamLines = teams.map((t, idx) => {
@@ -1503,8 +1511,8 @@ async function buildAssignPanel(tournamentId: number): Promise<{ content: string
   })
 
   const footerText = unassigned.length > 0
-    ? `👥 未配置: ${unassigned.length}名 — ボタンで個別配置、または下の自動振り分けをお使いください`
-    : '✅ 全員配置済みです'
+    ? `👥 未配置: ${unassigned.length}名 — ボタンで個別配置、または下の自動振り分けをお使いください\n📝 配置済みプレイヤーのボタンをクリックすると変更・削除できます`
+    : '✅ 全員配置済みです\n📝 プレイヤー名をクリックすると配置を変更・削除できます'
 
   const lines = [
     '**チーム振り分けパネル**',
@@ -1515,17 +1523,27 @@ async function buildAssignPanel(tournamentId: number): Promise<{ content: string
   ]
 
   const rows: ActionRowBuilder<ButtonBuilder>[] = []
-  // 未配置プレイヤーボタン（最大20名、5列×4行）
-  for (let i = 0; i < unassigned.length && i < 20; i += 5) {
+  // 未配置を先に、配置済みを後に並べて最大20名のボタンを生成（5列×4行）
+  const assignedParticipants = realParticipants.filter(p => assignedIds.has(p.discord_id))
+  const allForButtons = [...unassigned, ...assignedParticipants]
+  for (let i = 0; i < allForButtons.length && rows.length < 4; i += 5) {
     const row = new ActionRowBuilder<ButtonBuilder>()
-    for (let j = i; j < Math.min(i + 5, unassigned.length); j++) {
-      const p = unassigned[j]
-      const rankPart = p.rank ? ` [${p.rank}]` : ''
+    for (let j = i; j < Math.min(i + 5, allForButtons.length); j++) {
+      const p = allForButtons[j]
+      const isAssigned = assignedIds.has(p.discord_id)
+      const assignments = assignmentsByDiscordId.get(p.discord_id) ?? []
+      let assignLabel = ''
+      if (isAssigned && assignments.length > 0) {
+        const first = assignments[0]
+        const posName = POSITION_NAMES[(first.position ?? 1) - 1]
+        assignLabel = `(${first.team_name.slice(0, 3)}/${posName}${assignments.length > 1 ? '+' : ''})`
+      }
+      const rankPart = !isAssigned && p.rank ? ` [${p.rank}]` : ''
       row.addComponents(
         new ButtonBuilder()
           .setCustomId(`tnm-assign:${tournamentId}:${p.discord_id}`)
-          .setLabel(`${p.discord_name.slice(0, 12)}${rankPart}`.slice(0, 20))
-          .setStyle(ButtonStyle.Secondary)
+          .setLabel(`${p.discord_name.slice(0, 10)}${rankPart}${assignLabel}`.slice(0, 80))
+          .setStyle(isAssigned ? ButtonStyle.Primary : ButtonStyle.Secondary)
       )
     }
     rows.push(row)
@@ -1554,38 +1572,56 @@ async function handleAssignButton(interaction: ButtonInteraction, tournamentId: 
   const tournament = await TournamentModel.getById(tournamentId)
   if (!tournament) { await interaction.reply({ content: '❌', flags: MessageFlags.Ephemeral }); return true }
 
-  // 名前を participant から引く
   const participant = await TournamentParticipantModel.getByDiscordId(tournamentId, discordId)
   const displayName = participant?.discord_name ?? discordId
 
   const teams = await TournamentTeamModel.getByTournament(tournamentId)
+  const allTournamentMembers = await TournamentTeamMemberModel.getByTournament(tournamentId)
+  const myAssignments = allTournamentMembers.filter(m => m.discord_id === discordId)
+  const myPositions = new Set(myAssignments.map(m => `${m.team_id}:${m.position}`))
 
   const options: StringSelectMenuOptionBuilder[] = []
   for (const t of teams) {
-    const members = await TournamentTeamMemberModel.getByTeam(t.id)
+    const members = allTournamentMembers.filter(m => m.team_id === t.id)
     for (let pos = 1; pos <= 5; pos++) {
+      if (myPositions.has(`${t.id}:${pos}`)) continue  // すでに自分が配置済みのスロットはスキップ
       const taken = members.find(m => m.position === pos)
-      if (!taken) {
-        options.push(new StringSelectMenuOptionBuilder()
-          .setLabel(`${t.name} / ${POSITION_NAMES[pos - 1]}`)
-          .setValue(`${t.id}:${pos}`))
-      }
+      const label = taken
+        ? `${t.name} / ${POSITION_NAMES[pos - 1]} (← ${taken.discord_name.slice(0, 8)})`
+        : `${t.name} / ${POSITION_NAMES[pos - 1]}`
+      options.push(new StringSelectMenuOptionBuilder()
+        .setLabel(label.slice(0, 100))
+        .setValue(`${t.id}:${pos}`))
+    }
+  }
+
+  // 現在の配置の削除オプション
+  for (const m of myAssignments) {
+    const team = teams.find(t => t.id === m.team_id)
+    if (team) {
+      options.push(new StringSelectMenuOptionBuilder()
+        .setLabel(`🗑️ 削除: ${team.name} / ${POSITION_NAMES[(m.position ?? 1) - 1]}`)
+        .setValue(`remove:${m.id}`))
     }
   }
 
   if (options.length === 0) {
-    await interaction.reply({ content: '❌ 空きポジションがありません。', flags: MessageFlags.Ephemeral })
+    await interaction.reply({ content: '❌ 変更できるポジションがありません。', flags: MessageFlags.Ephemeral })
     return true
   }
 
   const msgId = interaction.message.id
   const select = new StringSelectMenuBuilder()
     .setCustomId(`tnm-assign-slot:${tournamentId}:${discordId}:${msgId}`)
-    .setPlaceholder('チームとポジションを選択')
+    .setPlaceholder('ポジション選択（削除は🗑️を選択）')
     .addOptions(options.slice(0, 25))
 
+  const contentMsg = myAssignments.length > 0
+    ? `**${displayName}** の配置を変更・追加・削除できます。`
+    : `**${displayName}** をどのポジションに配置しますか？`
+
   await interaction.reply({
-    content: `**${displayName}** をどのポジションに配置しますか？`,
+    content: contentMsg,
     components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select) as any],
     flags: MessageFlags.Ephemeral,
   })
@@ -1593,15 +1629,49 @@ async function handleAssignButton(interaction: ButtonInteraction, tournamentId: 
 }
 
 async function handleAssignSlotSelect(interaction: StringSelectMenuInteraction, tournamentId: number, discordId: string, mainMsgId: string): Promise<boolean> {
-  const [teamIdStr, posStr] = interaction.values[0].split(':')
+  const value = interaction.values[0]
+
+  const refreshPanel = async () => {
+    try {
+      const channel = interaction.channel
+      if (channel && channel.isTextBased() && !channel.isDMBased()) {
+        const mainMsg = await channel.messages.fetch(mainMsgId)
+        const { content: pc, components: pc2 } = await buildAssignPanel(tournamentId)
+        await mainMsg.edit({ content: pc, components: pc2 })
+      }
+    } catch { /* ベストエフォート */ }
+  }
+
+  // 削除操作
+  if (value.startsWith('remove:')) {
+    const memberId = parseInt(value.split(':')[1])
+    await TournamentTeamMemberModel.delete(memberId)
+    await interaction.update({ content: '✅ 配置を削除しました。', components: [] })
+    await refreshPanel()
+    return true
+  }
+
+  const [teamIdStr, posStr] = value.split(':')
   const teamId = parseInt(teamIdStr)
   const position = parseInt(posStr)
 
   const participant = await TournamentParticipantModel.getByDiscordId(tournamentId, discordId)
   if (!participant) { await interaction.update({ content: '❌ 参加者が見つかりません。', components: [] }); return true }
 
-  const existing = await TournamentTeamMemberModel.getByDiscordIdInTournament(tournamentId, discordId)
-  if (existing) { await interaction.update({ content: '❌ すでにチームに配置されています。', components: [] }); return true }
+  const teamMembers = await TournamentTeamMemberModel.getByTeam(teamId)
+
+  // このスロットにすでに同じプレイヤーが配置されている場合はスキップ
+  const sameSlot = teamMembers.find(m => m.position === position && m.discord_id === discordId)
+  if (sameSlot) {
+    await interaction.update({ content: `ℹ️ ${participant.discord_name} はすでに ${POSITION_NAMES[position - 1]} に配置されています。`, components: [] })
+    return true
+  }
+
+  // 別のプレイヤーがこのスロットを占有している場合は置き換え
+  const occupant = teamMembers.find(m => m.position === position)
+  if (occupant) {
+    await TournamentTeamMemberModel.delete(occupant.id)
+  }
 
   await TournamentTeamMemberModel.create({
     team_id: teamId,
@@ -1613,17 +1683,7 @@ async function handleAssignSlotSelect(interaction: StringSelectMenuInteraction, 
   })
 
   await interaction.update({ content: `✅ ${participant.discord_name} を ${POSITION_NAMES[position - 1]} に配置しました。`, components: [] })
-
-  // メインパネルを更新
-  try {
-    const channel = interaction.channel
-    if (channel && channel.isTextBased() && !channel.isDMBased()) {
-      const mainMsg = await channel.messages.fetch(mainMsgId)
-      const { content: pc, components: pc2 } = await buildAssignPanel(tournamentId)
-      await mainMsg.edit({ content: pc, components: pc2 })
-    }
-  } catch { /* ベストエフォート */ }
-
+  await refreshPanel()
   return true
 }
 

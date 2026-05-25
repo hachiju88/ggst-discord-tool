@@ -60,10 +60,10 @@ export class TeamBattleService {
       `**${team1?.name ?? '?'}** vs **${team2?.name ?? '?'}**`,
       '',
       `【${team1?.name ?? '?'}】`,
-      ...sortByPosition(t1Members).map((m, i) => rosterLine(m, POSITION_NAMES[i] ?? `${i + 1}番`)),
+      ...sortByPosition(t1Members).map(m => rosterLine(m, POSITION_NAMES[(m.position ?? 1) - 1] ?? `${m.position}番`)),
       '',
       `【${team2?.name ?? '?'}】`,
-      ...sortByPosition(t2Members).map((m, i) => rosterLine(m, POSITION_NAMES[i] ?? `${i + 1}番`)),
+      ...sortByPosition(t2Members).map(m => rosterLine(m, POSITION_NAMES[(m.position ?? 1) - 1] ?? `${m.position}番`)),
     ]
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
