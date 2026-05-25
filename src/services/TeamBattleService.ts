@@ -353,9 +353,10 @@ export class TeamBattleService {
     ])
     if (!m1 || !m2) throw new Error('Tiebreaker members not found')
 
+    // calcHandicap は引数オブジェクトの .id を返すので member.id を渡す
     const handicap = BracketService.calcHandicap(
-      { rank: m1.rank } as any,
-      { rank: m2.rank } as any,
+      { id: m1.id, rank: m1.rank } as any,
+      { id: m2.id, rank: m2.rank } as any,
       regulation.handicapRules
     )
 
@@ -365,9 +366,11 @@ export class TeamBattleService {
       match_code: generateMatchCode(),
       team1_member_id: m1.id,
       team2_member_id: m2.id,
-      handicap_member_id: handicap.handicapParticipantId
-        ? (handicap.handicapParticipantId === (m1 as any).id ? m1.id : m2.id)
-        : null,
+      handicap_member_id: handicap.handicapParticipantId === m1.id
+        ? m1.id
+        : handicap.handicapParticipantId === m2.id
+          ? m2.id
+          : null,
       handicap_rounds: handicap.rounds,
       is_tiebreaker: true,
     })
@@ -375,23 +378,17 @@ export class TeamBattleService {
   }
 
   // 引き分け確定時のゲーム取得合計を返す（is_draw マッチのスコア保存用）
+  // 規約: team1_member_id は常にマッチの team1 側、team2_member_id は team2 側に対応
+  // （generateSequentialBattles / generateFirstSurvivalBattle / generateNextSurvivalBattle / generateTiebreakerBattle すべてこの規約で作成）
   static async computeTotalGames(
-    matchId: number,
-    team1Id: number
+    matchId: number
   ): Promise<{ t1Games: number; t2Games: number }> {
     const battles = await TournamentTeamBattleModel.getByMatch(matchId)
     let t1Games = 0, t2Games = 0
     for (const b of battles) {
       if (b.status !== 'completed') continue
-      const m1 = b.team1_member_id ? await TournamentTeamMemberModel.getById(b.team1_member_id) : null
-      const m1TeamId = m1?.team_id != null ? Number(m1.team_id) : null
-      if (m1TeamId === team1Id) {
-        t1Games += Number(b.team1_games_won)
-        t2Games += Number(b.team2_games_won)
-      } else {
-        t1Games += Number(b.team2_games_won)
-        t2Games += Number(b.team1_games_won)
-      }
+      t1Games += Number(b.team1_games_won)
+      t2Games += Number(b.team2_games_won)
     }
     return { t1Games, t2Games }
   }

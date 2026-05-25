@@ -225,6 +225,11 @@ export class TournamentMatchModel {
     })
   }
 
+  static async delete(id: number): Promise<void> {
+    const db = getDatabase()
+    await db.execute({ sql: 'DELETE FROM tournament_matches WHERE id = ?', args: [id] })
+  }
+
   static async clearParticipant(id: number, slot: 'p1' | 'p2'): Promise<void> {
     const db = getDatabase()
     const col = slot === 'p1' ? 'participant1_id' : 'participant2_id'

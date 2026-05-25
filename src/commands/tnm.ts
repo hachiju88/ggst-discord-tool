@@ -1716,36 +1716,47 @@ async function handleBattleStart(interaction: ButtonInteraction, matchId: number
 
   await interaction.deferUpdate()
 
-  const tournament = await TournamentModel.getById(match.tournament_id)
-  if (!tournament) return true
-  const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
-
-  const matchData = await TournamentMatchModel.getWithParticipants(matchId)
-  const p1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
-  const p2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
-  if (!p1Id || !p2Id) { return true }
-
-  let battleIds: number[]
-  if (regulation.teamBattleFormat === 'survival') {
-    battleIds = [await TeamBattleService.generateFirstSurvivalBattle(matchId, p1Id, p2Id, regulation)]
-  } else {
-    battleIds = await TeamBattleService.generateSequentialBattles(matchId, p1Id, p2Id, regulation)
-  }
-
-  // 「対戦開始」ボタンを削除
-  await interaction.editReply({ content: interaction.message.content, components: [] })
-
-  const channel = interaction.channel
-  if (!channel || !channel.isTextBased() || channel.isDMBased()) return true
-
-  for (const bid of battleIds) {
-    try {
-      const { content, components } = await TeamBattleService.formatBattleContent(bid, regulation)
-      const msg = await channel.send({ content, components })
-      await TournamentTeamBattleModel.setMessageId(bid, msg.id)
-    } catch (err) {
-      console.error(`[tnm] Failed to post battle ${bid}:`, err)
+  try {
+    const tournament = await TournamentModel.getById(match.tournament_id)
+    if (!tournament) {
+      await interaction.editReply({ content: '❌ 大会情報が見つかりません。' })
+      return true
     }
+    const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
+
+    const matchData = await TournamentMatchModel.getWithParticipants(matchId)
+    const p1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
+    const p2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
+    if (!p1Id || !p2Id) {
+      await interaction.editReply({ content: '❌ チーム情報が見つかりません。' })
+      return true
+    }
+
+    let battleIds: number[]
+    if (regulation.teamBattleFormat === 'survival') {
+      battleIds = [await TeamBattleService.generateFirstSurvivalBattle(matchId, p1Id, p2Id, regulation)]
+    } else {
+      battleIds = await TeamBattleService.generateSequentialBattles(matchId, p1Id, p2Id, regulation)
+    }
+
+    // 「対戦開始」ボタンを削除
+    await interaction.editReply({ content: interaction.message.content, components: [] })
+
+    const channel = interaction.channel
+    if (!channel || !channel.isTextBased() || channel.isDMBased()) return true
+
+    for (const bid of battleIds) {
+      try {
+        const { content, components } = await TeamBattleService.formatBattleContent(bid, regulation)
+        const msg = await channel.send({ content, components })
+        await TournamentTeamBattleModel.setMessageId(bid, msg.id)
+      } catch (err) {
+        console.error(`[tnm] Failed to post battle ${bid}:`, err)
+      }
+    }
+  } catch (err) {
+    console.error('[handleBattleStart] Error:', err)
+    try { await interaction.editReply({ content: '❌ 対戦開始に失敗しました。管理者にログを確認してもらってください。' }) } catch {}
   }
   return true
 }
@@ -1946,7 +1957,7 @@ async function finalizeTeamMatch(
   const isDraw = matchWinnerTeamId === null
   const winnerTeam = matchWinnerTeamId ? await TournamentTeamModel.getById(matchWinnerTeamId) : null
   const summary = await TeamBattleService.formatMatchSummary(matchId, team1Id, team2Id)
-  const { t1Games, t2Games } = await TeamBattleService.computeTotalGames(matchId, team1Id)
+  const { t1Games, t2Games } = await TeamBattleService.computeTotalGames(matchId)
   // 大会がすでに終了済みなら、再 finalize（バトル修正経由）は最終アナウンスをスキップ
   const wasTournamentCompleted = tournament.status === 'completed'
 
@@ -2123,7 +2134,7 @@ async function postDrawChoicePrompt(
     TournamentTeamModel.getById(team1Id),
     TournamentTeamModel.getById(team2Id),
   ])
-  const { t1Games, t2Games } = await TeamBattleService.computeTotalGames(matchId, team1Id)
+  const { t1Games, t2Games } = await TeamBattleService.computeTotalGames(matchId)
 
   const row = new ActionRowBuilder<ButtonBuilder>()
   if (format !== 'single_elim') {
@@ -2156,13 +2167,19 @@ async function handleDrawEndButton(interaction: ButtonInteraction, matchId: numb
   await interaction.deferUpdate()
 
   const match = await TournamentMatchModel.getById(matchId)
-  if (!match) { return true }
+  if (!match) {
+    await interaction.editReply({ content: '❌ 試合が見つかりません。', components: [] })
+    return true
+  }
   if (match.status === 'completed') {
     await interaction.editReply({ content: 'この試合はすでに終了しています。', components: [] })
     return true
   }
   const tournament = await TournamentModel.getById(match.tournament_id)
-  if (!tournament) return true
+  if (!tournament) {
+    await interaction.editReply({ content: '❌ 大会情報が見つかりません。', components: [] })
+    return true
+  }
   if (tournament.format === 'single_elim') {
     await interaction.editReply({ content: 'シングルエリミネーションでは引き分けで終了できません。最終戦を実施してください。', components: [] })
     return true
@@ -2170,7 +2187,10 @@ async function handleDrawEndButton(interaction: ButtonInteraction, matchId: numb
   const matchData = await TournamentMatchModel.getWithParticipants(matchId)
   const team1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
   const team2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
-  if (!team1Id || !team2Id) return true
+  if (!team1Id || !team2Id) {
+    await interaction.editReply({ content: '❌ チーム情報が見つかりません。', components: [] })
+    return true
+  }
 
   // 念のため：引き分け状態でなければ拒否
   if (!(await TeamBattleService.isDrawState(matchId, team1Id, team2Id))) {
@@ -2198,7 +2218,10 @@ async function handleDrawTiebreakerButton(interaction: ButtonInteraction, matchI
   const matchData = await TournamentMatchModel.getWithParticipants(matchId)
   const team1Id = matchData?.p1_discord_id ? teamIdFromProxy(matchData.p1_discord_id) : null
   const team2Id = matchData?.p2_discord_id ? teamIdFromProxy(matchData.p2_discord_id) : null
-  if (!team1Id || !team2Id) return true
+  if (!team1Id || !team2Id) {
+    await interaction.editReply({ content: '❌ チーム情報が見つかりません。', components: [] })
+    return true
+  }
 
   if (!(await TeamBattleService.isDrawState(matchId, team1Id, team2Id))) {
     await interaction.editReply({ content: '引き分け状態ではありません。', components: [] })
@@ -2346,7 +2369,10 @@ async function handleTiebreakerStartButton(interaction: ButtonInteraction, match
   }
 
   const tournament = await TournamentModel.getById(match.tournament_id)
-  if (!tournament) return true
+  if (!tournament) {
+    await interaction.editReply({ content: '❌ 大会情報が見つかりません。', components: [] })
+    return true
+  }
   const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
 
   let battleId: number
@@ -2584,10 +2610,16 @@ async function buildFinalTbPickerMessage(
 async function handleFinalTbTeamSelect(interaction: StringSelectMenuInteraction, tournamentId: number, side: 1 | 2): Promise<boolean> {
   await interaction.deferUpdate()
   const tournament = await TournamentModel.getById(tournamentId)
-  if (!tournament) return true
+  if (!tournament) {
+    await interaction.editReply({ content: '❌ 大会情報が見つかりません。', components: [] })
+    return true
+  }
   const format = tournament.format as 'league' | 'swiss'
   const tiedIds = await findTopTiedTeams(tournamentId, format)
-  if (tiedIds.length < 2) return true
+  if (tiedIds.length < 2) {
+    await interaction.editReply({ content: '❌ 1位同率のチームが見つかりません。', components: [] })
+    return true
+  }
 
   const { t1, t2, m1, m2 } = readFinalTbState(interaction)
   const chosen = parseInt(interaction.values[0] ?? '0') || 0
@@ -2607,10 +2639,16 @@ async function handleFinalTbTeamSelect(interaction: StringSelectMenuInteraction,
 async function handleFinalTbMemberSelect(interaction: StringSelectMenuInteraction, tournamentId: number, side: 1 | 2): Promise<boolean> {
   await interaction.deferUpdate()
   const tournament = await TournamentModel.getById(tournamentId)
-  if (!tournament) return true
+  if (!tournament) {
+    await interaction.editReply({ content: '❌ 大会情報が見つかりません。', components: [] })
+    return true
+  }
   const format = tournament.format as 'league' | 'swiss'
   const tiedIds = await findTopTiedTeams(tournamentId, format)
-  if (tiedIds.length < 2) return true
+  if (tiedIds.length < 2) {
+    await interaction.editReply({ content: '❌ 1位同率のチームが見つかりません。', components: [] })
+    return true
+  }
 
   const { t1, t2, m1, m2 } = readFinalTbState(interaction)
   const chosen = parseInt(interaction.values[0] ?? '0') || 0
@@ -2686,9 +2724,10 @@ async function handleFinalTbStartButton(
     return true
   }
 
+  // calcHandicap は引数オブジェクトの .id を返すので member id を渡し、戻り値で side を判別
   const handicap = BracketService.calcHandicap(
-    { rank: m1.rank } as any,
-    { rank: m2.rank } as any,
+    { id: m1.id, rank: m1.rank } as any,
+    { id: m2.id, rank: m2.rank } as any,
     regulation.handicapRules
   )
 
@@ -2701,9 +2740,11 @@ async function handleFinalTbStartButton(
       participant1_id: p1.id,
       participant2_id: p2.id,
       match_code: null,
-      handicap_participant_id: handicap.handicapParticipantId
-        ? (handicap.handicapParticipantId === (m1 as any).id ? p1.id : p2.id)
-        : null,
+      handicap_participant_id: handicap.handicapParticipantId === m1.id
+        ? p1.id
+        : handicap.handicapParticipantId === m2.id
+          ? p2.id
+          : null,
       handicap_rounds: handicap.rounds,
     })
   } catch (err) {
@@ -2717,8 +2758,8 @@ async function handleFinalTbStartButton(
     battleId = await TeamBattleService.generateTiebreakerBattle(newMatch.id, m1Id, m2Id, regulation)
   } catch (err) {
     console.error('[tnm] generateTiebreakerBattle failed:', err)
-    // 半作成状態を防ぐためマッチを削除
-    try { await TournamentMatchModel.resetMatch(newMatch.id) } catch {}
+    // 半作成状態を防ぐためマッチを完全削除（resetMatch では is_final_tiebreaker=1 が残り再試行不可になる）
+    try { await TournamentMatchModel.delete(newMatch.id) } catch {}
     await interaction.editReply({ content: '優勝決定戦バトルの作成に失敗しました。', components: [] })
     return true
   }
