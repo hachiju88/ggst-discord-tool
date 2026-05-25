@@ -36,7 +36,7 @@ import { SwissService } from '../services/SwissService'
 import { SwissImageService } from '../services/SwissImageService'
 import { TeamBattleService, isTeamProxy, teamIdFromProxy, proxyDiscordId } from '../services/TeamBattleService'
 import { TournamentTeamModel } from '../models/TournamentTeam'
-import { TournamentTeamMemberModel, POSITION_NAMES, positionLabel } from '../models/TournamentTeamMember'
+import { TournamentTeamMemberModel, POSITION_NAMES, positionLabel, getPositionsForTeamSize, nextSchemaSlot } from '../models/TournamentTeamMember'
 import { TournamentTeamBattleModel } from '../models/TournamentTeamBattle'
 import { TournamentParticipant } from '../models/TournamentParticipant'
 import { RANKS } from '../constants/ranks'
@@ -1370,16 +1370,17 @@ async function handleTeamCreateModal(interaction: ModalSubmitInteraction, tourna
   const teamOrder = (await TournamentTeamModel.getByTournament(tournamentId)).length
   const team = await TournamentTeamModel.create({ tournament_id: tournamentId, name: teamName, team_order: teamOrder })
 
-  // 作成者をキャプテン（先鋒=1）として追加
+  // 作成者をキャプテンとして追加。1人チームのスキーマに従い大将で参加させる。
+  const captainPos = getPositionsForTeamSize(1)[0]
   await TournamentTeamMemberModel.create({
     team_id: team.id,
     discord_id: interaction.user.id,
     discord_name: interaction.user.displayName || interaction.user.username,
-    position: 1,
+    position: captainPos,
     is_captain: true,
   })
 
-  await interaction.editReply(`✅ **${teamName}** を作成し、先鋒で参加しました。\nランク・キャラ設定のため続けてください。`)
+  await interaction.editReply(`✅ **${teamName}** を作成し、${positionLabel(captainPos)}で参加しました。\nランク・キャラ設定のため続けてください。`)
 
   // チームメッセージを投稿（参加ボタン付き）
   const channel = interaction.channel
@@ -1449,15 +1450,19 @@ async function handleTeamJoinButton(interaction: ButtonInteraction, tournamentId
   }
   const team = await TournamentTeamModel.getById(teamId)
   if (!team) { await interaction.reply({ content: '❌ チームが見つかりません。', flags: MessageFlags.Ephemeral }); return true }
-  const count = await TournamentTeamMemberModel.countByTeam(teamId)
-  if (count >= 5) { await interaction.reply({ content: `❌ **${team.name}** はすでに満員です（5名）。`, flags: MessageFlags.Ephemeral }); return true }
+  const currentMembers = await TournamentTeamMemberModel.getByTeam(teamId)
+  if (currentMembers.length >= 5) { await interaction.reply({ content: `❌ **${team.name}** はすでに満員です（5名）。`, flags: MessageFlags.Ephemeral }); return true }
 
-  // 一旦名前だけ追加して位置は後で
+  // 新規参加者を、新人数のスキーマに基づく次の空きスロットに配置（既存配置は動かさない）
+  const newPos = nextSchemaSlot(
+    currentMembers.map(m => m.position),
+    currentMembers.length + 1
+  )
   await TournamentTeamMemberModel.create({
     team_id: teamId,
     discord_id: interaction.user.id,
     discord_name: interaction.user.displayName || interaction.user.username,
-    position: count + 1,
+    position: newPos,
   })
 
   const regulation = JSON.parse(tournament.regulation) as TournamentRegulation
@@ -1588,8 +1593,8 @@ async function handleAssignButton(interaction: ButtonInteraction, tournamentId: 
       if (myPositions.has(`${t.id}:${pos}`)) continue  // すでに自分が配置済みのスロットはスキップ
       const taken = members.find(m => m.position === pos)
       const label = taken
-        ? `${t.name} / ${POSITION_NAMES[pos - 1]} (← ${taken.discord_name.slice(0, 8)})`
-        : `${t.name} / ${POSITION_NAMES[pos - 1]}`
+        ? `${t.name} / ${positionLabel(pos)} (← ${taken.discord_name.slice(0, 8)})`
+        : `${t.name} / ${positionLabel(pos)}`
       placementOptions.push(new StringSelectMenuOptionBuilder()
         .setLabel(label.slice(0, 100))
         .setValue(`${t.id}:${pos}`))
@@ -1668,7 +1673,7 @@ async function handleAssignSlotSelect(interaction: StringSelectMenuInteraction, 
   // このスロットにすでに同じプレイヤーが配置されている場合はスキップ
   const sameSlot = teamMembers.find(m => m.position === position && m.discord_id === discordId)
   if (sameSlot) {
-    await interaction.update({ content: `ℹ️ ${participant.discord_name} はすでに ${POSITION_NAMES[position - 1]} に配置されています。`, components: [] })
+    await interaction.update({ content: `ℹ️ ${participant.discord_name} はすでに ${positionLabel(position)} に配置されています。`, components: [] })
     return true
   }
 
@@ -1697,7 +1702,7 @@ async function handleAssignSlotSelect(interaction: StringSelectMenuInteraction, 
     is_captain: inheritCaptain,
   })
 
-  await interaction.update({ content: `✅ ${participant.discord_name} を ${POSITION_NAMES[position - 1]} に配置しました。`, components: [] })
+  await interaction.update({ content: `✅ ${participant.discord_name} を ${positionLabel(position)} に配置しました。`, components: [] })
   await refreshPanel()
   return true
 }
@@ -1956,7 +1961,7 @@ async function finalizeTeamMatch(
 
   const isDraw = matchWinnerTeamId === null
   const winnerTeam = matchWinnerTeamId ? await TournamentTeamModel.getById(matchWinnerTeamId) : null
-  const summary = await TeamBattleService.formatMatchSummary(matchId, team1Id, team2Id)
+  const summary = await TeamBattleService.formatMatchSummary(matchId, team1Id, team2Id, regulation)
   const { t1Games, t2Games } = await TeamBattleService.computeTotalGames(matchId)
   // 大会がすでに終了済みなら、再 finalize（バトル修正経由）は最終アナウンスをスキップ
   const wasTournamentCompleted = tournament.status === 'completed'
@@ -2866,7 +2871,27 @@ async function handleAutoAssign(
     occupiedByTeam.set(t.id, new Set(members.map(m => m.position).filter(Boolean) as number[]))
   }
 
-  // スネークドラフトで割り当てスロット生成
+  // スネーク順で配るシミュレーションで各チームの最終人数を算出
+  const projected = new Map<number, number>(
+    teams.map(t => [t.id, occupiedByTeam.get(t.id)!.size])
+  )
+  let projRemaining = unassigned.length
+  let projAsc = true
+  while (projRemaining > 0) {
+    const order = projAsc ? teams : [...teams].reverse()
+    let added = false
+    for (const t of order) {
+      if (projRemaining === 0) break
+      if (projected.get(t.id)! >= 5) continue
+      projected.set(t.id, projected.get(t.id)! + 1)
+      projRemaining--
+      added = true
+    }
+    if (!added) break  // 全チーム満員
+    projAsc = !projAsc
+  }
+
+  // 各チームの最終人数のスキーマに従ってスロットを生成（projected を上限とする）
   const slots: { teamId: number; position: number }[] = []
   let ascending = true
   while (slots.length < unassigned.length) {
@@ -2874,15 +2899,14 @@ async function handleAutoAssign(
     let added = false
     for (const t of order) {
       const occ = occupiedByTeam.get(t.id)!
-      for (let pos = 1; pos <= 5; pos++) {
-        if (!occ.has(pos)) {
-          slots.push({ teamId: t.id, position: pos })
-          occ.add(pos)
-          added = true
-          break
-        }
+      if (occ.size >= projected.get(t.id)!) continue  // このチームは projected 到達済み
+      const target = nextSchemaSlot([...occ], projected.get(t.id)!)
+      if (target != null) {
+        slots.push({ teamId: t.id, position: target })
+        occ.add(target)
+        added = true
+        if (slots.length >= unassigned.length) break
       }
-      if (slots.length >= unassigned.length) break
     }
     if (!added) break  // 全チーム満員
     ascending = !ascending
@@ -2902,7 +2926,7 @@ async function handleAutoAssign(
       character: p.character,
       position: slot.position,
     })
-    assigned.push(`${p.discord_name}${p.rank ? ` [${p.rank}]` : ''} → **${team?.name}** ${POSITION_NAMES[slot.position - 1]}`)
+    assigned.push(`${p.discord_name}${p.rank ? ` [${p.rank}]` : ''} → **${team?.name}** ${positionLabel(slot.position)}`)
   }
 
   // パネルを更新

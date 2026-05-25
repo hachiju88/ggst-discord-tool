@@ -2,13 +2,34 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'disc
 import { TournamentRegulation } from '../models/Tournament'
 import { TournamentMatchModel } from '../models/TournamentMatch'
 import { TournamentTeamModel } from '../models/TournamentTeam'
-import { TournamentTeamMember, TournamentTeamMemberModel, POSITION_NAMES, positionLabel } from '../models/TournamentTeamMember'
+import { TournamentTeamMember, TournamentTeamMemberModel, positionLabel } from '../models/TournamentTeamMember'
 import { TournamentTeamBattle, TournamentTeamBattleModel } from '../models/TournamentTeamBattle'
 import { BracketService } from './BracketService'
 import { generateMatchCode } from '../utils/matchCode'
 
 function sortByPosition(members: TournamentTeamMember[]): TournamentTeamMember[] {
   return [...members].sort((a, b) => (a.position ?? 99) - (b.position ?? 99) || a.id - b.id)
+}
+
+// バトル表示のポジションラベル
+// - tiebreaker: 「最終戦」
+// - sequential / 両者同ポジション: 単一ラベル
+// - survival で両者ポジションが異なる: 併記
+function battlePosLabel(
+  battle: TournamentTeamBattle,
+  m1: TournamentTeamMember | null,
+  m2: TournamentTeamMember | null,
+  format: TournamentRegulation['teamBattleFormat']
+): string {
+  if (Number(battle.is_tiebreaker) === 1) return '最終戦'
+  const p1 = m1?.position ?? null
+  const p2 = m2?.position ?? null
+  if (p1 != null && p2 != null && p1 !== p2 && format === 'survival') {
+    return `${positionLabel(p1)} vs ${positionLabel(p2)}`
+  }
+  const single = p1 ?? p2
+  if (single != null) return positionLabel(single)
+  return `第${battle.battle_order}戦`
 }
 
 // proxy participant の discord_id からチームIDを取得
@@ -92,8 +113,7 @@ export class TeamBattleService {
     const t1m = await (m1 ? TournamentTeamModel.getById(m1.team_id) : null)
     const t2m = await (m2 ? TournamentTeamModel.getById(m2.team_id) : null)
 
-    const isTb = Number(battle.is_tiebreaker) === 1
-    const posLabel = isTb ? '最終戦' : (POSITION_NAMES[battle.battle_order - 1] ?? `第${battle.battle_order}戦`)
+    const posLabel = battlePosLabel(battle, m1, m2, regulation.teamBattleFormat)
     const winsLabel = `${regulation.winsRequired}先`
 
     const p1 = m1 ? `<@${m1.discord_id}>${m1.rank ? ` [${m1.rank}]` : ''}${m1.character ? ` (${m1.character})` : ''}` : '?'
@@ -429,7 +449,12 @@ export class TeamBattleService {
   }
 
   // チームマッチの結果サマリー文字列（更新後のメッセージ末尾に付ける）
-  static async formatMatchSummary(matchId: number, team1Id: number, team2Id: number): Promise<string> {
+  static async formatMatchSummary(
+    matchId: number,
+    team1Id: number,
+    team2Id: number,
+    regulation: TournamentRegulation
+  ): Promise<string> {
     const battles = await TournamentTeamBattleModel.getByMatch(matchId)
     const completed = battles.filter(b => b.status === 'completed')
     const initial = completed.filter(b => Number(b.is_tiebreaker) !== 1)
@@ -440,15 +465,23 @@ export class TeamBattleService {
       else if (b.winner_team_id === team2Id) t2Wins++
     }
 
+    const memberIds = Array.from(new Set(
+      completed.flatMap(b => [b.team1_member_id, b.team2_member_id])
+        .filter((id): id is number => id != null)
+    ))
+    const memberList = await Promise.all(memberIds.map(id => TournamentTeamMemberModel.getById(id)))
+    const memberMap = new Map<number, TournamentTeamMember>()
+    for (const m of memberList) if (m) memberMap.set(m.id, m)
+
     const [t1, t2] = await Promise.all([
       TournamentTeamModel.getById(team1Id),
       TournamentTeamModel.getById(team2Id),
     ])
 
     const resultLines = completed.map(b => {
-      const pos = Number(b.is_tiebreaker) === 1
-        ? '最終戦'
-        : (POSITION_NAMES[b.battle_order - 1] ?? `第${b.battle_order}戦`)
+      const m1 = b.team1_member_id != null ? memberMap.get(b.team1_member_id) ?? null : null
+      const m2 = b.team2_member_id != null ? memberMap.get(b.team2_member_id) ?? null : null
+      const pos = battlePosLabel(b, m1, m2, regulation.teamBattleFormat)
       const score = `${b.team1_games_won}-${b.team2_games_won}`
       return `${pos}: ${score}`
     })
@@ -461,7 +494,10 @@ export class TeamBattleService {
   }
 
   // チームマッチの試合結果embed
-  static async formatTeamMatchEmbed(matchId: number): Promise<EmbedBuilder> {
+  static async formatTeamMatchEmbed(
+    matchId: number,
+    regulation: TournamentRegulation
+  ): Promise<EmbedBuilder> {
     const battles = await TournamentTeamBattleModel.getByMatch(matchId)
     const match = await TournamentMatchModel.getWithParticipants(matchId)
 
@@ -473,11 +509,21 @@ export class TeamBattleService {
       t2Id ? TournamentTeamModel.getById(t2Id) : null,
     ])
 
+    const memberIds = Array.from(new Set(
+      battles.flatMap(b => [b.team1_member_id, b.team2_member_id])
+        .filter((id): id is number => id != null)
+    ))
+    const memberList = await Promise.all(memberIds.map(id => TournamentTeamMemberModel.getById(id)))
+    const memberMap = new Map<number, TournamentTeamMember>()
+    for (const m of memberList) if (m) memberMap.set(m.id, m)
+
     let t1Wins = 0, t2Wins = 0
     const lines: string[] = []
     for (const b of battles) {
       const isTb = Number(b.is_tiebreaker) === 1
-      const pos = isTb ? '最終戦' : (POSITION_NAMES[b.battle_order - 1] ?? `第${b.battle_order}戦`)
+      const m1 = b.team1_member_id != null ? memberMap.get(b.team1_member_id) ?? null : null
+      const m2 = b.team2_member_id != null ? memberMap.get(b.team2_member_id) ?? null : null
+      const pos = battlePosLabel(b, m1, m2, regulation.teamBattleFormat)
       if (b.status === 'completed') {
         if (b.winner_team_id === t1Id) {
           if (!isTb) t1Wins++
