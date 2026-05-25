@@ -138,10 +138,53 @@ export async function autoMigrate() {
         position INTEGER,
         is_captain INTEGER NOT NULL DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(team_id, discord_id)
+        UNIQUE(team_id, position)
       )` })
       await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_team_members_team ON tournament_team_members(team_id)' })
       console.log('✅ tournament_team_members table created')
+    } else {
+      // 旧 UNIQUE(team_id, discord_id) → UNIQUE(team_id, position) へのマイグレーション
+      // 同一チームで同ユーザーが複数ポジションを持てるようにするため
+      const tmTableSqlResult = await db.execute({
+        sql: "SELECT sql FROM sqlite_master WHERE type='table' AND name='tournament_team_members'",
+      })
+      const tmTableSql = ((tmTableSqlResult.rows[0] as any)?.sql ?? '') as string
+      const hasOldUnique = /UNIQUE\s*\(\s*team_id\s*,\s*discord_id\s*\)/i.test(tmTableSql)
+      if (hasOldUnique) {
+        // 既存データに (team_id, position) の重複がないか確認
+        const dupResult = await db.execute({
+          sql: `SELECT team_id, position, COUNT(*) AS cnt FROM tournament_team_members
+                WHERE position IS NOT NULL
+                GROUP BY team_id, position HAVING cnt > 1`,
+        })
+        if (dupResult.rows.length > 0) {
+          console.error('⚠️ tournament_team_members に (team_id, position) の重複行が存在するためマイグレーションを中止します:')
+          for (const row of dupResult.rows) {
+            const r = row as any
+            console.error(`   team_id=${r.team_id}, position=${r.position}, count=${r.cnt}`)
+          }
+          console.error('   手動で重複を解消してから再起動してください。')
+        } else {
+          console.log('Migrating tournament_team_members UNIQUE constraint...')
+          await db.execute({ sql: `CREATE TABLE tournament_team_members_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            team_id INTEGER NOT NULL REFERENCES tournament_teams(id) ON DELETE CASCADE,
+            discord_id TEXT NOT NULL,
+            discord_name TEXT NOT NULL,
+            rank TEXT,
+            character TEXT,
+            position INTEGER,
+            is_captain INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(team_id, position)
+          )` })
+          await db.execute({ sql: 'INSERT INTO tournament_team_members_new SELECT * FROM tournament_team_members' })
+          await db.execute({ sql: 'DROP TABLE tournament_team_members' })
+          await db.execute({ sql: 'ALTER TABLE tournament_team_members_new RENAME TO tournament_team_members' })
+          await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_team_members_team ON tournament_team_members(team_id)' })
+          console.log('✅ tournament_team_members UNIQUE 制約を (team_id, discord_id) → (team_id, position) に変更')
+        }
+      }
     }
 
     if (!tableNames.includes('tournament_team_battles')) {

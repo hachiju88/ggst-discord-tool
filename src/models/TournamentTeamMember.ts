@@ -2,6 +2,12 @@ import { getDatabase } from '../database'
 
 export const POSITION_NAMES = ['先鋒', '次鋒', '中堅', '副将', '大将']
 
+// position 値からラベル文字列を返す。null は「未配置」、範囲外は「N番」
+export function positionLabel(position: number | null | undefined): string {
+  if (position == null) return '未配置'
+  return POSITION_NAMES[position - 1] ?? `${position}番`
+}
+
 export interface TournamentTeamMember {
   id: number
   team_id: number
@@ -66,6 +72,16 @@ export class TournamentTeamMemberModel {
     return (r.rows[0] as unknown as TournamentTeamMember) ?? null
   }
 
+  // 同一チーム内で同じユーザーが複数ポジションを持ちうるため、全行を返す
+  static async getAllByDiscordId(teamId: number, discordId: string): Promise<TournamentTeamMember[]> {
+    const db = getDatabase()
+    const r = await db.execute({
+      sql: 'SELECT * FROM tournament_team_members WHERE team_id = ? AND discord_id = ? ORDER BY position, id',
+      args: [teamId, discordId],
+    })
+    return r.rows as unknown as TournamentTeamMember[]
+  }
+
   // 大会内に同じDiscordユーザーが既にいるか確認
   static async getByDiscordIdInTournament(
     tournamentId: number,
@@ -122,6 +138,23 @@ export class TournamentTeamMemberModel {
 
   static async delete(id: number): Promise<void> {
     const db = getDatabase()
+    // SQLite は FK 強制が既定 OFF のため、battle 参照を手動で NULL に
+    await db.execute({
+      sql: 'UPDATE tournament_team_battles SET team1_member_id = NULL WHERE team1_member_id = ?',
+      args: [id],
+    })
+    await db.execute({
+      sql: 'UPDATE tournament_team_battles SET team2_member_id = NULL WHERE team2_member_id = ?',
+      args: [id],
+    })
+    await db.execute({
+      sql: 'UPDATE tournament_team_battles SET winner_member_id = NULL WHERE winner_member_id = ?',
+      args: [id],
+    })
+    await db.execute({
+      sql: 'UPDATE tournament_team_battles SET handicap_member_id = NULL WHERE handicap_member_id = ?',
+      args: [id],
+    })
     await db.execute({ sql: 'DELETE FROM tournament_team_members WHERE id = ?', args: [id] })
   }
 

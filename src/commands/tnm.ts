@@ -36,7 +36,7 @@ import { SwissService } from '../services/SwissService'
 import { SwissImageService } from '../services/SwissImageService'
 import { TeamBattleService, isTeamProxy, teamIdFromProxy, proxyDiscordId } from '../services/TeamBattleService'
 import { TournamentTeamModel } from '../models/TournamentTeam'
-import { TournamentTeamMemberModel, POSITION_NAMES } from '../models/TournamentTeamMember'
+import { TournamentTeamMemberModel, POSITION_NAMES, positionLabel } from '../models/TournamentTeamMember'
 import { TournamentTeamBattleModel } from '../models/TournamentTeamBattle'
 import { TournamentParticipant } from '../models/TournamentParticipant'
 import { RANKS } from '../constants/ranks'
@@ -1534,9 +1534,10 @@ async function buildAssignPanel(tournamentId: number): Promise<{ content: string
       const assignments = assignmentsByDiscordId.get(p.discord_id) ?? []
       let assignLabel = ''
       if (isAssigned && assignments.length > 0) {
-        const first = assignments[0]
-        const posName = POSITION_NAMES[(first.position ?? 1) - 1]
-        assignLabel = `(${first.team_name.slice(0, 3)}/${posName}${assignments.length > 1 ? '+' : ''})`
+        const displayed = assignments.slice(0, 3)
+          .map(a => `${a.team_name.slice(0, 3)}/${positionLabel(a.position)}`)
+        const overflow = assignments.length > 3 ? ',…' : ''
+        assignLabel = `(${displayed.join(',')}${overflow})`
       }
       const rankPart = !isAssigned && p.rank ? ` [${p.rank}]` : ''
       row.addComponents(
@@ -1580,7 +1581,7 @@ async function handleAssignButton(interaction: ButtonInteraction, tournamentId: 
   const myAssignments = allTournamentMembers.filter(m => m.discord_id === discordId)
   const myPositions = new Set(myAssignments.map(m => `${m.team_id}:${m.position}`))
 
-  const options: StringSelectMenuOptionBuilder[] = []
+  const placementOptions: StringSelectMenuOptionBuilder[] = []
   for (const t of teams) {
     const members = allTournamentMembers.filter(m => m.team_id === t.id)
     for (let pos = 1; pos <= 5; pos++) {
@@ -1589,21 +1590,25 @@ async function handleAssignButton(interaction: ButtonInteraction, tournamentId: 
       const label = taken
         ? `${t.name} / ${POSITION_NAMES[pos - 1]} (← ${taken.discord_name.slice(0, 8)})`
         : `${t.name} / ${POSITION_NAMES[pos - 1]}`
-      options.push(new StringSelectMenuOptionBuilder()
+      placementOptions.push(new StringSelectMenuOptionBuilder()
         .setLabel(label.slice(0, 100))
         .setValue(`${t.id}:${pos}`))
     }
   }
 
-  // 現在の配置の削除オプション
+  const removeOptions: StringSelectMenuOptionBuilder[] = []
   for (const m of myAssignments) {
     const team = teams.find(t => t.id === m.team_id)
     if (team) {
-      options.push(new StringSelectMenuOptionBuilder()
-        .setLabel(`🗑️ 削除: ${team.name} / ${POSITION_NAMES[(m.position ?? 1) - 1]}`)
+      removeOptions.push(new StringSelectMenuOptionBuilder()
+        .setLabel(`🗑️ 削除: ${team.name} / ${positionLabel(m.position)}`)
         .setValue(`remove:${m.id}`))
     }
   }
+
+  // Discord select の上限は 25。削除オプションは常に収まるよう、配置オプションを残り枠で切り詰める
+  const remainingForPlacement = Math.max(0, 25 - removeOptions.length)
+  const options = [...placementOptions.slice(0, remainingForPlacement), ...removeOptions]
 
   if (options.length === 0) {
     await interaction.reply({ content: '❌ 変更できるポジションがありません。', flags: MessageFlags.Ephemeral })
@@ -1614,7 +1619,7 @@ async function handleAssignButton(interaction: ButtonInteraction, tournamentId: 
   const select = new StringSelectMenuBuilder()
     .setCustomId(`tnm-assign-slot:${tournamentId}:${discordId}:${msgId}`)
     .setPlaceholder('ポジション選択（削除は🗑️を選択）')
-    .addOptions(options.slice(0, 25))
+    .addOptions(options)
 
   const contentMsg = myAssignments.length > 0
     ? `**${displayName}** の配置を変更・追加・削除できます。`
@@ -1668,9 +1673,18 @@ async function handleAssignSlotSelect(interaction: StringSelectMenuInteraction, 
   }
 
   // 別のプレイヤーがこのスロットを占有している場合は置き換え
+  // 占有者がキャプテンだった場合は新規メンバーに引き継ぐ
   const occupant = teamMembers.find(m => m.position === position)
+  const inheritCaptain = occupant?.is_captain === 1
   if (occupant) {
     await TournamentTeamMemberModel.delete(occupant.id)
+  }
+
+  // 同ユーザーの未配置(position=null)行が同チームに残っていれば掃除
+  for (const sm of teamMembers) {
+    if (sm.discord_id === discordId && sm.position === null) {
+      await TournamentTeamMemberModel.delete(sm.id)
+    }
   }
 
   await TournamentTeamMemberModel.create({
@@ -1680,6 +1694,7 @@ async function handleAssignSlotSelect(interaction: StringSelectMenuInteraction, 
     rank: participant.rank,
     character: participant.character,
     position,
+    is_captain: inheritCaptain,
   })
 
   await interaction.update({ content: `✅ ${participant.discord_name} を ${POSITION_NAMES[position - 1]} に配置しました。`, components: [] })
@@ -3607,10 +3622,13 @@ async function handleCombinedModal(interaction: ModalSubmitInteraction): Promise
 
   if (type === 'team') {
     const teamId = parseInt(extraId)
-    const member = await TournamentTeamMemberModel.getByDiscordId(teamId, interaction.user.id)
-    if (!member) { await interaction.reply({ content: '❌ メンバーが見つかりません。', flags: MessageFlags.Ephemeral }); return true }
-    await TournamentTeamMemberModel.setRank(member.id, rank ?? null)
-    await TournamentTeamMemberModel.setCharacter(member.id, character ?? null)
+    // 同じユーザーが同チーム内で複数ポジションを持ちうるため全行を更新
+    const members = await TournamentTeamMemberModel.getAllByDiscordId(teamId, interaction.user.id)
+    if (members.length === 0) { await interaction.reply({ content: '❌ メンバーが見つかりません。', flags: MessageFlags.Ephemeral }); return true }
+    for (const m of members) {
+      await TournamentTeamMemberModel.setRank(m.id, rank ?? null)
+      await TournamentTeamMemberModel.setCharacter(m.id, character ?? null)
+    }
     const team = await TournamentTeamModel.getById(teamId)
     await interaction.reply({ content: `✅ 登録完了！（チーム: **${team?.name}**）\nランク: **${rank ?? '未指定'}** / キャラ: **${character ?? '未指定'}**`, flags: MessageFlags.Ephemeral })
   }

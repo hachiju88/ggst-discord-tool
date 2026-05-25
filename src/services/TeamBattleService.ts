@@ -2,7 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'disc
 import { TournamentRegulation } from '../models/Tournament'
 import { TournamentMatchModel } from '../models/TournamentMatch'
 import { TournamentTeamModel } from '../models/TournamentTeam'
-import { TournamentTeamMember, TournamentTeamMemberModel, POSITION_NAMES } from '../models/TournamentTeamMember'
+import { TournamentTeamMember, TournamentTeamMemberModel, POSITION_NAMES, positionLabel } from '../models/TournamentTeamMember'
 import { TournamentTeamBattle, TournamentTeamBattleModel } from '../models/TournamentTeamBattle'
 import { BracketService } from './BracketService'
 import { generateMatchCode } from '../utils/matchCode'
@@ -60,10 +60,10 @@ export class TeamBattleService {
       `**${team1?.name ?? '?'}** vs **${team2?.name ?? '?'}**`,
       '',
       `【${team1?.name ?? '?'}】`,
-      ...sortByPosition(t1Members).map(m => rosterLine(m, POSITION_NAMES[(m.position ?? 1) - 1] ?? `${m.position}番`)),
+      ...sortByPosition(t1Members).map(m => rosterLine(m, positionLabel(m.position))),
       '',
       `【${team2?.name ?? '?'}】`,
-      ...sortByPosition(t2Members).map(m => rosterLine(m, POSITION_NAMES[(m.position ?? 1) - 1] ?? `${m.position}番`)),
+      ...sortByPosition(t2Members).map(m => rosterLine(m, positionLabel(m.position))),
     ]
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
