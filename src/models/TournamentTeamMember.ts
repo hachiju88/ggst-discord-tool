@@ -8,6 +8,38 @@ export function positionLabel(position: number | null | undefined): string {
   return POSITION_NAMES[position - 1] ?? `${position}番`
 }
 
+// チーム規模ごとの正規ポジション構成
+// 1人: 大将 / 2人: 先鋒・大将 / 3人: 先鋒・中堅・大将
+// 4人: 先鋒・次鋒・中堅・大将 / 5人: 先鋒・次鋒・中堅・副将・大将
+export const POSITIONS_BY_TEAM_SIZE: Readonly<Record<number, readonly number[]>> = {
+  1: [5],
+  2: [1, 5],
+  3: [1, 3, 5],
+  4: [1, 2, 3, 5],
+  5: [1, 2, 3, 4, 5],
+}
+
+export function getPositionsForTeamSize(size: number): readonly number[] {
+  if (size < 1) return []
+  return POSITIONS_BY_TEAM_SIZE[Math.min(size, 5)] ?? []
+}
+
+// 既存配置を尊重しつつ、新規参加者のための次の空きスキーマスロットを返す。
+// スキーマに空きが無い場合は 1〜5 の中の任意の空きにフォールバック。
+export function nextSchemaSlot(
+  occupiedPositions: (number | null | undefined)[],
+  newSize: number
+): number | null {
+  const occupied = new Set(occupiedPositions.filter((p): p is number => p != null))
+  const schema = getPositionsForTeamSize(newSize)
+  const fromSchema = schema.find(p => !occupied.has(p))
+  if (fromSchema != null) return fromSchema
+  for (let p = 1; p <= 5; p++) {
+    if (!occupied.has(p)) return p
+  }
+  return null
+}
+
 export interface TournamentTeamMember {
   id: number
   team_id: number
