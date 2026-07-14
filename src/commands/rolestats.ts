@@ -1,5 +1,9 @@
 import { SlashCommandBuilder, MessageFlags } from 'discord.js';
-import type { ChatInputCommandInteraction, ButtonInteraction } from 'discord.js';
+import type {
+  ChatInputCommandInteraction,
+  ButtonInteraction,
+  AutocompleteInteraction,
+} from 'discord.js';
 import { RoleStatsService, REFRESH_BUTTON_ID } from '../services/RoleStatsService';
 import { checkPermission, PermissionLevel } from '../utils/permissions';
 
@@ -10,14 +14,21 @@ const INTENT_HINT =
 
 export const data = new SlashCommandBuilder()
   .setName('rolestats')
-  .setDescription('[監視] ロールの所属人数を集計・表示します')
+  .setDescription('[監視] ロールの所属人数をグループ別に集計・表示します')
   .addSubcommand((s) =>
     s.setName('show').setDescription('監視パネルを投稿します（以後この位置が自動更新されます）'),
   )
   .addSubcommand((s) =>
     s
       .setName('add')
-      .setDescription('監視対象のロールを追加します')
+      .setDescription('集計グループにロールを追加します（グループが無ければ作成）')
+      .addStringOption((o) =>
+        o
+          .setName('group')
+          .setDescription('集計グループ名（例: プラットフォーム / ランク / キャラクター / 入力デバイス）')
+          .setRequired(true)
+          .setAutocomplete(true),
+      )
       .addRoleOption((o) =>
         o.setName('role').setDescription('追加するロール').setRequired(true),
       ),
@@ -25,14 +36,38 @@ export const data = new SlashCommandBuilder()
   .addSubcommand((s) =>
     s
       .setName('remove')
-      .setDescription('監視対象のロールを外します')
+      .setDescription('ロールを監視対象から外します')
       .addRoleOption((o) =>
         o.setName('role').setDescription('外すロール').setRequired(true),
       ),
   )
   .addSubcommand((s) =>
-    s.setName('list').setDescription('現在の監視対象ロールを確認します'),
+    s
+      .setName('delete-group')
+      .setDescription('集計グループをまるごと削除します')
+      .addStringOption((o) =>
+        o
+          .setName('group')
+          .setDescription('削除するグループ名')
+          .setRequired(true)
+          .setAutocomplete(true),
+      ),
+  )
+  .addSubcommand((s) =>
+    s.setName('list').setDescription('現在の集計グループと監視ロールを確認します'),
   );
+
+export async function autocomplete(interaction: AutocompleteInteraction): Promise<void> {
+  const focused = interaction.options.getFocused(true);
+  if (focused.name !== 'group' || !interaction.guildId) {
+    await interaction.respond([]);
+    return;
+  }
+  const names = await RoleStatsService.getGroupNames(interaction.guildId);
+  const query = focused.value.toLowerCase();
+  const filtered = names.filter((n) => n.toLowerCase().includes(query)).slice(0, 25);
+  await interaction.respond(filtered.map((n) => ({ name: n, value: n })));
+}
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   const guild = interaction.guild;
@@ -51,12 +86,28 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const subcommand = interaction.options.getSubcommand();
 
   if (subcommand === 'add') {
+    const group = interaction.options.getString('group', true).trim();
     const role = interaction.options.getRole('role', true);
-    const added = await RoleStatsService.addRole(guild.id, role.id);
+    if (!group) {
+      await interaction.reply({
+        content: '❌ グループ名を入力してください。',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    const result = await RoleStatsService.addRole(guild.id, group, role.id);
+
+    let content: string;
+    if (result.alreadyInGroup) {
+      content = `ℹ️ <@&${role.id}> は既にグループ **${group}** に登録されています。`;
+    } else if (result.movedFromOtherGroup) {
+      content = `✅ <@&${role.id}> をグループ **${group}** に移動しました。`;
+    } else {
+      content = `✅ <@&${role.id}> をグループ **${group}** に追加しました。`;
+      if (result.createdGroup) content += `\n🆕 グループ **${group}** を新規作成しました。`;
+    }
     await interaction.reply({
-      content: added
-        ? `✅ <@&${role.id}> を監視対象に追加しました。`
-        : `ℹ️ <@&${role.id}> は既に監視対象です。`,
+      content,
       allowedMentions: { parse: [] },
       flags: MessageFlags.Ephemeral,
     });
@@ -76,12 +127,33 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return;
   }
 
+  if (subcommand === 'delete-group') {
+    const group = interaction.options.getString('group', true).trim();
+    const deleted = await RoleStatsService.deleteGroup(guild.id, group);
+    await interaction.reply({
+      content: deleted
+        ? `✅ グループ **${group}** を削除しました。`
+        : `ℹ️ グループ **${group}** は存在しません。`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
   if (subcommand === 'list') {
-    const ids = await RoleStatsService.getRoleIds(guild.id);
-    const content =
-      ids.length === 0
-        ? 'ℹ️ 監視対象のロールは未設定です。`/rolestats add` で追加してください。'
-        : `⚙️ **監視対象ロール (${ids.length}件)**\n` + ids.map((id) => `・<@&${id}>`).join('\n');
+    const groups = await RoleStatsService.getGroups(guild.id);
+    let content: string;
+    if (groups.length === 0) {
+      content =
+        'ℹ️ 集計グループは未設定です。`/rolestats add group:<グループ名> role:<ロール>` で追加してください。';
+    } else {
+      content = `⚙️ **集計グループ (${groups.length}件)**\n`;
+      content += groups
+        .map((g) => {
+          const roles = g.roleIds.map((id) => `<@&${id}>`).join(' ') || '（ロールなし）';
+          return `\n**${g.name}** (${g.roleIds.length})\n${roles}`;
+        })
+        .join('\n');
+    }
     await interaction.reply({
       content,
       allowedMentions: { parse: [] },
@@ -93,10 +165,10 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   // subcommand === 'show'
   await interaction.deferReply();
 
-  const ids = await RoleStatsService.getRoleIds(guild.id);
-  if (ids.length === 0) {
+  const groups = await RoleStatsService.getGroups(guild.id);
+  if (groups.length === 0) {
     await interaction.editReply(
-      'ℹ️ 監視対象のロールが未設定です。`/rolestats add role:<ロール>` で追加してから再実行してください。',
+      'ℹ️ 集計グループが未設定です。`/rolestats add group:<グループ名> role:<ロール>` で追加してから再実行してください。',
     );
     return;
   }
