@@ -5,6 +5,9 @@ export function createClient(): Client {
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
+      // /rolestats のロール人数集計に必要(特権インテント)。
+      // Discord Developer Portal 側でも「Server Members Intent」を有効化すること。
+      GatewayIntentBits.GuildMembers,
     ],
     rest: {
       timeout: 30000,

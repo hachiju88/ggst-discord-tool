@@ -31,6 +31,22 @@ export class SystemSettingModel {
         });
     }
 
+    // 指定プレフィックスで始まるキーをまとめて取得
+    static async getByPrefix(prefix: string): Promise<{ key: string; value: string }[]> {
+        const db = getDatabase();
+        // LIKE のワイルドカード(% _ \)をエスケープして前方一致検索
+        const escaped = prefix.replace(/[%_\\]/g, (c) => `\\${c}`);
+        const result = await db.execute({
+            sql: "SELECT key, value FROM system_settings WHERE key LIKE ? ESCAPE '\\'",
+            args: [`${escaped}%`]
+        });
+
+        return result.rows.map((row) => ({
+            key: row.key as string,
+            value: row.value as string
+        }));
+    }
+
     // 設定値を削除
     static async delete(key: string): Promise<void> {
         const db = getDatabase();

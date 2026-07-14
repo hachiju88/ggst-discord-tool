@@ -263,15 +263,17 @@ NODE_ENV=development
 1. [Discord Developer Portal](https://discord.com/developers/applications)にアクセス
 2. 「New Application」をクリック
 3. Bot タブから Bot Token を取得（`DISCORD_TOKEN`）
-4. General Information タブから Application ID を取得（`DISCORD_APPLICATION_ID`）
-5. OAuth2 → URL Generator で以下を選択:
+4. Bot タブの **Privileged Gateway Intents** で **Server Members Intent** を ON にする
+   （`/rolestats` のロール人数集計に必須。未設定だと人数を取得できません）
+5. General Information タブから Application ID を取得（`DISCORD_APPLICATION_ID`）
+6. OAuth2 → URL Generator で以下を選択:
    - **Scopes**: `bot`, `applications.commands`
    - **Bot Permissions**:
      - Send Messages
      - Embed Links
      - Attach Files
      - Use Slash Commands
-6. 生成されたURLでBotをサーバーに招待
+7. 生成されたURLでBotをサーバーに招待
 
 ### 5. Turso Databaseの作成
 
@@ -389,6 +391,19 @@ npm start
 367: |  | `view-settings` | 現在の権限設定を確認 |
 368: |  | `backup` | データのバックアップを作成 |
 369: |  | `restore` | バックアップからデータを復元 |
+
+#### ロール人数モニター (New!)
+
+SERVER STATS 系 Bot の「監視できるロール数の上限」に縛られず、任意の数のロールの所属人数を集計・表示します。`show` で投稿したパネルは10分ごとに自動更新され、🔄ボタンで即時更新もできます。監視対象ロール数に上限はありません。
+
+> ⚠️ 人数集計には Discord Developer Portal の **Server Members Intent**（特権インテント）が必要です。
+
+| コマンド | サブコマンド | 説明 |
+|---------|------------|------|
+| `/rolestats` | `show` | 人数モニターのパネルを投稿（以後この位置が自動更新） |
+|  | `add` | 監視対象のロールを追加 |
+|  | `remove` | 監視対象のロールを外す |
+|  | `list` | 現在の監視対象ロールを確認 |
 370: 
 371: ### 使用例
 
