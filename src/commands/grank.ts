@@ -221,6 +221,9 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
     // deferUpdate 済みのため、ここで例外が漏れると bot.ts のフォールバックが
     // 走らず「選択したのに何も起きない」無言失敗になる。必ずここで捕捉して
     // ユーザーへ結果を返す。
+    // addTracking 成功(DB登録済み)後の editReply が transient エラーで落ちた場合に
+    // 「追加失敗」と誤表示しないよう、登録済みかどうかを保持する。
+    let alreadyAdded = false;
     try {
       const player = await PuddleFarmService.getPlayer(playerId);
       if (!player) {
@@ -247,6 +250,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
         });
         return;
       }
+      alreadyAdded = true;
       await interaction.editReply({
         content: `✅ **${player.name}** (${charInfo.char_long}) を追加しました。\n⏳ 履歴を取得中...`,
         components: [],
@@ -258,10 +262,11 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       });
     } catch (err) {
       console.error('[grank] add select failed:', err);
-      await interaction.editReply({
-        content: '❌ プレイヤーの追加中にエラーが発生しました。時間をおいて再度お試しください。',
-        components: [],
-      }).catch(() => { /* 応答ずみ等は無視 */ });
+      // 既に登録は完了しているケースでは「失敗」と断定しない(履歴取得は🔄で再取得可能)。
+      const content = alreadyAdded
+        ? '⚠️ 追加は完了しましたが、履歴取得の表示に失敗しました。パネルの🔄で反映されます。'
+        : '❌ プレイヤーの追加中にエラーが発生しました。時間をおいて再度お試しください。';
+      await interaction.editReply({ content, components: [] }).catch(() => { /* 応答ずみ等は無視 */ });
     }
     return;
   }
@@ -276,84 +281,99 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const count = await RankTrackingService.getGuildTrackingCount(guildId);
-  if (count >= MAX_TRACKED_PER_GUILD) {
-    await interaction.editReply({
-      content: `❌ 追跡上限 (${MAX_TRACKED_PER_GUILD}件) に達しています。先に不要なプレイヤーを解除してください。`,
-    });
-    return;
-  }
-
-  const searchString = interaction.fields.getTextInputValue('search_string').trim();
-  const charShort = interaction.fields.getTextInputValue('char_short').trim().toUpperCase();
-
-  if (searchString.length === 0) {
-    await interaction.editReply({ content: '❌ 検索名を入力してください。' });
-    return;
-  }
-  if (charShort.length !== 2) {
-    await interaction.editReply({ content: '❌ キャラクター短縮コードは2文字で指定してください (例: SO, KY)。' });
-    return;
-  }
-
-  const results = await PuddleFarmService.searchPlayer(searchString);
-  // char で絞り込んだ時点で各行は (プレイヤー, このchar) を表すため、id 重複排除で
-  // 同一プレイヤーの重複行を安全に除去できる(別 char は既に除外済み)。
-  const filtered = dedupById(results.filter(r => r.char_short.toUpperCase() === charShort));
-
-  if (filtered.length === 0) {
-    const available = [...new Set(results.map(r => r.char_short))].join(', ');
-    const hint = available ? `\n見つかったキャラ: \`${available}\`` : '';
-    await interaction.editReply({
-      content: `❌ **${searchString}** で \`${charShort}\` のプレイヤーが見つかりませんでした。${hint}`,
-    });
-    return;
-  }
-
-  if (filtered.length === 1) {
-    const r = filtered[0];
-    // API の char_short 表記を保存。
-    const result = await RankTrackingService.addTracking(
-      guildId, r.id, r.name, r.char_short, r.char_long, interaction.user.id,
-    );
-    if (result === 'duplicate') {
-      await interaction.editReply({ content: `ℹ️ **${r.name}** (${r.char_short}) はすでに追跡中です。` });
+  // deferReply 済みのため、以降で例外が漏れると bot.ts のフォールバックが走らず
+  // 「モーダル送信後に何も起きない」無言失敗になる。DB / 検索呼び出しの例外を
+  // 必ずここで捕捉してユーザーへ返す。
+  // addTracking 成功後の editReply が transient エラーで落ちた場合に「追加失敗」と
+  // 誤表示しないよう、登録済みかどうかを保持する。
+  let alreadyAdded = false;
+  try {
+    const count = await RankTrackingService.getGuildTrackingCount(guildId);
+    if (count >= MAX_TRACKED_PER_GUILD) {
+      await interaction.editReply({
+        content: `❌ 追跡上限 (${MAX_TRACKED_PER_GUILD}件) に達しています。先に不要なプレイヤーを解除してください。`,
+      });
       return;
     }
-    await interaction.editReply({
-      content: `✅ **${r.name}** (${r.char_long}) を追加しました。\n⏳ 履歴を取得中...`,
-    });
-    const backfill = await RankTrackingService.backfillPlayer(r.id, r.char_short);
-    await interaction.editReply({
-      content: formatBackfillResult(r.name, r.char_long, backfill),
-    });
-    return;
-  }
 
-  // 候補が複数ヒット — Select menu に逃がす。
-  // r.rating は型上 number だが API が null を返すケース(placement/未ランク)に
-  // 備えてガードする。decodeRating(null) は NaN を経由してクラッシュするため。
-  const options = filtered.slice(0, 25).map(r => {
-    let ratingLabel: string;
-    if (typeof r.rating === 'number' && Number.isFinite(r.rating)) {
-      const decoded = decodeRating(r.rating);
-      ratingLabel = decoded.kind === 'DR' ? `DR ${decoded.value.toFixed(0)}` : `RP ${decoded.value.toFixed(0)}`;
-    } else {
-      ratingLabel = 'レート不明';
+    const searchString = interaction.fields.getTextInputValue('search_string').trim();
+    const charShort = interaction.fields.getTextInputValue('char_short').trim().toUpperCase();
+
+    if (searchString.length === 0) {
+      await interaction.editReply({ content: '❌ 検索名を入力してください。' });
+      return;
     }
-    // 同名・同キャラの別プレイヤーが並ぶことがあるため、ID を併記して
-    // 区別できるようにする(description は最大100文字)。
-    return new StringSelectMenuOptionBuilder()
-      .setLabel(truncate(r.name, 25))
-      .setDescription(truncate(`${ratingLabel} · ID ${r.id}`, 100))
-      .setValue(String(r.id));
-  });
-  const menu = new StringSelectMenuBuilder()
-    .setCustomId(`grank-add:select:${charShort}`)
-    .setPlaceholder('登録するプレイヤーを選択')
-    .addOptions(options);
-  await interaction.editReply({
-    content: `**${searchString}** (${charShort}) の検索結果が複数見つかりました。登録するプレイヤーを選択してください:`,
-    components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
-  });
+    if (charShort.length !== 2) {
+      await interaction.editReply({ content: '❌ キャラクター短縮コードは2文字で指定してください (例: SO, KY)。' });
+      return;
+    }
+
+    const results = await PuddleFarmService.searchPlayer(searchString);
+    // char で絞り込んだ時点で各行は (プレイヤー, このchar) を表すため、id 重複排除で
+    // 同一プレイヤーの重複行を安全に除去できる(別 char は既に除外済み)。
+    const filtered = dedupById(results.filter(r => r.char_short.toUpperCase() === charShort));
+
+    if (filtered.length === 0) {
+      const available = [...new Set(results.map(r => r.char_short))].join(', ');
+      const hint = available ? `\n見つかったキャラ: \`${available}\`` : '';
+      await interaction.editReply({
+        content: `❌ **${searchString}** で \`${charShort}\` のプレイヤーが見つかりませんでした。${hint}`,
+      });
+      return;
+    }
+
+    if (filtered.length === 1) {
+      const r = filtered[0];
+      // API の char_short 表記を保存。
+      const result = await RankTrackingService.addTracking(
+        guildId, r.id, r.name, r.char_short, r.char_long, interaction.user.id,
+      );
+      if (result === 'duplicate') {
+        await interaction.editReply({ content: `ℹ️ **${r.name}** (${r.char_short}) はすでに追跡中です。` });
+        return;
+      }
+      alreadyAdded = true;
+      await interaction.editReply({
+        content: `✅ **${r.name}** (${r.char_long}) を追加しました。\n⏳ 履歴を取得中...`,
+      });
+      const backfill = await RankTrackingService.backfillPlayer(r.id, r.char_short);
+      await interaction.editReply({
+        content: formatBackfillResult(r.name, r.char_long, backfill),
+      });
+      return;
+    }
+
+    // 候補が複数ヒット — Select menu に逃がす。
+    // r.rating は型上 number だが API が null を返すケース(placement/未ランク)に
+    // 備えてガードする。decodeRating(null) は NaN を経由してクラッシュするため。
+    const options = filtered.slice(0, 25).map(r => {
+      let ratingLabel: string;
+      if (typeof r.rating === 'number' && Number.isFinite(r.rating)) {
+        const decoded = decodeRating(r.rating);
+        ratingLabel = decoded.kind === 'DR' ? `DR ${decoded.value.toFixed(0)}` : `RP ${decoded.value.toFixed(0)}`;
+      } else {
+        ratingLabel = 'レート不明';
+      }
+      // 同名・同キャラの別プレイヤーが並ぶことがあるため、ID を併記して
+      // 区別できるようにする(description は最大100文字)。
+      return new StringSelectMenuOptionBuilder()
+        .setLabel(truncate(r.name, 25))
+        .setDescription(truncate(`${ratingLabel} · ID ${r.id}`, 100))
+        .setValue(String(r.id));
+    });
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId(`grank-add:select:${charShort}`)
+      .setPlaceholder('登録するプレイヤーを選択')
+      .addOptions(options);
+    await interaction.editReply({
+      content: `**${searchString}** (${charShort}) の検索結果が複数見つかりました。登録するプレイヤーを選択してください:`,
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
+    });
+  } catch (err) {
+    console.error('[grank] modal submit failed:', err);
+    const content = alreadyAdded
+      ? '⚠️ 追加は完了しましたが、履歴取得の表示に失敗しました。パネルの🔄で反映されます。'
+      : '❌ プレイヤーの追加処理中にエラーが発生しました。時間をおいて再度お試しください。';
+    await interaction.editReply({ content }).catch(() => { /* 応答ずみ等は無視 */ });
+  }
 }
