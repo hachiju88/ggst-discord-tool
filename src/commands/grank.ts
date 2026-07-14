@@ -17,10 +17,27 @@ import type {
   GuildMember,
 } from 'discord.js';
 import { RankTrackingService } from '../services/RankTrackingService';
-import { PuddleFarmService } from '../services/PuddleFarmService';
+import { PuddleFarmService, type SearchResult } from '../services/PuddleFarmService';
 import { buildPanel } from '../services/RankPanelBuilder';
 import { truncate } from '../utils/text';
 import { decodeRating } from '../constants/dr-ranks';
+
+// puddle.farm の検索は同一プレイヤー(同じ id)を複数行で返すことがある
+// (別名・名前履歴マッチなど)。同一キャラで絞り込んだ後にこれが残ると、
+// StringSelectMenu の option value(= player id)が重複し、Discord が
+// メニュー送信を 400 で拒否 → defer 済みインタラクションが無言で失敗する。
+// これを防ぐため id で重複排除する(最初の出現を採用)。
+function dedupById(results: SearchResult[]): SearchResult[] {
+  const seen = new Set<string>();
+  const out: SearchResult[] = [];
+  for (const r of results) {
+    const id = String(r.id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(r);
+  }
+  return out;
+}
 
 function formatBackfillResult(
   name: string,
@@ -201,40 +218,51 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
     const playerId = interaction.values[0]; // string (int64 だと Number化で精度欠損するため)
     await interaction.deferUpdate();
 
-    const player = await PuddleFarmService.getPlayer(playerId);
-    if (!player) {
-      await interaction.editReply({ content: '❌ プレイヤー情報の取得に失敗しました。', components: [] });
-      return;
-    }
-    const charInfo = player.ratings.find(r => r.char_short.toUpperCase() === charShortFromId);
-    if (!charInfo) {
+    // deferUpdate 済みのため、ここで例外が漏れると bot.ts のフォールバックが
+    // 走らず「選択したのに何も起きない」無言失敗になる。必ずここで捕捉して
+    // ユーザーへ結果を返す。
+    try {
+      const player = await PuddleFarmService.getPlayer(playerId);
+      if (!player) {
+        await interaction.editReply({ content: '❌ プレイヤー情報の取得に失敗しました。', components: [] });
+        return;
+      }
+      const charInfo = player.ratings.find(r => r.char_short.toUpperCase() === charShortFromId);
+      if (!charInfo) {
+        await interaction.editReply({
+          content: `❌ ${player.name} は ${charShortFromId} の使用記録がありません。`,
+          components: [],
+        });
+        return;
+      }
+      // puddle.farm が返す char_short の表記をそのまま保存(URL生成・履歴取得時の整合性のため)。
+      const canonicalCharShort = charInfo.char_short;
+      const result = await RankTrackingService.addTracking(
+        guildId, playerId, player.name, canonicalCharShort, charInfo.char_long, interaction.user.id,
+      );
+      if (result === 'duplicate') {
+        await interaction.editReply({
+          content: `ℹ️ **${player.name}** (${canonicalCharShort}) はすでに追跡中です。`,
+          components: [],
+        });
+        return;
+      }
       await interaction.editReply({
-        content: `❌ ${player.name} は ${charShortFromId} の使用記録がありません。`,
+        content: `✅ **${player.name}** (${charInfo.char_long}) を追加しました。\n⏳ 履歴を取得中...`,
         components: [],
       });
-      return;
-    }
-    // puddle.farm が返す char_short の表記をそのまま保存(URL生成・履歴取得時の整合性のため)。
-    const canonicalCharShort = charInfo.char_short;
-    const result = await RankTrackingService.addTracking(
-      guildId, playerId, player.name, canonicalCharShort, charInfo.char_long, interaction.user.id,
-    );
-    if (result === 'duplicate') {
+      const backfill = await RankTrackingService.backfillPlayer(playerId, canonicalCharShort);
       await interaction.editReply({
-        content: `ℹ️ **${player.name}** (${canonicalCharShort}) はすでに追跡中です。`,
+        content: formatBackfillResult(player.name, charInfo.char_long, backfill),
         components: [],
       });
-      return;
+    } catch (err) {
+      console.error('[grank] add select failed:', err);
+      await interaction.editReply({
+        content: '❌ プレイヤーの追加中にエラーが発生しました。時間をおいて再度お試しください。',
+        components: [],
+      }).catch(() => { /* 応答ずみ等は無視 */ });
     }
-    await interaction.editReply({
-      content: `✅ **${player.name}** (${charInfo.char_long}) を追加しました。\n⏳ 履歴を取得中...`,
-      components: [],
-    });
-    const backfill = await RankTrackingService.backfillPlayer(playerId, canonicalCharShort);
-    await interaction.editReply({
-      content: formatBackfillResult(player.name, charInfo.char_long, backfill),
-      components: [],
-    });
     return;
   }
 }
@@ -269,7 +297,9 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   }
 
   const results = await PuddleFarmService.searchPlayer(searchString);
-  const filtered = results.filter(r => r.char_short.toUpperCase() === charShort);
+  // char で絞り込んだ時点で各行は (プレイヤー, このchar) を表すため、id 重複排除で
+  // 同一プレイヤーの重複行を安全に除去できる(別 char は既に除外済み)。
+  const filtered = dedupById(results.filter(r => r.char_short.toUpperCase() === charShort));
 
   if (filtered.length === 0) {
     const available = [...new Set(results.map(r => r.char_short))].join(', ');
@@ -311,9 +341,11 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
     } else {
       ratingLabel = 'レート不明';
     }
+    // 同名・同キャラの別プレイヤーが並ぶことがあるため、ID を併記して
+    // 区別できるようにする(description は最大100文字)。
     return new StringSelectMenuOptionBuilder()
       .setLabel(truncate(r.name, 25))
-      .setDescription(ratingLabel)
+      .setDescription(truncate(`${ratingLabel} · ID ${r.id}`, 100))
       .setValue(String(r.id));
   });
   const menu = new StringSelectMenuBuilder()
