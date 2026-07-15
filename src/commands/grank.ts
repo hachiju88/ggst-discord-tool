@@ -27,6 +27,15 @@ import { decodeRating } from '../constants/dr-ranks';
 // StringSelectMenu の option value(= player id)が重複し、Discord が
 // メニュー送信を 400 で拒否 → defer 済みインタラクションが無言で失敗する。
 // これを防ぐため id で重複排除する(最初の出現を採用)。
+// 【一時デバッグ用】原因調査のためエラー詳細を ephemeral メッセージに出す。
+// 本人にしか見えない ephemeral 応答なので情報漏洩リスクは低いが、原因特定後に
+// 呼び出し箇所ごと元のシンプルな文言へ戻すこと。
+function formatErrorDetail(err: unknown): string {
+  const name = err instanceof Error ? err.name : 'Error';
+  const msg = err instanceof Error ? err.message : String(err);
+  return `\n\`\`\`\n${truncate(`${name}: ${msg}`, 400)}\n\`\`\``;
+}
+
 function dedupById(results: SearchResult[]): SearchResult[] {
   const seen = new Set<string>();
   const out: SearchResult[] = [];
@@ -265,7 +274,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       // 既に登録は完了しているケースでは「失敗」と断定しない(履歴取得は🔄で再取得可能)。
       const content = alreadyAdded
         ? '⚠️ 追加は完了しましたが、履歴取得の表示に失敗しました。パネルの🔄で反映されます。'
-        : '❌ プレイヤーの追加中にエラーが発生しました。時間をおいて再度お試しください。';
+        : `❌ プレイヤーの追加中にエラーが発生しました。時間をおいて再度お試しください。${formatErrorDetail(err)}`;
       await interaction.editReply({ content, components: [] }).catch(() => { /* 応答ずみ等は無視 */ });
     }
     return;
@@ -373,7 +382,7 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
     console.error('[grank] modal submit failed:', err);
     const content = alreadyAdded
       ? '⚠️ 追加は完了しましたが、履歴取得の表示に失敗しました。パネルの🔄で反映されます。'
-      : '❌ プレイヤーの追加処理中にエラーが発生しました。時間をおいて再度お試しください。';
+      : `❌ プレイヤーの追加処理中にエラーが発生しました。時間をおいて再度お試しください。${formatErrorDetail(err)}`;
     await interaction.editReply({ content }).catch(() => { /* 応答ずみ等は無視 */ });
   }
 }
