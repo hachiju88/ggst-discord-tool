@@ -27,15 +27,6 @@ import { decodeRating } from '../constants/dr-ranks';
 // StringSelectMenu の option value(= player id)が重複し、Discord が
 // メニュー送信を 400 で拒否 → defer 済みインタラクションが無言で失敗する。
 // これを防ぐため id で重複排除する(最初の出現を採用)。
-// 【一時デバッグ用】原因調査のためエラー詳細を ephemeral メッセージに出す。
-// 本人にしか見えない ephemeral 応答なので情報漏洩リスクは低いが、原因特定後に
-// 呼び出し箇所ごと元のシンプルな文言へ戻すこと。
-function formatErrorDetail(err: unknown): string {
-  const name = err instanceof Error ? err.name : 'Error';
-  const msg = err instanceof Error ? err.message : String(err);
-  return `\n\`\`\`\n${truncate(`${name}: ${msg}`, 400)}\n\`\`\``;
-}
-
 function dedupById(results: SearchResult[]): SearchResult[] {
   const seen = new Set<string>();
   const out: SearchResult[] = [];
@@ -249,8 +240,12 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       }
       // puddle.farm が返す char_short の表記をそのまま保存(URL生成・履歴取得時の整合性のため)。
       const canonicalCharShort = charInfo.char_short;
+      // /player/{id} の rating には char_long が含まれず undefined になる。
+      // undefined を DB に bind すると libsql が "Unsupported type of value" で throw
+      // するため、無ければ char_short で代替する(パネルは char_long || char_short 表示)。
+      const canonicalCharLong = charInfo.char_long || canonicalCharShort;
       const result = await RankTrackingService.addTracking(
-        guildId, playerId, player.name, canonicalCharShort, charInfo.char_long, interaction.user.id,
+        guildId, playerId, player.name, canonicalCharShort, canonicalCharLong, interaction.user.id,
       );
       if (result === 'duplicate') {
         await interaction.editReply({
@@ -261,12 +256,12 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       }
       alreadyAdded = true;
       await interaction.editReply({
-        content: `✅ **${player.name}** (${charInfo.char_long}) を追加しました。\n⏳ 履歴を取得中...`,
+        content: `✅ **${player.name}** (${canonicalCharLong}) を追加しました。\n⏳ 履歴を取得中...`,
         components: [],
       });
       const backfill = await RankTrackingService.backfillPlayer(playerId, canonicalCharShort);
       await interaction.editReply({
-        content: formatBackfillResult(player.name, charInfo.char_long, backfill),
+        content: formatBackfillResult(player.name, canonicalCharLong, backfill),
         components: [],
       });
     } catch (err) {
@@ -274,7 +269,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       // 既に登録は完了しているケースでは「失敗」と断定しない(履歴取得は🔄で再取得可能)。
       const content = alreadyAdded
         ? '⚠️ 追加は完了しましたが、履歴取得の表示に失敗しました。パネルの🔄で反映されます。'
-        : `❌ プレイヤーの追加中にエラーが発生しました。時間をおいて再度お試しください。${formatErrorDetail(err)}`;
+        : '❌ プレイヤーの追加中にエラーが発生しました。時間をおいて再度お試しください。';
       await interaction.editReply({ content, components: [] }).catch(() => { /* 応答ずみ等は無視 */ });
     }
     return;
@@ -333,9 +328,10 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
 
     if (filtered.length === 1) {
       const r = filtered[0];
-      // API の char_short 表記を保存。
+      // API の char_short 表記を保存。char_long 欠落時は char_short で代替
+      // (undefined を bind すると libsql が throw するため)。
       const result = await RankTrackingService.addTracking(
-        guildId, r.id, r.name, r.char_short, r.char_long, interaction.user.id,
+        guildId, r.id, r.name, r.char_short, r.char_long || r.char_short, interaction.user.id,
       );
       if (result === 'duplicate') {
         await interaction.editReply({ content: `ℹ️ **${r.name}** (${r.char_short}) はすでに追跡中です。` });
@@ -382,7 +378,7 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
     console.error('[grank] modal submit failed:', err);
     const content = alreadyAdded
       ? '⚠️ 追加は完了しましたが、履歴取得の表示に失敗しました。パネルの🔄で反映されます。'
-      : `❌ プレイヤーの追加処理中にエラーが発生しました。時間をおいて再度お試しください。${formatErrorDetail(err)}`;
+      : '❌ プレイヤーの追加処理中にエラーが発生しました。時間をおいて再度お試しください。';
     await interaction.editReply({ content }).catch(() => { /* 応答ずみ等は無視 */ });
   }
 }
