@@ -249,8 +249,12 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       }
       // puddle.farm が返す char_short の表記をそのまま保存(URL生成・履歴取得時の整合性のため)。
       const canonicalCharShort = charInfo.char_short;
+      // /player/{id} の rating には char_long が含まれず undefined になる。
+      // undefined を DB に bind すると libsql が "Unsupported type of value" で throw
+      // するため、無ければ char_short で代替する(パネルは char_long || char_short 表示)。
+      const canonicalCharLong = charInfo.char_long || canonicalCharShort;
       const result = await RankTrackingService.addTracking(
-        guildId, playerId, player.name, canonicalCharShort, charInfo.char_long, interaction.user.id,
+        guildId, playerId, player.name, canonicalCharShort, canonicalCharLong, interaction.user.id,
       );
       if (result === 'duplicate') {
         await interaction.editReply({
@@ -261,12 +265,12 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       }
       alreadyAdded = true;
       await interaction.editReply({
-        content: `✅ **${player.name}** (${charInfo.char_long}) を追加しました。\n⏳ 履歴を取得中...`,
+        content: `✅ **${player.name}** (${canonicalCharLong}) を追加しました。\n⏳ 履歴を取得中...`,
         components: [],
       });
       const backfill = await RankTrackingService.backfillPlayer(playerId, canonicalCharShort);
       await interaction.editReply({
-        content: formatBackfillResult(player.name, charInfo.char_long, backfill),
+        content: formatBackfillResult(player.name, canonicalCharLong, backfill),
         components: [],
       });
     } catch (err) {
@@ -333,9 +337,10 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
 
     if (filtered.length === 1) {
       const r = filtered[0];
-      // API の char_short 表記を保存。
+      // API の char_short 表記を保存。char_long 欠落時は char_short で代替
+      // (undefined を bind すると libsql が throw するため)。
       const result = await RankTrackingService.addTracking(
-        guildId, r.id, r.name, r.char_short, r.char_long, interaction.user.id,
+        guildId, r.id, r.name, r.char_short, r.char_long || r.char_short, interaction.user.id,
       );
       if (result === 'duplicate') {
         await interaction.editReply({ content: `ℹ️ **${r.name}** (${r.char_short}) はすでに追跡中です。` });
