@@ -4,8 +4,9 @@ import type {
   ButtonInteraction,
   AutocompleteInteraction,
 } from 'discord.js';
-import { RoleStatsService, REFRESH_BUTTON_ID } from '../services/RoleStatsService';
+import { RoleStatsService, REFRESH_BUTTON_ID, SETUP_GROUP_ORDER } from '../services/RoleStatsService';
 import { checkPermission, PermissionLevel } from '../utils/permissions';
+import { truncate } from '../utils/text';
 
 // Server Members Intent 未設定時に案内するメッセージ
 const INTENT_HINT =
@@ -55,6 +56,11 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand((s) =>
     s.setName('list').setDescription('現在の集計グループと監視ロールを確認します'),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName('setup')
+      .setDescription('既存ロールを名前で自動判別し、標準グループへ一括登録します（非破壊）'),
   );
 
 export async function autocomplete(interaction: AutocompleteInteraction): Promise<void> {
@@ -158,6 +164,46 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       content,
       allowedMentions: { parse: [] },
       flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  if (subcommand === 'setup') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const { added, skippedCount } = await RoleStatsService.autoSetup(guild);
+
+    if (added.length === 0) {
+      await interaction.editReply(
+        'ℹ️ 自動判別できる未登録ロールが見つかりませんでした。\n' +
+          `（判別対象外: ${skippedCount}件）ロール名をご確認のうえ \`/rolestats add\` で手動追加してください。`,
+      );
+      return;
+    }
+
+    // グループごとに集約して標準順で表示
+    const byGroup = new Map<string, string[]>();
+    for (const { group, roleId } of added) {
+      const arr = byGroup.get(group) ?? [];
+      arr.push(`<@&${roleId}>`);
+      byGroup.set(group, arr);
+    }
+    const orderedNames = [
+      ...SETUP_GROUP_ORDER.filter((n) => byGroup.has(n)),
+      ...[...byGroup.keys()].filter((n) => !SETUP_GROUP_ORDER.includes(n)),
+    ];
+
+    let content = `✅ **${added.length}件** のロールを自動登録しました。\n`;
+    for (const name of orderedNames) {
+      const mentions = byGroup.get(name) ?? [];
+      content += `\n**${name}** (${mentions.length})\n${mentions.join(' ')}`;
+    }
+    content += `\n\nℹ️ 判別対象外だった **${skippedCount}件** は \`/rolestats add\` で手動追加できます。`;
+    content += `\n\`/rolestats show\` でパネルを投稿してください。`;
+
+    // メッセージ長制限(2000)対策で末尾を切り詰める
+    await interaction.editReply({
+      content: truncate(content, 1990),
+      allowedMentions: { parse: [] },
     });
     return;
   }

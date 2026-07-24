@@ -7,6 +7,94 @@ import {
 import type { Guild, APIEmbedField } from 'discord.js';
 import { SystemSettingModel } from '../models/SystemSetting';
 import { truncate } from '../utils/text';
+import { CHARACTERS } from '../constants/characters';
+
+// 自動セットアップで使う標準グループ名
+export const SETUP_GROUP_PLATFORM = 'プラットフォーム';
+export const SETUP_GROUP_RANK = 'ランク';
+export const SETUP_GROUP_CHARACTER = 'キャラクター';
+export const SETUP_GROUP_DEVICE = '入力デバイス';
+// 表示・レポート時のグループ順
+export const SETUP_GROUP_ORDER = [
+  SETUP_GROUP_PLATFORM,
+  SETUP_GROUP_RANK,
+  SETUP_GROUP_CHARACTER,
+  SETUP_GROUP_DEVICE,
+];
+
+// プラットフォーム判定キーワード(小文字化して部分一致)
+const PLATFORM_KEYWORDS = [
+  'ps5', 'ps4', 'ps3', 'playstation', 'プレステ', 'プレイステーション', 'プレステーション',
+  'pc', 'steam', 'スチーム', 'スティーム', 'epic',
+  'xbox', 'エックスボックス', '箱',
+  'switch', 'スイッチ',
+];
+
+// 入力デバイス判定キーワード
+const DEVICE_KEYWORDS = [
+  'パッド', 'pad', 'コントローラー', 'controller',
+  'レバーレス', 'leverless', 'ヒットボックス', 'hitbox', 'hit box',
+  'アケコン', 'アーケードスティック', 'アーケード', 'スティック', 'stick', 'レバー',
+  'キーボード', 'keyboard',
+];
+
+// ランク判定キーワード
+const RANK_KEYWORDS = [
+  '闘神', 'グラマス', 'ハイマス',
+  'ダイヤ', 'ダイア', 'ダイヤモンド', 'diamond',
+  'プラチナ', 'platinum',
+  'ゴールド', 'gold',
+  'シルバー', 'silver',
+  'ブロンズ', 'bronze',
+  'アイアン', 'iron',
+  'セレスチャル', 'celestial', '天上',
+];
+
+// キャラクター名の別名(短縮表記など)。CHARACTERS の先頭セグメントだけでは
+// 拾いにくいものを補う。
+const CHARACTER_SPECIAL_ALIASES: Record<string, string[]> = {
+  'クイーン・ディズィー': ['ディズィー', 'ディジー'],
+  'ジャック・オー・ヴァレンタイン': ['ジャックオー'],
+  'ベッドマン?': ['ベッドマン'],
+  '飛鳥R♯': ['飛鳥'],
+  'A.B.A': ['aba', 'a.b.a'],
+};
+
+// キャラクターごとの判定別名リストを構築
+function buildCharacterAliases(): { full: string; aliases: string[] }[] {
+  return CHARACTERS.map((full) => {
+    const aliases = new Set<string>();
+    const cleaned = full.replace(/[?？]/g, '').trim();
+    aliases.add(cleaned.toLowerCase());
+    const first = cleaned.split(/[・=＝\s]/)[0];
+    if (first) aliases.add(first.toLowerCase());
+    for (const extra of CHARACTER_SPECIAL_ALIASES[full] ?? []) {
+      aliases.add(extra.toLowerCase());
+    }
+    // 2文字未満の別名は誤検出しやすいので除外
+    return { full, aliases: [...aliases].filter((a) => a.length >= 2) };
+  });
+}
+
+const CHARACTER_ALIASES = buildCharacterAliases();
+
+/**
+ * ロール名から標準グループを推定する。該当なしは null。
+ * プラットフォーム→デバイス→キャラクター→ランク の順で判定する
+ * (「ゴールドルイス」をランクの「ゴールド」より先にキャラ判定するため)。
+ */
+export function classifyRoleName(rawName: string): string | null {
+  const name = rawName.trim().toLowerCase();
+  if (!name) return null;
+
+  if (PLATFORM_KEYWORDS.some((k) => name.includes(k))) return SETUP_GROUP_PLATFORM;
+  if (DEVICE_KEYWORDS.some((k) => name.includes(k))) return SETUP_GROUP_DEVICE;
+  if (CHARACTER_ALIASES.some((c) => c.aliases.some((a) => name.includes(a)))) {
+    return SETUP_GROUP_CHARACTER;
+  }
+  if (RANK_KEYWORDS.some((k) => name.includes(k.toLowerCase()))) return SETUP_GROUP_RANK;
+  return null;
+}
 
 // 集計グループ定義: rolestats_groups:<guildId> → JSON RoleGroup[]
 const GROUPS_PREFIX = 'rolestats_groups:';
@@ -141,6 +229,53 @@ export class RoleStatsService {
     }
     if (removed) await this.setGroups(guildId, groups);
     return removed;
+  }
+
+  /**
+   * サーバーの既存ロール名を自動判別し、標準グループ(プラットフォーム/ランク/
+   * キャラクター/入力デバイス)へ一括登録する。既存設定は保持したままマージする
+   * (非破壊)。ロール名の読み取りのみで、特権インテントは不要。
+   */
+  static async autoSetup(guild: Guild): Promise<{
+    added: { group: string; roleId: string }[];
+    skippedCount: number;
+  }> {
+    // 全ロールをキャッシュに載せる
+    await guild.roles.fetch();
+
+    const groups = await this.getGroups(guild.id);
+    const findOrCreate = (name: string): RoleGroup => {
+      let g = groups.find((x) => x.name === name);
+      if (!g) {
+        g = { name, roleIds: [] };
+        groups.push(g);
+      }
+      return g;
+    };
+
+    const added: { group: string; roleId: string }[] = [];
+    let skippedCount = 0;
+
+    for (const [, role] of guild.roles.cache) {
+      if (role.id === guild.id) continue; // @everyone
+      if (role.managed) continue; // Bot/連携が管理するロール
+
+      const groupName = classifyRoleName(role.name);
+      if (!groupName) {
+        skippedCount++;
+        continue;
+      }
+
+      // 既にどこかのグループにあるならスキップ(移動しない=非破壊)
+      const alreadyTracked = groups.some((g) => g.roleIds.includes(role.id));
+      if (alreadyTracked) continue;
+
+      findOrCreate(groupName).roleIds.push(role.id);
+      added.push({ group: groupName, roleId: role.id });
+    }
+
+    if (added.length > 0) await this.setGroups(guild.id, groups);
+    return { added, skippedCount };
   }
 
   /** グループごと削除する。削除できたら true */
