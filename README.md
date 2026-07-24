@@ -263,15 +263,17 @@ NODE_ENV=development
 1. [Discord Developer Portal](https://discord.com/developers/applications)にアクセス
 2. 「New Application」をクリック
 3. Bot タブから Bot Token を取得（`DISCORD_TOKEN`）
-4. General Information タブから Application ID を取得（`DISCORD_APPLICATION_ID`）
-5. OAuth2 → URL Generator で以下を選択:
+4. Bot タブの **Privileged Gateway Intents** で **Server Members Intent** を ON にする
+   （`/rolestats` のロール人数集計に必須。未設定だと人数を取得できません）
+5. General Information タブから Application ID を取得（`DISCORD_APPLICATION_ID`）
+6. OAuth2 → URL Generator で以下を選択:
    - **Scopes**: `bot`, `applications.commands`
    - **Bot Permissions**:
      - Send Messages
      - Embed Links
      - Attach Files
      - Use Slash Commands
-6. 生成されたURLでBotをサーバーに招待
+7. 生成されたURLでBotをサーバーに招待
 
 ### 5. Turso Databaseの作成
 
@@ -389,6 +391,44 @@ npm start
 367: |  | `view-settings` | 現在の権限設定を確認 |
 368: |  | `backup` | データのバックアップを作成 |
 369: |  | `restore` | バックアップからデータを復元 |
+
+#### ロール人数モニター (New!)
+
+SERVER STATS 系 Bot の「監視できるロール数の上限」に縛られず、任意の数のロールの所属人数を**集計グループ別**に表示します。プラットフォーム／ランク／キャラクター／入力デバイスなど、目的に応じたグループを自由に作成でき、パネルにはグループごとに人数と実人数（重複所属を除いた実数）が並びます。`show` で投稿したパネルは10分ごとに自動更新され、🔄ボタンで即時更新もできます。グループ数・監視ロール数に上限はありません。
+
+> ⚠️ 人数集計には Discord Developer Portal の **Server Members Intent**（特権インテント）が必要です。
+
+| コマンド | サブコマンド | 説明 |
+|---------|------------|------|
+| `/rolestats` | `setup` | 既存ロールを名前で自動判別し標準グループへ一括登録（非破壊） |
+|  | `show` | 人数モニターのパネルを投稿（以後この位置が自動更新） |
+|  | `add` | グループにロールを追加（`group` が無ければ自動作成） |
+|  | `remove` | ロールを監視対象から外す |
+|  | `delete-group` | 集計グループをまるごと削除 |
+
+**メンバー / オンボーディング集計**：パネルの先頭には常に、Discord のオンボーディング
+（メンバーシップ審査・ルール同意ゲート）を**完了したメンバー**と、**まだ完了していない
+（オンボーディング中の）メンバー**の人数が表示されます（Bot は除外）。判定には Discord の
+`pending` 状態を使うため、サーバーで「メンバー審査」または「オンボーディング」が有効に
+なっている必要があります（未設定の場合は全員が完了扱いになります）。
+
+**かんたん初期設定（推奨）**：`/rolestats setup` を実行すると、サーバー内の既存ロール名を判別して
+「プラットフォーム／ランク／キャラクター／入力デバイス」の4グループへ自動登録します。
+判別は Bot 内蔵の GGST ランク名・キャラクター名の一覧＋プラットフォーム/デバイスのキーワードで行い、
+既存の設定は消さずに追加（非破壊）します。判別できなかったロールは後から手動で追加できます。
+
+```bash
+/rolestats setup   # 既存ロールを自動でグループ分け
+/rolestats show    # グループ別パネルを投稿（10分ごとに自動更新）
+
+# 手動で個別に追加・調整する場合
+/rolestats add group:プラットフォーム role:@PS5
+/rolestats add group:入力デバイス     role:@レバーレス
+```
+
+> 判別ルール: ランク=`闘神/ダイヤ/プラチナ/ゴールド/シルバー/ブロンズ/アイアン` 等、
+> プラットフォーム=`PS5/PC/Steam/Xbox/Switch` 等、入力デバイス=`パッド/レバーレス/アケコン/キーボード` 等、
+> キャラクター=全キャラ名（短縮名対応）。`管理者`・`一般` などは対象外になります。
 370: 
 371: ### 使用例
 

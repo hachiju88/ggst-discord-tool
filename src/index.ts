@@ -4,6 +4,7 @@ import { createClient, registerCommands } from './bot';
 import { initDatabase, closeDatabase } from './database';
 import { autoMigrate } from './database/auto-migrate';
 import { startScheduler } from './services/RankScheduler';
+import { startRoleStatsScheduler } from './services/RoleStatsScheduler';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -48,15 +49,19 @@ async function main() {
 
     // ランクスケジューラはクライアント準備完了後に開始
     let stopRankScheduler: (() => void) | null = null;
+    let stopRoleStatsScheduler: (() => void) | null = null;
     client.once('clientReady', () => {
       stopRankScheduler = startScheduler(client);
       console.log('✅ Rank scheduler started');
+      stopRoleStatsScheduler = startRoleStatsScheduler(client);
+      console.log('✅ Role stats scheduler started');
     });
 
     // Graceful shutdown
     const shutdown = async () => {
       console.log('Shutting down...');
       stopRankScheduler?.();
+      stopRoleStatsScheduler?.();
       server.close();
       client.destroy();
       await closeDatabase();

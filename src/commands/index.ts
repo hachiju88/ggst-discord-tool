@@ -12,6 +12,7 @@ import * as move from './move';
 import * as admin from './admin';
 import * as tnm from './tnm';
 import * as grank from './grank';
+import * as rolestats from './rolestats';
 
 // コマンドモジュールの型定義
 interface CommandModule {
@@ -35,6 +36,7 @@ const commandRegistry = new Map<string, CommandModule>([
   ['admin', admin],
   ['tnm', tnm],
   ['grank', grank],
+  ['rolestats', rolestats],
 ]);
 
 // コマンドハンドラー
@@ -90,6 +92,10 @@ export async function buttonHandler(interaction: ButtonInteraction): Promise<voi
   }
   if (customId.startsWith('grank:')) {
     await grank.handleButtonInteract(interaction);
+    return;
+  }
+  if (customId.startsWith('rolestats:')) {
+    await rolestats.handleButtonInteract(interaction);
     return;
   }
 }
