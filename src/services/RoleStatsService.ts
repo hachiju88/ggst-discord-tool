@@ -376,7 +376,7 @@ export class RoleStatsService {
       fields.push({
         name: `メンバー状況（合計 ${done + onboarding}人）`,
         value:
-          `✅ メンバー（オンボーディング完了） — **${done}** 人\n` +
+          `✅ メンバー — **${done}** 人\n` +
           `⏳ オンボーディング中 — **${onboarding}** 人`,
       });
     }
