@@ -103,6 +103,8 @@ const GROUPS_PREFIX = 'rolestats_groups:';
 const LEGACY_ROLES_PREFIX = 'rolestats_roles:';
 // 自動更新パネルの位置: rolestats_panel:<guildId> → JSON { channelId, messageId }
 const PANEL_PREFIX = 'rolestats_panel:';
+// メンバー/オンボーディング集計の表示フラグ: rolestats_member_status:<guildId> → '1'
+const MEMBER_STATUS_PREFIX = 'rolestats_member_status:';
 
 // Embed フィールドの value は最大1024文字。
 const MAX_FIELD_LEN = 1024;
@@ -289,6 +291,20 @@ export class RoleStatsService {
     return true;
   }
 
+  // ─── メンバー/オンボーディング集計の表示設定 ──────────────────────────
+
+  static async isMemberStatusEnabled(guildId: string): Promise<boolean> {
+    return (await SystemSettingModel.get(MEMBER_STATUS_PREFIX + guildId)) === '1';
+  }
+
+  static async setMemberStatusEnabled(guildId: string, enabled: boolean): Promise<void> {
+    if (enabled) {
+      await SystemSettingModel.set(MEMBER_STATUS_PREFIX + guildId, '1');
+    } else {
+      await SystemSettingModel.delete(MEMBER_STATUS_PREFIX + guildId);
+    }
+  }
+
   // ─── 自動更新パネルの位置 ──────────────────────────────────────────────
 
   static async setPanel(guildId: string, location: PanelLocation): Promise<void> {
@@ -331,8 +347,9 @@ export class RoleStatsService {
     components: ActionRowBuilder<ButtonBuilder>[];
   }> {
     const groups = await this.getGroups(guild.id);
+    const memberStatusEnabled = await this.isMemberStatusEnabled(guild.id);
 
-    // 全メンバーをキャッシュに載せる(role.members を正確にするため)
+    // 全メンバーをキャッシュに載せる(role.members / pending を正確にするため)
     await guild.members.fetch();
 
     const components = [
@@ -345,7 +362,26 @@ export class RoleStatsService {
       ),
     ];
 
-    if (groups.length === 0) {
+    const fields: APIEmbedField[] = [];
+
+    // メンバー/オンボーディング集計(先頭に表示)
+    if (memberStatusEnabled) {
+      let done = 0;
+      let onboarding = 0;
+      for (const [, m] of guild.members.cache) {
+        if (m.user.bot) continue; // Bot は除外
+        if (m.pending) onboarding++;
+        else done++;
+      }
+      fields.push({
+        name: `メンバー状況（合計 ${done + onboarding}人）`,
+        value:
+          `✅ メンバー（オンボーディング完了） — **${done}** 人\n` +
+          `⏳ オンボーディング中 — **${onboarding}** 人`,
+      });
+    }
+
+    if (groups.length === 0 && fields.length === 0) {
       const eb = new EmbedBuilder()
         .setColor(0x5865f2)
         .setTitle('📊 ロール人数モニター')
@@ -357,7 +393,6 @@ export class RoleStatsService {
 
     const allDistinct = new Set<string>();
     let existingRoleCount = 0;
-    const fields: APIEmbedField[] = [];
 
     for (const group of groups) {
       const entries = group.roleIds.map((id) => {

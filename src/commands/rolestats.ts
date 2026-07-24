@@ -59,6 +59,17 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand((s) =>
     s
+      .setName('member-status')
+      .setDescription('メンバー/オンボーディング中の人数セクションの表示を切り替えます')
+      .addBooleanOption((o) =>
+        o
+          .setName('enabled')
+          .setDescription('表示する(True) / 非表示にする(False)')
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
       .setName('setup')
       .setDescription('既存ロールを名前で自動判別し、標準グループへ一括登録します（非破壊）'),
   );
@@ -147,6 +158,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   if (subcommand === 'list') {
     const groups = await RoleStatsService.getGroups(guild.id);
+    const memberStatus = await RoleStatsService.isMemberStatusEnabled(guild.id);
     let content: string;
     if (groups.length === 0) {
       content =
@@ -160,9 +172,22 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         })
         .join('\n');
     }
+    content += `\n\n👥 メンバー/オンボーディング集計: ${memberStatus ? '**表示中**' : '非表示'}`;
     await interaction.reply({
       content,
       allowedMentions: { parse: [] },
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  if (subcommand === 'member-status') {
+    const enabled = interaction.options.getBoolean('enabled', true);
+    await RoleStatsService.setMemberStatusEnabled(guild.id, enabled);
+    await interaction.reply({
+      content: enabled
+        ? '✅ メンバー/オンボーディングの集計を**表示**します。`/rolestats show` の再実行または🔄で反映されます。'
+        : '✅ メンバー/オンボーディングの集計を**非表示**にしました。',
       flags: MessageFlags.Ephemeral,
     });
     return;
