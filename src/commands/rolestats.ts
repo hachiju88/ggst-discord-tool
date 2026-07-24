@@ -55,20 +55,6 @@ export const data = new SlashCommandBuilder()
       ),
   )
   .addSubcommand((s) =>
-    s.setName('list').setDescription('現在の集計グループと監視ロールを確認します'),
-  )
-  .addSubcommand((s) =>
-    s
-      .setName('member-status')
-      .setDescription('メンバー/オンボーディング中の人数セクションの表示を切り替えます')
-      .addBooleanOption((o) =>
-        o
-          .setName('enabled')
-          .setDescription('表示する(True) / 非表示にする(False)')
-          .setRequired(true),
-      ),
-  )
-  .addSubcommand((s) =>
     s
       .setName('setup')
       .setDescription('既存ロールを名前で自動判別し、標準グループへ一括登録します（非破壊）'),
@@ -156,43 +142,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return;
   }
 
-  if (subcommand === 'list') {
-    const groups = await RoleStatsService.getGroups(guild.id);
-    const memberStatus = await RoleStatsService.isMemberStatusEnabled(guild.id);
-    let content: string;
-    if (groups.length === 0) {
-      content =
-        'ℹ️ 集計グループは未設定です。`/rolestats add group:<グループ名> role:<ロール>` で追加してください。';
-    } else {
-      content = `⚙️ **集計グループ (${groups.length}件)**\n`;
-      content += groups
-        .map((g) => {
-          const roles = g.roleIds.map((id) => `<@&${id}>`).join(' ') || '（ロールなし）';
-          return `\n**${g.name}** (${g.roleIds.length})\n${roles}`;
-        })
-        .join('\n');
-    }
-    content += `\n\n👥 メンバー/オンボーディング集計: ${memberStatus ? '**表示中**' : '非表示'}`;
-    await interaction.reply({
-      content,
-      allowedMentions: { parse: [] },
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  if (subcommand === 'member-status') {
-    const enabled = interaction.options.getBoolean('enabled', true);
-    await RoleStatsService.setMemberStatusEnabled(guild.id, enabled);
-    await interaction.reply({
-      content: enabled
-        ? '✅ メンバー/オンボーディングの集計を**表示**します。`/rolestats show` の再実行または🔄で反映されます。'
-        : '✅ メンバー/オンボーディングの集計を**非表示**にしました。',
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
   if (subcommand === 'setup') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const { added, skippedCount } = await RoleStatsService.autoSetup(guild);
@@ -235,14 +184,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   // subcommand === 'show'
   await interaction.deferReply();
-
-  const groups = await RoleStatsService.getGroups(guild.id);
-  if (groups.length === 0) {
-    await interaction.editReply(
-      'ℹ️ 集計グループが未設定です。`/rolestats add group:<グループ名> role:<ロール>` で追加してから再実行してください。',
-    );
-    return;
-  }
 
   let payload;
   try {
