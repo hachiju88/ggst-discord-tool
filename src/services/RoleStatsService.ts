@@ -26,7 +26,7 @@ export const SETUP_GROUP_ORDER = [
 const PLATFORM_KEYWORDS = [
   'ps5', 'ps4', 'ps3', 'playstation', 'プレステ', 'プレイステーション', 'プレステーション',
   'pc', 'steam', 'スチーム', 'スティーム', 'epic',
-  'xbox', 'エックスボックス', '箱',
+  'xbox', 'エックスボックス',
   'switch', 'スイッチ',
 ];
 
