@@ -64,7 +64,7 @@ const CHARACTER_SPECIAL_ALIASES: Record<string, string[]> = {
 function buildCharacterAliases(): { full: string; aliases: string[] }[] {
   return CHARACTERS.map((full) => {
     const aliases = new Set<string>();
-    const cleaned = full.replace(/[?？]/g, '').trim();
+    const cleaned = full.normalize('NFKC').replace(/[?？]/g, '').trim();
     aliases.add(cleaned.toLowerCase());
     const first = cleaned.split(/[・=＝\s]/)[0];
     if (first) aliases.add(first.toLowerCase());
@@ -84,7 +84,8 @@ const CHARACTER_ALIASES = buildCharacterAliases();
  * (「ゴールドルイス」をランクの「ゴールド」より先にキャラ判定するため)。
  */
 export function classifyRoleName(rawName: string): string | null {
-  const name = rawName.trim().toLowerCase();
+  // NFKC 正規化で全角/半角(ＰＣ, 半角カナ ﾊﾟｯﾄﾞ 等)を吸収し、小文字化して比較する
+  const name = rawName.normalize('NFKC').trim().toLowerCase();
   if (!name) return null;
 
   if (PLATFORM_KEYWORDS.some((k) => name.includes(k))) return SETUP_GROUP_PLATFORM;
