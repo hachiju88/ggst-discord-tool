@@ -116,6 +116,10 @@ const MAX_EMBED_CHARS = 5200;
 const MAX_EMBEDS = 10;
 // 旧 v1 データを移行する際の受け皿グループ名。
 const LEGACY_GROUP_NAME = '未分類';
+// 棒グラフの最大長(ブロック数)。グループ内の最多ロールがこの長さになる。
+const BAR_WIDTH = 10;
+// 1/8 刻みの部分ブロック(端数表現用)。index 1..7 を使用。
+const BAR_EIGHTHS = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
 
 export interface RoleGroup {
   name: string;
@@ -368,15 +372,15 @@ export class RoleStatsService {
         const role = guild.roles.cache.get(id);
         return {
           id,
+          name: role?.name ?? null,
           exists: !!role,
-          position: role?.rawPosition ?? -1,
           count: role ? role.members.size : 0,
         };
       });
-      // 存在するロールを先に、Discord のロール順(上位=強い)に合わせて降順表示
+      // 存在するロールを先に、人数の多い順(降順)に並べる
       entries.sort((a, b) => {
         if (a.exists !== b.exists) return a.exists ? -1 : 1;
-        return b.position - a.position;
+        return b.count - a.count;
       });
 
       const groupDistinct = new Set<string>();
@@ -391,16 +395,31 @@ export class RoleStatsService {
         }
       }
 
-      const lines = entries.map((e) =>
-        e.exists ? `<@&${e.id}> — **${e.count}** 人` : `⚠️ <@&${e.id}> — 削除されたロール`,
-      );
-      const chunks = this.chunkLines(lines, MAX_FIELD_LEN);
+      // 棒グラフ用の基準(グループ内の最多人数)と桁数を求める
+      const maxCount = entries.reduce((m, e) => (e.exists && e.count > m ? e.count : m), 0);
+      const digits = String(maxCount).length;
+      const lines = entries.map((e) => {
+        if (!e.exists) {
+          return `${' '.repeat(BAR_WIDTH)} ${'-'.padStart(digits)}  ⚠️ 削除されたロール`;
+        }
+        const bar = this.renderBar(e.count, maxCount).padEnd(BAR_WIDTH, ' ');
+        const countStr = String(e.count).padStart(digits);
+        // ロール名の ` はコードフェンスを壊すため除去してから切り詰める
+        const safeName = truncate((e.name ?? '(不明)').replace(/`/g, ''), 24);
+        return `${bar} ${countStr}  ${safeName}`;
+      });
+
+      // コードブロックの ``` (計8文字)＋改行分を差し引いて分割
+      const chunks = this.chunkLines(lines, MAX_FIELD_LEN - 10);
       if (chunks.length === 0) chunks.push('（ロール未登録）');
 
-      chunks.forEach((value, i) => {
+      chunks.forEach((chunk, i) => {
         const name =
           i === 0 ? `${group.name}（実人数 ${groupDistinct.size}人）` : `${group.name}（続き）`;
-        fields.push({ name: truncate(name, MAX_FIELD_NAME_LEN), value });
+        fields.push({
+          name: truncate(name, MAX_FIELD_NAME_LEN),
+          value: '```\n' + chunk + '\n```',
+        });
       });
     }
 
@@ -416,6 +435,20 @@ export class RoleStatsService {
     embeds[embeds.length - 1].setFooter({ text: footer.join(' ／ ') }).setTimestamp(new Date());
 
     return { embeds, components };
+  }
+
+  /** 人数を最大値に対する割合で棒(ブロック文字)に変換する。1/8刻みで端数も表現 */
+  private static renderBar(count: number, max: number): string {
+    if (max <= 0 || count <= 0) return '';
+    const units = (count / max) * BAR_WIDTH; // 0..BAR_WIDTH
+    const full = Math.min(Math.floor(units), BAR_WIDTH);
+    let bar = '█'.repeat(full);
+    if (full < BAR_WIDTH) {
+      const rem = Math.round((units - full) * 8); // 0..8
+      if (rem === 8) bar += '█';
+      else if (rem > 0) bar += BAR_EIGHTHS[rem];
+    }
+    return bar;
   }
 
   /** 行配列を、1要素あたり maxLen 文字以内の説明文チャンクへ分割する */
