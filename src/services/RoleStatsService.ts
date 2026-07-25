@@ -404,7 +404,9 @@ export class RoleStatsService {
         }
         const bar = this.renderBar(e.count, maxCount).padEnd(BAR_WIDTH, ' ');
         const countStr = String(e.count).padStart(digits);
-        return `${bar} ${countStr}  ${truncate(e.name ?? '(不明)', 24)}`;
+        // ロール名の ` はコードフェンスを壊すため除去してから切り詰める
+        const safeName = truncate((e.name ?? '(不明)').replace(/`/g, ''), 24);
+        return `${bar} ${countStr}  ${safeName}`;
       });
 
       // コードブロックの ``` (計8文字)＋改行分を差し引いて分割
