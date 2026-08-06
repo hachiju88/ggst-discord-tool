@@ -323,12 +323,37 @@ export class RoleStatsService {
   // ─── パネル生成 ────────────────────────────────────────────────────────
 
   /**
+   * 全メンバーを REST(`GET /guilds/{id}/members`)経由でキャッシュへ読み込む。
+   *
+   * オンボーディング状況の判定に使う `GuildMember.pending` は、
+   * `guild.members.fetch()`(ゲートウェイの GUILD_MEMBERS_CHUNK)では
+   * 送られてこず、全員が `pending = false` になってしまう
+   * (discordjs/discord.js#6546)。REST の list はメンバーオブジェクトに
+   * `pending` を含むため、こちらを1000件ずつページングして全員を読み込む。
+   * これにより role.members の人数集計とオンボーディング集計の双方が正確になる。
+   *
+   * どちらの経路でも「Server Members Intent」(特権インテント)が必要で、
+   * 未有効だと例外を投げるため、呼び出し側で捕捉すること。
+   */
+  private static async loadAllMembers(guild: Guild): Promise<void> {
+    let after: string | undefined;
+    for (;;) {
+      const batch = await guild.members.list({ limit: 1000, after });
+      if (batch.size === 0) break;
+      // list は user id 昇順で返るため、最後の id を次ページの起点にする
+      after = batch.last()!.id;
+      // 満たなければ最終ページ
+      if (batch.size < 1000) break;
+    }
+  }
+
+  /**
    * 集計グループごとにロール所属人数を集計し、Embed パネルを組み立てる。
    *
-   * 正確な人数を得るために `guild.members.fetch()` で全メンバーをキャッシュに
-   * 載せてから `role.members.size` を数える。これには Discord Developer Portal
-   * 側で「Server Members Intent」(特権インテント)を有効化しておく必要がある。
-   * 未有効だと fetch が例外を投げるため、呼び出し側で捕捉すること。
+   * 正確な人数を得るために全メンバーをキャッシュに載せてから
+   * `role.members.size` を数える。これには Discord Developer Portal 側で
+   * 「Server Members Intent」(特権インテント)を有効化しておく必要がある。
+   * 未有効だとメンバー読み込みが例外を投げるため、呼び出し側で捕捉すること。
    */
   static async buildPanel(guild: Guild): Promise<{
     embeds: EmbedBuilder[];
@@ -337,7 +362,7 @@ export class RoleStatsService {
     const groups = await this.getGroups(guild.id);
 
     // 全メンバーをキャッシュに載せる(role.members / pending を正確にするため)
-    await guild.members.fetch();
+    await this.loadAllMembers(guild);
 
     const components = [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
