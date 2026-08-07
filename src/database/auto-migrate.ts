@@ -396,6 +396,44 @@ export async function autoMigrate() {
       }
     }
 
+    // system_settings テーブル（権限ロール・各種設定の保存先）が無ければ作成。
+    // 旧環境では migrate-add-settings-table.ts で個別に作られていたが、
+    // 新規デプロイでも確実に存在させるためここでも保証する。
+    if (!tableNames.includes('system_settings')) {
+      await db.execute({ sql: `CREATE TABLE IF NOT EXISTS system_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )` })
+      console.log('✅ system_settings table created')
+    }
+
+    // 簡易VC募集: VC参加回数の記録テーブル
+    if (!tableNames.includes('vc_visits')) {
+      await db.execute({ sql: `CREATE TABLE IF NOT EXISTS vc_visits (
+        guild_id TEXT NOT NULL,
+        discord_id TEXT NOT NULL,
+        visit_count INTEGER NOT NULL DEFAULT 0,
+        last_visit_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (guild_id, discord_id)
+      )` })
+      console.log('✅ vc_visits table created')
+    }
+
+    // 簡易VC募集: 自動作成した一時VCの管理テーブル
+    if (!tableNames.includes('temp_voice_channels')) {
+      await db.execute({ sql: `CREATE TABLE IF NOT EXISTS temp_voice_channels (
+        channel_id TEXT PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        creator_id TEXT NOT NULL,
+        announce_channel_id TEXT,
+        announce_message_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )` })
+      await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_temp_vc_guild ON temp_voice_channels(guild_id)' })
+      console.log('✅ temp_voice_channels table created')
+    }
+
     console.log('Database schema check complete');
   } catch (error) {
     console.error('Auto-migration error:', error);

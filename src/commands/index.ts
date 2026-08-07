@@ -13,6 +13,7 @@ import * as admin from './admin';
 import * as tnm from './tnm';
 import * as grank from './grank';
 import * as rolestats from './rolestats';
+import * as vc from './vc';
 
 // コマンドモジュールの型定義
 interface CommandModule {
@@ -37,6 +38,7 @@ const commandRegistry = new Map<string, CommandModule>([
   ['tnm', tnm],
   ['grank', grank],
   ['rolestats', rolestats],
+  ['vc', vc],
 ]);
 
 // コマンドハンドラー
@@ -75,6 +77,7 @@ export function getModalSubmitHandler(customId: string): ((interaction: any) => 
     'tnm-admin-enter-char': 'tnm',
     'tnm-admin-team-setup-modal': 'tnm',
     'grank-add': 'grank',
+    'vc': 'vc',
   };
   const commandName = prefixToCommand[prefix];
   if (commandName) {
@@ -98,6 +101,10 @@ export async function buttonHandler(interaction: ButtonInteraction): Promise<voi
     await rolestats.handleButtonInteract(interaction);
     return;
   }
+  if (customId.startsWith('vc:')) {
+    await vc.handleButtonInteract(interaction);
+    return;
+  }
 }
 
 // SelectMenuハンドラー
@@ -109,6 +116,10 @@ export async function selectMenuHandler(interaction: StringSelectMenuInteraction
   }
   if (customId.startsWith('grank:') || customId.startsWith('grank-add:')) {
     await grank.handleSelectMenu(interaction);
+    return;
+  }
+  if (customId.startsWith('vc:')) {
+    await vc.handleSelectMenu(interaction);
     return;
   }
 }

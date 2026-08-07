@@ -5,6 +5,7 @@ import { initDatabase, closeDatabase } from './database';
 import { autoMigrate } from './database/auto-migrate';
 import { startScheduler } from './services/RankScheduler';
 import { startRoleStatsScheduler } from './services/RoleStatsScheduler';
+import { sweepTempChannels } from './services/VoiceRecruitService';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -55,6 +56,10 @@ async function main() {
       console.log('✅ Rank scheduler started');
       stopRoleStatsScheduler = startRoleStatsScheduler(client);
       console.log('✅ Role stats scheduler started');
+      // 起動時に空になった一時VCを掃除
+      sweepTempChannels(client)
+        .then(() => console.log('✅ Temp voice channels swept'))
+        .catch((e) => console.error('Temp voice channel sweep error:', e));
     });
 
     // Graceful shutdown
