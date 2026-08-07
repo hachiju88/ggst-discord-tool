@@ -11,19 +11,15 @@ import { SystemSettingModel } from '../models/SystemSetting';
 
 /**
  * 簡易VC募集機能のサービス層。
- * - 設定（作成先カテゴリ / ゲーム候補）の永続化
- * - VC参加回数の記録（イツメン判定などラベル表示用。強制はしない）
+ * - 設定（作成先カテゴリ / 募集通知チャンネル / ゲーム候補）の永続化
  * - 一時VC（参加者が全員退出したら消えるVC）の管理・自動削除
  */
 
 // ── 選択肢の定義 ──────────────────────────────────────────────────────────
-export const DEFAULT_GAMES = ['GGST', '雑談', 'スト６', 'シャドウバース'];
+export const DEFAULT_GAMES = ['GGST', 'GGST（Switch）', 'スト６', 'シャドバ', 'デュエプレ', 'TRPG', '雀魂'];
 
 // ゲームの「その他（手動入力）」を表すセンチネル値
 export const CUSTOM_GAME_VALUE = '__custom__';
-
-// イツメン判定のしきい値（この回数以上のVC参加でイツメン扱い）
-export const REGULAR_THRESHOLD = 3;
 
 export interface Option {
   value: string;
@@ -38,8 +34,8 @@ export const COUNT_OPTIONS: Option[] = [
 
 export const AUDIENCE_OPTIONS: Option[] = [
   { value: 'all', label: '制限なし', description: 'どなたでも歓迎' },
-  { value: 'regular', label: 'イツメン向け', description: `VC参加${REGULAR_THRESHOLD}回以上の方向け` },
-  { value: 'newcomer', label: 'サーバー初心者向け', description: `VC参加${REGULAR_THRESHOLD}回未満の方向け` },
+  { value: 'regular', label: 'イツメン', description: '常連さん向け' },
+  { value: 'newcomer', label: 'サーバー初心者', description: 'サーバーに来て間もない方向け' },
 ];
 
 export const RANK_OPTIONS: Option[] = [
@@ -61,6 +57,7 @@ export function rankLabel(value: string): string {
 
 // ── 設定（system_settings に guild 単位で保存） ─────────────────────────────
 const CATEGORY_KEY = (guildId: string) => `vc_recruit_category:${guildId}`;
+const NOTIFY_KEY = (guildId: string) => `vc_recruit_notify:${guildId}`;
 const GAMES_KEY = (guildId: string) => `vc_recruit_games:${guildId}`;
 
 export async function getCategoryId(guildId: string): Promise<string | null> {
@@ -69,6 +66,15 @@ export async function getCategoryId(guildId: string): Promise<string | null> {
 
 export async function setCategoryId(guildId: string, categoryId: string): Promise<void> {
   await SystemSettingModel.set(CATEGORY_KEY(guildId), categoryId);
+}
+
+/** 募集通知（作成された募集を投稿する）チャンネル */
+export async function getNotifyChannelId(guildId: string): Promise<string | null> {
+  return SystemSettingModel.get(NOTIFY_KEY(guildId));
+}
+
+export async function setNotifyChannelId(guildId: string, channelId: string): Promise<void> {
+  await SystemSettingModel.set(NOTIFY_KEY(guildId), channelId);
 }
 
 /** 保存済みゲーム候補を取得（未設定ならデフォルトを返す） */
@@ -108,31 +114,6 @@ export async function removeGame(guildId: string, name: string): Promise<boolean
   if (next.length === games.length) return false;
   await SystemSettingModel.set(GAMES_KEY(guildId), JSON.stringify(next));
   return true;
-}
-
-// ── VC参加回数の記録 ────────────────────────────────────────────────────
-export async function incrementVisit(guildId: string, discordId: string): Promise<void> {
-  const db = getDatabase();
-  await db.execute({
-    sql: `
-      INSERT INTO vc_visits (guild_id, discord_id, visit_count, last_visit_at)
-      VALUES (?, ?, 1, CURRENT_TIMESTAMP)
-      ON CONFLICT(guild_id, discord_id) DO UPDATE SET
-        visit_count = visit_count + 1,
-        last_visit_at = CURRENT_TIMESTAMP
-    `,
-    args: [guildId, discordId],
-  });
-}
-
-export async function getVisitCount(guildId: string, discordId: string): Promise<number> {
-  const db = getDatabase();
-  const res = await db.execute({
-    sql: 'SELECT visit_count FROM vc_visits WHERE guild_id = ? AND discord_id = ?',
-    args: [guildId, discordId],
-  });
-  if (res.rows.length === 0) return 0;
-  return Number(res.rows[0].visit_count ?? 0);
 }
 
 // ── 一時VCの管理 ────────────────────────────────────────────────────────
@@ -245,26 +226,12 @@ async function deleteIfEmpty(channel: VoiceBasedChannel): Promise<boolean> {
 
 /**
  * voiceStateUpdate から呼ぶ。
- * - VCへの新規参加を参加回数としてカウント
  * - 一時VCが空になったら自動削除
  */
 export async function handleVoiceStateUpdate(
   oldState: VoiceState,
   newState: VoiceState,
 ): Promise<void> {
-  const guildId = newState.guild.id;
-
-  // 参加回数カウント（別VCへ移動した場合も新規参加として1カウント）
-  // AFKチャンネルへの移動は「参加」とみなさない。
-  const isAfk = newState.channelId === newState.guild.afkChannelId;
-  if (newState.channelId && oldState.channelId !== newState.channelId && !isAfk) {
-    try {
-      await incrementVisit(guildId, newState.id);
-    } catch (e) {
-      console.error('[VoiceRecruit] incrementVisit error:', e);
-    }
-  }
-
   // 退出元が一時VCなら空チェック
   if (oldState.channel && oldState.channelId !== newState.channelId) {
     try {

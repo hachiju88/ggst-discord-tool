@@ -408,18 +408,6 @@ export async function autoMigrate() {
       console.log('✅ system_settings table created')
     }
 
-    // 簡易VC募集: VC参加回数の記録テーブル
-    if (!tableNames.includes('vc_visits')) {
-      await db.execute({ sql: `CREATE TABLE IF NOT EXISTS vc_visits (
-        guild_id TEXT NOT NULL,
-        discord_id TEXT NOT NULL,
-        visit_count INTEGER NOT NULL DEFAULT 0,
-        last_visit_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (guild_id, discord_id)
-      )` })
-      console.log('✅ vc_visits table created')
-    }
-
     // 簡易VC募集: 自動作成した一時VCの管理テーブル
     if (!tableNames.includes('temp_voice_channels')) {
       await db.execute({ sql: `CREATE TABLE IF NOT EXISTS temp_voice_channels (
