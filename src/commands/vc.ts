@@ -356,6 +356,22 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         });
       }
 
+      // 「募集通知」チャンネルは @everyone を読み取り専用にして運用することが多い。
+      // その場合でも Bot が募集を投稿できるよう、Bot 自身に投稿権限を明示的に付与する。
+      // （これが無いと投稿に失敗し、募集がパネルチャンネルへフォールバック投稿されてしまう）
+      const me = guild.members.me;
+      if (me && notifyChannel.type === ChannelType.GuildText) {
+        try {
+          await notifyChannel.permissionOverwrites.edit(me, {
+            ViewChannel: true,
+            SendMessages: true,
+            EmbedLinks: true,
+          });
+        } catch (e) {
+          console.error('[vc] notify channel overwrite error:', e);
+        }
+      }
+
       await setCategoryId(guild.id, category.id);
       await setNotifyChannelId(guild.id, notifyChannel.id);
 
