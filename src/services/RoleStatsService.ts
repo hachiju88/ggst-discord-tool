@@ -337,13 +337,15 @@ export class RoleStatsService {
    */
   private static async loadAllMembers(guild: Guild): Promise<void> {
     let after: string | undefined;
-    for (;;) {
+    // カーソルが進まない/巨大サーバーでも無限ループしないよう上限を設ける
+    // (1000件 × 1000ページ = 100万人分)。
+    for (let page = 0; page < 1000; page++) {
       const batch = await guild.members.list({ limit: 1000, after });
-      if (batch.size === 0) break;
+      if (batch.size < 1000) break; // 空 or 最終ページ
       // list は user id 昇順で返るため、最後の id を次ページの起点にする
-      after = batch.last()!.id;
-      // 満たなければ最終ページ
-      if (batch.size < 1000) break;
+      const nextAfter = batch.last()!.id;
+      if (nextAfter === after) break; // カーソルが進まない場合は打ち切り(念のため)
+      after = nextAfter;
     }
   }
 
