@@ -659,11 +659,30 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
 
   sessions.delete(key);
 
+  // 作成したVCへメンバーを移動するには、Bot自身がそのVCに「接続」できる必要がある。
+  // 作成先カテゴリが @everyone の接続を制限していると、新規VCもその制限を継承し、
+  // ギルド全体で「メンバーの移動」権限があっても移動に失敗する。これを避けるため、
+  // Bot自身に接続・移動を許可する権限上書きを付与しておく（付与できなくても続行）。
+  const me = guild.members.me;
+  if (me) {
+    try {
+      await channel.permissionOverwrites.edit(me, {
+        ViewChannel: true,
+        Connect: true,
+        MoveMembers: true,
+      });
+    } catch (e) {
+      console.error('[vc] bot overwrite error:', e);
+    }
+  }
+
   // 募集主が既にどこかのVCに居れば、作成したVCへ移動させる。
   // Discordの仕様上、どのVCにも接続していないユーザーはAPIで移動（引き込み）できない。
   // interaction.member.voice はキャッシュ未反映だと channelId が null になることがあるため、
   // guild.voiceStates.cache からも参照してフォールバックする。
   let moved = false;
+  // 移動に失敗した理由。'permission'=権限不足の可能性 / 'left'=移動直前に退出していた。
+  let moveFailure: 'permission' | 'left' | null = null;
   const currentVoiceChannelId =
     (interaction.inCachedGuild() ? interaction.member.voice.channelId : null) ??
     guild.voiceStates.cache.get(interaction.user.id)?.channelId ??
@@ -679,21 +698,31 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     } catch (e) {
       // Move Members / Connect 権限不足などで失敗し得る。握り潰さずログに残す。
       console.error('[vc] move member error:', e);
+      // 40032 = 対象ユーザーがVCに接続していない。キャッシュが古く、作成前に退出して
+      // いたケース。これは権限の問題ではないので、警告ではなく通常案内にする。
+      const code = (e as { code?: number }).code;
+      moveFailure = code === 40032 ? 'left' : 'permission';
     }
   }
 
   // 募集告知メッセージ
+  // フィールドは「項目名」の下に「内容」が縦積みで表示され見づらいため、
+  // 説明文に「項目名：内容」の横並びで1行ずつ並べる。
+  const infoLines = [
+    `👤 **作成者：** <@${interaction.user.id}>`,
+    `🎮 **ゲーム：** ${session.game}`,
+    `👥 **参加人数：** ${countLabel(session.count)}`,
+    `🎯 **対象者：** ${audienceLabel(session.audience)}`,
+    `🏆 **対象ランク：** ${rankLabel(session.rank)}`,
+  ];
+  if (session.comment) {
+    infoLines.push(`💬 **ひとこと：** ${truncate(session.comment, 200)}`);
+  }
   const embed = new EmbedBuilder()
     .setColor(AUDIENCE_COLOR[session.audience] ?? 0x5865f2)
     .setTitle(`🎙️ ${session.game} 募集`)
-    .setDescription(`➡️ <#${channel.id}> に参加しよう！`)
-    .addFields(
-      { name: '作成者', value: `<@${interaction.user.id}>`, inline: true },
-      { name: 'ゲーム', value: session.game, inline: true },
-      { name: '参加人数', value: countLabel(session.count), inline: true },
-      { name: '対象者', value: audienceLabel(session.audience), inline: true },
-      { name: '対象ランク', value: rankLabel(session.rank), inline: true },
-      { name: 'ひとこと', value: session.comment ? truncate(session.comment, 200) : 'なし', inline: false },
+    .setDescription(
+      `➡️ <#${channel.id}> に参加しよう！\n\n` + infoLines.join('\n'),
     )
     .setTimestamp(new Date());
 
@@ -720,16 +749,23 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   // 誰も入らなかった場合の保険（3分後に空なら削除）
   scheduleEmptyGuard(channel);
 
-  // 移動結果を作成者に伝える。VCに居たのに移動できなかった場合は権限不足の可能性を示す。
+  // 移動結果を作成者に伝える。
+  // Discordの仕様上、Botはどのボイスチャンネルにも接続していないユーザーを
+  // VCへ「引き込む」ことができない（既にVCに居るユーザーの移動のみ可能）。
+  // そのため未接続の場合は自動移動は不可能で、本人にVCへの参加操作をお願いする。
   let moveLine: string;
   if (moved) {
     moveLine = '➡️ 作成したVCに移動しました。';
-  } else if (wasInVoice) {
+  } else if (wasInVoice && moveFailure === 'permission') {
     moveLine =
       '⚠️ 自動移動に失敗しました（Botの「メンバーの移動」権限や接続権限を確認してください）。' +
       '下の「VCへ移動」ボタンから参加できます。';
   } else {
-    moveLine = '下の「VCへ移動」ボタンからVCに参加してください。';
+    // 未接続（または移動直前に退出）で自動移動できないケース。
+    // ボタンはチャンネルを開くだけなので、開いた先で「参加」を押す必要がある旨を明記する。
+    moveLine =
+      '🔊 下の「VCへ移動」ボタンでVCを開き、画面の**「ボイスに参加」/「参加」**を押してください。\n' +
+      '💡 次回から自動で移動させたい場合は、**先にどこかのVCに入ってから**「VCを作成」を押すと、そのまま新しいVCへ移動します。';
   }
 
   // 募集通知の投稿結果を作成者に正直に伝える（無言の失敗を防ぐ）。
@@ -738,10 +774,15 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     announceLine =
       '\n⚠️ 募集通知の投稿に失敗しました。管理者は `/vc set-notify` で通知チャンネルを設定し、' +
       'Botにそのチャンネルへの「メッセージ送信」権限があるか確認してください。';
-  } else if (announce.via === 'fallback') {
-    // 通知チャンネル未設定/送信失敗などで実行チャンネルへフォールバック投稿された場合の案内。
+  } else if (announce.via === 'fallback-failed') {
+    // 通知チャンネルは設定済みだが投稿に失敗 → 権限/チャンネルの確認を促す。
     announceLine =
-      `\n📣 募集を <#${announce.channelId}> に投稿しました。専用の通知先を使うには \`/vc set-notify\` で設定してください。`;
+      `\n⚠️ 募集通知チャンネルへ投稿できなかったため、<#${announce.channelId}> に投稿しました。` +
+      '通知チャンネルが削除されていないか、Botにそのチャンネルへの「メッセージ送信」権限があるか確認してください。';
+  } else if (announce.via === 'fallback-unset') {
+    // 通知チャンネル未設定で実行チャンネルへ投稿した場合の案内。
+    announceLine =
+      `\n📣 募集を <#${announce.channelId}> に投稿しました。専用の通知先を使うには \`/vc setup\` または \`/vc set-notify\` で設定してください。`;
   } else {
     announceLine = `\n📣 募集を <#${announce.channelId}> に投稿しました。`;
   }
@@ -758,19 +799,25 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
 
 /**
  * 募集通知チャンネル（無ければ実行チャンネル）に告知を投稿し、その位置を返す。
- * via は 'notify'（設定された通知チャンネルへ投稿）か 'fallback'（未設定/失敗で
- * 実行チャンネルへ投稿）で、呼び出し側の案内文の出し分けに使う。
+ * via は投稿経路を表し、呼び出し側の案内文の出し分けに使う:
+ *  - 'notify'          … 設定された通知チャンネルへ投稿できた（正常）
+ *  - 'fallback-unset'  … 通知チャンネル未設定のため実行チャンネルへ投稿した
+ *  - 'fallback-failed' … 通知チャンネルは設定済みだが投稿に失敗し実行チャンネルへ投稿した
  */
+type AnnounceVia = 'notify' | 'fallback-unset' | 'fallback-failed';
 async function postAnnouncement(
   interaction: ButtonInteraction,
   guildId: string,
   payload: BaseMessageOptions,
-): Promise<{ channelId: string; messageId: string; via: 'notify' | 'fallback' } | null> {
+): Promise<{ channelId: string; messageId: string; via: AnnounceVia } | null> {
   const guild = interaction.guild;
   if (!guild) return null;
 
   // 優先: 設定された募集通知チャンネル
   const notifyId = await getNotifyChannelId(guildId);
+  // 通知チャンネルは設定されているのに投稿できなかったか（権限不足/チャンネル削除など）を
+  // 区別するためのフラグ。フォールバック時の案内文を正確にするために使う。
+  let notifyConfiguredButFailed = false;
   if (notifyId) {
     const ch = await guild.channels.fetch(notifyId).catch(() => null);
     const sendable = getSendable(ch);
@@ -780,7 +827,11 @@ async function postAnnouncement(
         return { channelId: sendable.id, messageId: msg.id, via: 'notify' };
       } catch (e) {
         console.error('[vc] notify channel send error:', e);
+        notifyConfiguredButFailed = true;
       }
+    } else {
+      // 設定は残っているがチャンネルが取得できない/送信不可（削除・権限など）。
+      notifyConfiguredButFailed = true;
     }
   }
 
@@ -789,7 +840,11 @@ async function postAnnouncement(
   if (fallback) {
     try {
       const msg = await fallback.send(payload);
-      return { channelId: fallback.id, messageId: msg.id, via: 'fallback' };
+      return {
+        channelId: fallback.id,
+        messageId: msg.id,
+        via: notifyConfiguredButFailed ? 'fallback-failed' : 'fallback-unset',
+      };
     } catch (e) {
       console.error('[vc] fallback announcement send error:', e);
     }
