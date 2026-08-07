@@ -659,13 +659,24 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
 
   sessions.delete(key);
 
-  // 募集主が既にどこかのVCに居れば、作成したVCへ移動させる
+  // 募集主が既にどこかのVCに居れば、作成したVCへ移動させる。
+  // Discordの仕様上、どのVCにも接続していないユーザーはAPIで移動（引き込み）できない。
+  // interaction.member.voice はキャッシュ未反映だと channelId が null になることがあるため、
+  // guild.voiceStates.cache からも参照してフォールバックする。
   let moved = false;
-  if (interaction.inCachedGuild() && interaction.member.voice.channelId) {
+  const currentVoiceChannelId =
+    (interaction.inCachedGuild() ? interaction.member.voice.channelId : null) ??
+    guild.voiceStates.cache.get(interaction.user.id)?.channelId ??
+    null;
+  if (currentVoiceChannelId && currentVoiceChannelId !== channel.id) {
     try {
-      await interaction.member.voice.setChannel(channel);
+      const member = interaction.inCachedGuild()
+        ? interaction.member
+        : await guild.members.fetch(interaction.user.id);
+      await member.voice.setChannel(channel);
       moved = true;
     } catch (e) {
+      // Move Members / Connect 権限不足などで失敗し得る。握り潰さずログに残す。
       console.error('[vc] move member error:', e);
     }
   }
@@ -708,14 +719,29 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   // 誰も入らなかった場合の保険（3分後に空なら削除）
   scheduleEmptyGuard(channel);
 
+  // 募集通知の投稿結果を作成者に正直に伝える（無言の失敗を防ぐ）。
+  let announceLine: string;
+  if (!announce) {
+    announceLine =
+      '\n⚠️ 募集通知の投稿に失敗しました。管理者は `/vc set-notify` で通知チャンネルを設定し、' +
+      'Botにそのチャンネルへの「メッセージ送信」権限があるか確認してください。';
+  } else if (announce.channelId === interaction.channelId) {
+    // 通知チャンネル未設定などでこのチャンネルにフォールバック投稿された場合の案内。
+    announceLine =
+      `\n📣 募集をこのチャンネルに投稿しました。専用の通知先を使うには \`/vc set-notify\` で設定してください。`;
+  } else {
+    announceLine = `\n📣 募集を <#${announce.channelId}> に投稿しました。`;
+  }
+
   await interaction.editReply({
     content:
       `✅ VCを作成しました！ → <#${channel.id}>\n` +
       (moved
-        ? '作成したVCに移動しました。'
-        : 'VCに参加してください。') +
-      '（**参加者が全員退出すると自動的に削除**されます）',
-    components: [],
+        ? '➡️ 作成したVCに移動しました。'
+        : '下の「VCへ移動」ボタンからVCに参加してください。') +
+      announceLine +
+      '\n（**参加者が全員退出すると自動的に削除**されます）',
+    components: [linkRow],
   });
 }
 
