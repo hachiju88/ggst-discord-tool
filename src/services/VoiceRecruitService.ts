@@ -3,14 +3,13 @@ import {
   VoiceState,
   VoiceChannel,
   ChannelType,
-  EmbedBuilder,
 } from 'discord.js';
 import type { VoiceBasedChannel } from 'discord.js';
 import { getDatabase } from '../database';
 import { SystemSettingModel } from '../models/SystemSetting';
 
 /**
- * 簡易VC募集機能のサービス層。
+ * 簡単VC募集機能のサービス層。
  * - 設定（作成先カテゴリ / 募集通知チャンネル / ゲーム候補）の永続化
  * - 一時VC（参加者が全員退出したら消えるVC）の管理・自動削除
  */
@@ -20,6 +19,9 @@ export const DEFAULT_GAMES = ['GGST', 'GGST（Switch）', 'スト６', 'シャ�
 
 // ゲームの「その他（手動入力）」を表すセンチネル値
 export const CUSTOM_GAME_VALUE = '__custom__';
+// 募集目的・部屋番号の「その他（手動入力）」を表すセンチネル値
+export const CUSTOM_PURPOSE_VALUE = '__custom_purpose__';
+export const CUSTOM_ROOM_VALUE = '__custom_room__';
 
 export interface Option {
   value: string;
@@ -29,7 +31,22 @@ export interface Option {
 
 export const COUNT_OPTIONS: Option[] = [
   ...[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({ value: String(n), label: `${n}人` })),
-  { value: '0', label: '無制限' },
+  { value: '0', label: '制限なし' },
+];
+
+// 募集目的（固定候補 + 「その他」は手動入力。候補には追加しない）
+export const PURPOSE_OPTIONS: Option[] = [
+  { value: 'プレマ', label: 'プレマ' },
+  { value: 'ランクマ', label: 'ランクマ' },
+  { value: 'コーチング', label: 'コーチング' },
+];
+
+// 部屋番号（固定候補 + 「その他」は手動入力。候補には追加しない）
+export const ROOM_OPTIONS: Option[] = [
+  { value: '888999', label: '888999' },
+  { value: '777888', label: '777888' },
+  { value: '666777', label: '666777' },
+  { value: '555666', label: '555666' },
 ];
 
 export const AUDIENCE_OPTIONS: Option[] = [
@@ -47,6 +64,13 @@ export const RANK_OPTIONS: Option[] = [
 
 export function countLabel(value: string): string {
   return COUNT_OPTIONS.find((o) => o.value === value)?.label ?? `${value}人`;
+}
+export function purposeLabel(value: string): string {
+  // 固定候補に無ければ手動入力値をそのまま表示
+  return PURPOSE_OPTIONS.find((o) => o.value === value)?.label ?? value;
+}
+export function roomLabel(value: string): string {
+  return ROOM_OPTIONS.find((o) => o.value === value)?.label ?? value;
 }
 export function audienceLabel(value: string): string {
   return AUDIENCE_OPTIONS.find((o) => o.value === value)?.label ?? '制限なし';
@@ -186,28 +210,9 @@ async function getAllTempChannels(): Promise<TempChannelRow[]> {
   }));
 }
 
-/** 募集告知メッセージを「終了」表示に更新する（失敗は無視）。 */
-async function markAnnouncementClosed(
-  client: Client,
-  row: TempChannelRow,
-): Promise<void> {
-  if (!row.announce_channel_id || !row.announce_message_id) return;
-  try {
-    const ch = await client.channels.fetch(row.announce_channel_id);
-    if (!ch || !ch.isTextBased()) return;
-    const msg = await ch.messages.fetch(row.announce_message_id);
-    const original = msg.embeds[0];
-    const closed = EmbedBuilder.from(original ?? new EmbedBuilder())
-      .setColor(0x9aa0a6)
-      .setTitle('🔒 募集終了（VCは解散しました）');
-    await msg.edit({ embeds: [closed], components: [] });
-  } catch {
-    // メッセージが消えている等は無視
-  }
-}
-
 /**
  * 一時VCが空になっていれば削除する。削除したら true。
+ * 募集通知メッセージ側には手を加えない（終了時の編集は行わない）。
  */
 async function deleteIfEmpty(channel: VoiceBasedChannel): Promise<boolean> {
   const row = await getTempChannel(channel.id);
@@ -215,12 +220,11 @@ async function deleteIfEmpty(channel: VoiceBasedChannel): Promise<boolean> {
   if (channel.members.size > 0) return false; // まだ人がいる
 
   try {
-    await channel.delete('簡易VC募集: 参加者が全員退出したため自動削除');
+    await channel.delete('簡単VC募集: 参加者が全員退出したため自動削除');
   } catch {
     // 既に消えている場合など
   }
   await deleteTempChannelRow(channel.id);
-  await markAnnouncementClosed(channel.client, row);
   return true;
 }
 
@@ -284,7 +288,6 @@ export async function sweepTempChannels(client: Client): Promise<void> {
       const channel = await guild.channels.fetch(row.channel_id).catch(() => null);
       if (!channel || channel.type !== ChannelType.GuildVoice) {
         await deleteTempChannelRow(row.channel_id);
-        await markAnnouncementClosed(client, row);
         continue;
       }
       await deleteIfEmpty(channel as VoiceChannel);

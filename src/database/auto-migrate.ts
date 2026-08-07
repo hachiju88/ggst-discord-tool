@@ -408,7 +408,7 @@ export async function autoMigrate() {
       console.log('✅ system_settings table created')
     }
 
-    // 簡易VC募集: 自動作成した一時VCの管理テーブル
+    // 簡単VC募集: 自動作成した一時VCの管理テーブル
     if (!tableNames.includes('temp_voice_channels')) {
       await db.execute({ sql: `CREATE TABLE IF NOT EXISTS temp_voice_channels (
         channel_id TEXT PRIMARY KEY,
