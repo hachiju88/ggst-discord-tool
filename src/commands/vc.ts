@@ -659,11 +659,30 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
 
   sessions.delete(key);
 
+  // 作成したVCへメンバーを移動するには、Bot自身がそのVCに「接続」できる必要がある。
+  // 作成先カテゴリが @everyone の接続を制限していると、新規VCもその制限を継承し、
+  // ギルド全体で「メンバーの移動」権限があっても移動に失敗する。これを避けるため、
+  // Bot自身に接続・移動を許可する権限上書きを付与しておく（付与できなくても続行）。
+  const me = guild.members.me;
+  if (me) {
+    try {
+      await channel.permissionOverwrites.edit(me, {
+        ViewChannel: true,
+        Connect: true,
+        MoveMembers: true,
+      });
+    } catch (e) {
+      console.error('[vc] bot overwrite error:', e);
+    }
+  }
+
   // 募集主が既にどこかのVCに居れば、作成したVCへ移動させる。
   // Discordの仕様上、どのVCにも接続していないユーザーはAPIで移動（引き込み）できない。
   // interaction.member.voice はキャッシュ未反映だと channelId が null になることがあるため、
   // guild.voiceStates.cache からも参照してフォールバックする。
   let moved = false;
+  // 移動に失敗した理由。'permission'=権限不足の可能性 / 'left'=移動直前に退出していた。
+  let moveFailure: 'permission' | 'left' | null = null;
   const currentVoiceChannelId =
     (interaction.inCachedGuild() ? interaction.member.voice.channelId : null) ??
     guild.voiceStates.cache.get(interaction.user.id)?.channelId ??
@@ -679,6 +698,10 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     } catch (e) {
       // Move Members / Connect 権限不足などで失敗し得る。握り潰さずログに残す。
       console.error('[vc] move member error:', e);
+      // 40032 = 対象ユーザーがVCに接続していない。キャッシュが古く、作成前に退出して
+      // いたケース。これは権限の問題ではないので、警告ではなく通常案内にする。
+      const code = (e as { code?: number }).code;
+      moveFailure = code === 40032 ? 'left' : 'permission';
     }
   }
 
@@ -720,11 +743,12 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   // 誰も入らなかった場合の保険（3分後に空なら削除）
   scheduleEmptyGuard(channel);
 
-  // 移動結果を作成者に伝える。VCに居たのに移動できなかった場合は権限不足の可能性を示す。
+  // 移動結果を作成者に伝える。VCに居たのに権限不足で移動できなかった場合のみ警告する。
+  // 移動直前に退出していた（moveFailure==='left'）ケースは設定不備ではないので案内に留める。
   let moveLine: string;
   if (moved) {
     moveLine = '➡️ 作成したVCに移動しました。';
-  } else if (wasInVoice) {
+  } else if (wasInVoice && moveFailure === 'permission') {
     moveLine =
       '⚠️ 自動移動に失敗しました（Botの「メンバーの移動」権限や接続権限を確認してください）。' +
       '下の「VCへ移動」ボタンから参加できます。';
