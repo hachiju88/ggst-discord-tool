@@ -93,9 +93,10 @@ export async function addGame(guildId: string, name: string): Promise<boolean> {
   const games = await getGames(guildId);
   // 大文字小文字・全角半角までは見ない素朴な重複チェック
   if (games.some((g) => g === trimmed)) return false;
-  // Discord のセレクトは最大25件。上限に達していたら古いものを1つ落とす。
+  // Discord のセレクトは最大25件。ウィザードは末尾に「その他」を足すため
+  // 候補は24件までに制限し、上限に達していたら古いものを1つ落とす。
   const next = [...games, trimmed];
-  while (next.length > 25) next.shift();
+  while (next.length > 24) next.shift();
   await SystemSettingModel.set(GAMES_KEY(guildId), JSON.stringify(next));
   return true;
 }
@@ -254,7 +255,9 @@ export async function handleVoiceStateUpdate(
   const guildId = newState.guild.id;
 
   // 参加回数カウント（別VCへ移動した場合も新規参加として1カウント）
-  if (newState.channelId && oldState.channelId !== newState.channelId) {
+  // AFKチャンネルへの移動は「参加」とみなさない。
+  const isAfk = newState.channelId === newState.guild.afkChannelId;
+  if (newState.channelId && oldState.channelId !== newState.channelId && !isAfk) {
     try {
       await incrementVisit(guildId, newState.id);
     } catch (e) {

@@ -64,9 +64,32 @@ interface WizardSession {
   count?: string;
   audience: string; // default 'all'
   rank: string; // default 'none'
+  touchedAt: number; // 最終操作時刻（TTL掃除用）
 }
 const sessions = new Map<string, WizardSession>();
 const sessionKey = (guildId: string, userId: string) => `${guildId}:${userId}`;
+
+// 放置されたウィザードでメモリが増え続けないよう、一定時間で破棄する
+const SESSION_TTL_MS = 30 * 60 * 1000;
+
+function pruneSessions(): void {
+  const now = Date.now();
+  for (const [k, s] of sessions) {
+    if (now - s.touchedAt > SESSION_TTL_MS) sessions.delete(k);
+  }
+}
+
+/** セッションを保存（最終操作時刻を更新しつつ、古いものを掃除）。 */
+function saveSession(key: string, session: WizardSession): void {
+  session.touchedAt = Date.now();
+  sessions.set(key, session);
+  pruneSessions();
+}
+
+/** 既存セッションを取得、無ければ初期セッションを作る。 */
+function getOrInitSession(key: string): WizardSession {
+  return sessions.get(key) ?? { audience: 'all', rank: 'none', touchedAt: Date.now() };
+}
 
 // ── コマンド定義 ──────────────────────────────────────────────────────────
 export const data = new SlashCommandBuilder()
@@ -229,9 +252,9 @@ function buildWizard(session: WizardSession, games: string[]) {
 }
 
 function getDisplayName(interaction: ButtonInteraction): string {
-  const member = interaction.member;
-  if (member && 'displayName' in member && typeof (member as any).displayName === 'string') {
-    return (member as any).displayName;
+  // キャッシュ済みギルドなら member は GuildMember に絞り込まれ displayName を持つ
+  if (interaction.inCachedGuild()) {
+    return interaction.member.displayName;
   }
   return interaction.user.username;
 }
@@ -332,8 +355,8 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
   const key = sessionKey(interaction.guildId, interaction.user.id);
 
   if (interaction.customId === PANEL_BUTTON) {
-    const session: WizardSession = { audience: 'all', rank: 'none' };
-    sessions.set(key, session);
+    const session: WizardSession = { audience: 'all', rank: 'none', touchedAt: Date.now() };
+    saveSession(key, session);
     const games = await getGames(interaction.guildId);
     const wizard = buildWizard(session, games);
     await interaction.reply({
@@ -360,14 +383,14 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
 export async function handleSelectMenu(interaction: StringSelectMenuInteraction): Promise<void> {
   if (!interaction.guildId) return;
   const key = sessionKey(interaction.guildId, interaction.user.id);
-  const session = sessions.get(key) ?? { audience: 'all', rank: 'none' };
+  const session = getOrInitSession(key);
   const value = interaction.values[0];
 
   switch (interaction.customId) {
     case SELECT_GAME:
       if (value === CUSTOM_GAME_VALUE) {
         // モーダルを表示（このセレクトインタラクションはモーダル表示で消費される）
-        sessions.set(key, session);
+        saveSession(key, session);
         const modal = new ModalBuilder().setCustomId(GAME_MODAL).setTitle('ゲーム名を入力');
         const input = new TextInputBuilder()
           .setCustomId('name')
@@ -395,7 +418,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       return;
   }
 
-  sessions.set(key, session);
+  saveSession(key, session);
   const games = await getGames(interaction.guildId);
   const wizard = buildWizard(session, games);
   await interaction.update({ content: wizard.content, components: wizard.components });
@@ -406,14 +429,14 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
   if (interaction.customId !== GAME_MODAL || !interaction.guildId) return;
   const name = interaction.fields.getTextInputValue('name').trim();
   const key = sessionKey(interaction.guildId, interaction.user.id);
-  const session = sessions.get(key) ?? { audience: 'all', rank: 'none' };
+  const session = getOrInitSession(key);
 
   if (name) {
     // 次回以降のドロップダウンに追加保存
     await addGame(interaction.guildId, name);
     session.game = name;
   }
-  sessions.set(key, session);
+  saveSession(key, session);
 
   const games = await getGames(interaction.guildId);
   const wizard = buildWizard(session, games);
