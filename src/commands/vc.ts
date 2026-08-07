@@ -659,13 +659,25 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
 
   sessions.delete(key);
 
-  // 募集主が既にどこかのVCに居れば、作成したVCへ移動させる
+  // 募集主が既にどこかのVCに居れば、作成したVCへ移動させる。
+  // Discordの仕様上、どのVCにも接続していないユーザーはAPIで移動（引き込み）できない。
+  // interaction.member.voice はキャッシュ未反映だと channelId が null になることがあるため、
+  // guild.voiceStates.cache からも参照してフォールバックする。
   let moved = false;
-  if (interaction.inCachedGuild() && interaction.member.voice.channelId) {
+  const currentVoiceChannelId =
+    (interaction.inCachedGuild() ? interaction.member.voice.channelId : null) ??
+    guild.voiceStates.cache.get(interaction.user.id)?.channelId ??
+    null;
+  const wasInVoice = Boolean(currentVoiceChannelId);
+  if (currentVoiceChannelId) {
     try {
-      await interaction.member.voice.setChannel(channel);
+      const member = interaction.inCachedGuild()
+        ? interaction.member
+        : await guild.members.fetch(interaction.user.id);
+      await member.voice.setChannel(channel);
       moved = true;
     } catch (e) {
+      // Move Members / Connect 権限不足などで失敗し得る。握り潰さずログに残す。
       console.error('[vc] move member error:', e);
     }
   }
@@ -708,23 +720,52 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   // 誰も入らなかった場合の保険（3分後に空なら削除）
   scheduleEmptyGuard(channel);
 
+  // 移動結果を作成者に伝える。VCに居たのに移動できなかった場合は権限不足の可能性を示す。
+  let moveLine: string;
+  if (moved) {
+    moveLine = '➡️ 作成したVCに移動しました。';
+  } else if (wasInVoice) {
+    moveLine =
+      '⚠️ 自動移動に失敗しました（Botの「メンバーの移動」権限や接続権限を確認してください）。' +
+      '下の「VCへ移動」ボタンから参加できます。';
+  } else {
+    moveLine = '下の「VCへ移動」ボタンからVCに参加してください。';
+  }
+
+  // 募集通知の投稿結果を作成者に正直に伝える（無言の失敗を防ぐ）。
+  let announceLine: string;
+  if (!announce) {
+    announceLine =
+      '\n⚠️ 募集通知の投稿に失敗しました。管理者は `/vc set-notify` で通知チャンネルを設定し、' +
+      'Botにそのチャンネルへの「メッセージ送信」権限があるか確認してください。';
+  } else if (announce.via === 'fallback') {
+    // 通知チャンネル未設定/送信失敗などで実行チャンネルへフォールバック投稿された場合の案内。
+    announceLine =
+      `\n📣 募集を <#${announce.channelId}> に投稿しました。専用の通知先を使うには \`/vc set-notify\` で設定してください。`;
+  } else {
+    announceLine = `\n📣 募集を <#${announce.channelId}> に投稿しました。`;
+  }
+
   await interaction.editReply({
     content:
       `✅ VCを作成しました！ → <#${channel.id}>\n` +
-      (moved
-        ? '作成したVCに移動しました。'
-        : 'VCに参加してください。') +
-      '（**参加者が全員退出すると自動的に削除**されます）',
-    components: [],
+      moveLine +
+      announceLine +
+      '\n（**参加者が全員退出すると自動的に削除**されます）',
+    components: [linkRow],
   });
 }
 
-/** 募集通知チャンネル（無ければ実行チャンネル）に告知を投稿し、その位置を返す。 */
+/**
+ * 募集通知チャンネル（無ければ実行チャンネル）に告知を投稿し、その位置を返す。
+ * via は 'notify'（設定された通知チャンネルへ投稿）か 'fallback'（未設定/失敗で
+ * 実行チャンネルへ投稿）で、呼び出し側の案内文の出し分けに使う。
+ */
 async function postAnnouncement(
   interaction: ButtonInteraction,
   guildId: string,
   payload: BaseMessageOptions,
-): Promise<{ channelId: string; messageId: string } | null> {
+): Promise<{ channelId: string; messageId: string; via: 'notify' | 'fallback' } | null> {
   const guild = interaction.guild;
   if (!guild) return null;
 
@@ -736,7 +777,7 @@ async function postAnnouncement(
     if (sendable) {
       try {
         const msg = await sendable.send(payload);
-        return { channelId: sendable.id, messageId: msg.id };
+        return { channelId: sendable.id, messageId: msg.id, via: 'notify' };
       } catch (e) {
         console.error('[vc] notify channel send error:', e);
       }
@@ -748,7 +789,7 @@ async function postAnnouncement(
   if (fallback) {
     try {
       const msg = await fallback.send(payload);
-      return { channelId: fallback.id, messageId: msg.id };
+      return { channelId: fallback.id, messageId: msg.id, via: 'fallback' };
     } catch (e) {
       console.error('[vc] fallback announcement send error:', e);
     }
