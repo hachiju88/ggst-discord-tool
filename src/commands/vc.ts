@@ -29,10 +29,16 @@ import {
   COUNT_OPTIONS,
   AUDIENCE_OPTIONS,
   RANK_OPTIONS,
+  PURPOSE_OPTIONS,
+  ROOM_OPTIONS,
   CUSTOM_GAME_VALUE,
+  CUSTOM_PURPOSE_VALUE,
+  CUSTOM_ROOM_VALUE,
   countLabel,
   audienceLabel,
   rankLabel,
+  purposeLabel,
+  roomLabel,
   getCategoryId,
   setCategoryId,
   getNotifyChannelId,
@@ -46,19 +52,31 @@ import {
 
 // ── setup で作成するチャンネル構成 ─────────────────────────────────────────
 const CATEGORY_NAME = '===== 簡単募集（ベータ版） =====';
-const PANEL_CHANNEL_NAME = '簡易募集';
+const PANEL_CHANNEL_NAME = '簡単募集';
+// 用語変更（簡易→簡単）前に作成されたパネルチャンネルの旧名。
+// setup 再実行時に重複作成しないよう、旧名も検出して新名へリネームする。
+const LEGACY_PANEL_CHANNEL_NAMES = ['簡易募集'];
 const NOTIFY_CHANNEL_NAME = '募集通知';
+
+// 募集通知でメンションするロール名（このロールに👍リアクションを促す）
+const MENTION_ROLE_NAME = 'メンバー';
 
 // ── customId 定義 ─────────────────────────────────────────────────────────
 const PANEL_BUTTON = 'vc:open';
 const SELECT_GAME = 'vc:sel:game';
+const SELECT_PURPOSE = 'vc:sel:purpose';
 const SELECT_COUNT = 'vc:sel:count';
 const SELECT_AUDIENCE = 'vc:sel:audience';
 const SELECT_RANK = 'vc:sel:rank';
+const SELECT_ROOM = 'vc:sel:room';
 const CREATE_BUTTON = 'vc:create';
 const CANCEL_BUTTON = 'vc:cancel';
 const COMMENT_BUTTON = 'vc:comment';
+const NEXT_BUTTON = 'vc:next';
+const PREV_BUTTON = 'vc:prev';
 const GAME_MODAL = 'vc:gamemodal';
+const PURPOSE_MODAL = 'vc:purposemodal';
+const ROOM_MODAL = 'vc:roommodal';
 const COMMENT_MODAL = 'vc:commentmodal';
 
 // 対象者による色分け
@@ -70,15 +88,30 @@ const AUDIENCE_COLOR: Record<string, number> = {
 
 // ── ウィザードのセッション（ユーザー単位・メモリ保持） ───────────────────────
 interface WizardSession {
-  game?: string;
-  count?: string;
+  game?: string; // default 'GGST'
+  purpose?: string; // 募集目的（任意）
+  count?: string; // default '0'（制限なし）
   audience: string; // default 'all'
   rank: string; // default 'none'
+  room?: string; // 部屋番号（任意）
   comment?: string; // ひとこと（任意）
+  page: 1 | 2; // ウィザードの表示ページ（1ページに収まらないため2分割）
   touchedAt: number; // 最終操作時刻（TTL掃除用）
 }
 const sessions = new Map<string, WizardSession>();
 const sessionKey = (guildId: string, userId: string) => `${guildId}:${userId}`;
+
+/** フォームの初期セッション（ゲーム:GGST / 参加人数:制限なし を初期値に）。 */
+function newSession(): WizardSession {
+  return {
+    game: 'GGST',
+    count: '0',
+    audience: 'all',
+    rank: 'none',
+    page: 1,
+    touchedAt: Date.now(),
+  };
+}
 
 // 放置されたウィザードでメモリが増え続けないよう、一定時間で破棄する
 const SESSION_TTL_MS = 30 * 60 * 1000;
@@ -99,13 +132,13 @@ function saveSession(key: string, session: WizardSession): void {
 
 /** 既存セッションを取得、無ければ初期セッションを作る。 */
 function getOrInitSession(key: string): WizardSession {
-  return sessions.get(key) ?? { audience: 'all', rank: 'none', touchedAt: Date.now() };
+  return sessions.get(key) ?? newSession();
 }
 
 // ── コマンド定義 ──────────────────────────────────────────────────────────
 export const data = new SlashCommandBuilder()
   .setName('vc')
-  .setDescription('[VC募集] 簡易ボイスチャット募集')
+  .setDescription('[VC募集] 簡単ボイスチャット募集')
   .addSubcommand((s) =>
     s
       .setName('setup')
@@ -168,9 +201,9 @@ export const data = new SlashCommandBuilder()
 function buildPanelMessage() {
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle('🎙️ 簡易VC募集')
+    .setTitle('🎙️ 簡単VC募集')
     .setDescription(
-      '下のボタンを押して、募集内容（ゲーム・人数・対象者・ランク・ひとこと）を選ぶだけ！\n' +
+      '下のボタンを押して、募集内容（ゲーム・目的・人数・対象者・ランク・部屋番号・ひとこと）を選ぶだけ！\n' +
         '専用のボイスチャットが自動で作成され、募集が「募集通知」チャンネルに投稿されます。\n' +
         '**参加者が全員退出すると、そのVCは自動的に消えます。**',
     );
@@ -186,6 +219,39 @@ function buildPanelMessage() {
   return { embeds: [embed], components: [row] };
 }
 
+/** 固定候補のセレクトを組み立てる（末尾に「その他（手動入力）」を付与）。 */
+function buildOptionSelect(
+  customId: string,
+  placeholder: string,
+  options: { value: string; label: string; description?: string }[],
+  selected: string | undefined,
+  customValue: string,
+): StringSelectMenuBuilder {
+  const menuOptions = options.map((o) => {
+    const opt = new StringSelectMenuOptionBuilder()
+      .setLabel(o.label)
+      .setValue(o.value)
+      .setDefault(selected === o.value);
+    if (o.description) opt.setDescription(o.description);
+    return opt;
+  });
+  menuOptions.push(
+    new StringSelectMenuOptionBuilder()
+      .setLabel('その他（手動入力）…')
+      .setDescription('一覧に無い内容を入力します')
+      .setValue(customValue)
+      .setEmoji('✏️'),
+  );
+  return new StringSelectMenuBuilder()
+    .setCustomId(customId)
+    .setPlaceholder(placeholder)
+    .addOptions(menuOptions);
+}
+
+// Discord のメッセージは最大5アクション行のため、6個のセレクトを1画面に置けない。
+// そこでウィザードを2ページに分割する:
+//   ページ1: ゲーム / 募集目的 / 参加人数 / 対象者
+//   ページ2: 対象ランク / 部屋番号
 function buildWizard(session: WizardSession, games: string[]) {
   // ゲーム: 最大25件制限のため候補を24件までに絞り、末尾に「その他」を足す
   const gameOptions = games.slice(0, 24).map((g) =>
@@ -201,15 +267,22 @@ function buildWizard(session: WizardSession, games: string[]) {
       .setValue(CUSTOM_GAME_VALUE)
       .setEmoji('✏️'),
   );
-
   const gameSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_GAME)
     .setPlaceholder('① 募集するゲームを選択')
     .addOptions(gameOptions);
 
+  const purposeSelect = buildOptionSelect(
+    SELECT_PURPOSE,
+    '② 募集目的を選択',
+    PURPOSE_OPTIONS,
+    session.purpose,
+    CUSTOM_PURPOSE_VALUE,
+  );
+
   const countSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_COUNT)
-    .setPlaceholder('② 参加人数を選択')
+    .setPlaceholder('③ 参加人数を選択')
     .addOptions(
       COUNT_OPTIONS.map((o) =>
         new StringSelectMenuOptionBuilder()
@@ -221,7 +294,7 @@ function buildWizard(session: WizardSession, games: string[]) {
 
   const audienceSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_AUDIENCE)
-    .setPlaceholder('③ 対象者を選択')
+    .setPlaceholder('④ 対象者を選択')
     .addOptions(
       AUDIENCE_OPTIONS.map((o) => {
         const opt = new StringSelectMenuOptionBuilder()
@@ -235,7 +308,7 @@ function buildWizard(session: WizardSession, games: string[]) {
 
   const rankSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_RANK)
-    .setPlaceholder('④ 対象ランクを選択')
+    .setPlaceholder('⑤ 対象ランクを選択')
     .addOptions(
       RANK_OPTIONS.map((o) =>
         new StringSelectMenuOptionBuilder()
@@ -245,8 +318,64 @@ function buildWizard(session: WizardSession, games: string[]) {
       ),
     );
 
+  const roomSelect = buildOptionSelect(
+    SELECT_ROOM,
+    '⑥ 部屋番号を選択',
+    ROOM_OPTIONS,
+    session.room,
+    CUSTOM_ROOM_VALUE,
+  );
+
   const ready = Boolean(session.game && session.count);
+
+  // 現在の選択内容の要約（両ページ共通で全項目を表示）
+  const content =
+    '**🎙️ VC募集フォーム**' +
+    `（${session.page}/2 ページ）\n` +
+    `> 🎮 ゲーム: **${session.game ?? '未選択'}**\n` +
+    `> 🎯 目的: **${session.purpose ? purposeLabel(session.purpose) : '（未選択）'}**\n` +
+    `> 👥 定員: **${session.count ? countLabel(session.count) : '未選択'}**\n` +
+    `> 🙌 対象者: **${audienceLabel(session.audience)}**\n` +
+    `> 🏆 対象ランク: **${rankLabel(session.rank)}**\n` +
+    `> 🔑 部屋番号: **${session.room ? roomLabel(session.room) : '（未設定）'}**\n` +
+    `> 💬 ひとこと: **${session.comment ? truncate(session.comment, 100) : '（なし）'}**\n` +
+    (session.page === 1
+      ? '\n① 〜 ④ を選んで「次へ ▶」。'
+      : ready
+        ? '\n準備OK！「VCを作成」を押してください。'
+        : '\n※ ゲームと人数を選ぶと作成できます。');
+
+  if (session.page === 1) {
+    const nav = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(NEXT_BUTTON)
+        .setLabel('次へ（ランク・部屋番号）')
+        .setEmoji('▶️')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(CANCEL_BUTTON)
+        .setLabel('キャンセル')
+        .setStyle(ButtonStyle.Secondary),
+    );
+    return {
+      content,
+      components: [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(gameSelect),
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(purposeSelect),
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(countSelect),
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(audienceSelect),
+        nav,
+      ],
+    };
+  }
+
+  // ページ2
   const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(PREV_BUTTON)
+      .setLabel('戻る')
+      .setEmoji('◀️')
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(COMMENT_BUTTON)
       .setLabel(session.comment ? 'ひとこと編集' : 'ひとこと入力')
@@ -263,26 +392,36 @@ function buildWizard(session: WizardSession, games: string[]) {
       .setLabel('キャンセル')
       .setStyle(ButtonStyle.Secondary),
   );
-
-  const content =
-    '**🎙️ VC募集フォーム**\n' +
-    `> ゲーム: **${session.game ?? '未選択'}**\n` +
-    `> 定員: **${session.count ? countLabel(session.count) : '未選択'}**\n` +
-    `> 対象者: **${audienceLabel(session.audience)}**\n` +
-    `> 対象ランク: **${rankLabel(session.rank)}**\n` +
-    `> ひとこと: **${session.comment ? truncate(session.comment, 100) : '（なし）'}**\n` +
-    (ready ? '\n準備OK！「VCを作成」を押してください。' : '\n※ ゲームと人数を選ぶと作成できます。');
-
   return {
     content,
     components: [
-      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(gameSelect),
-      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(countSelect),
-      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(audienceSelect),
       new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(rankSelect),
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(roomSelect),
       buttonRow,
     ],
   };
+}
+
+/** 単一テキスト入力のモーダルを組み立てる（ゲーム/目的/部屋番号の手動入力用）。 */
+function buildTextModal(
+  customId: string,
+  title: string,
+  fieldId: string,
+  label: string,
+  placeholder: string,
+  maxLength: number,
+): ModalBuilder {
+  const input = new TextInputBuilder()
+    .setCustomId(fieldId)
+    .setLabel(label)
+    .setPlaceholder(placeholder)
+    .setStyle(TextInputStyle.Short)
+    .setMaxLength(maxLength)
+    .setRequired(true);
+  return new ModalBuilder()
+    .setCustomId(customId)
+    .setTitle(title)
+    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
 }
 
 function getDisplayName(interaction: ButtonInteraction): string {
@@ -324,13 +463,22 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         });
       }
 
-      // 簡易募集チャンネル（パネル設置先）
+      // 簡単募集チャンネル（パネル設置先）
+      // 新名だけでなく旧名（簡易募集）も検出し、旧名があれば新名へリネームして再利用する。
+      // これをしないと用語変更後の setup 再実行で新旧2つのパネルチャンネルが並んでしまう。
       let panelChannel = guild.channels.cache.find(
         (c) =>
           c.type === ChannelType.GuildText &&
           c.parentId === category!.id &&
-          c.name === PANEL_CHANNEL_NAME,
+          (c.name === PANEL_CHANNEL_NAME || LEGACY_PANEL_CHANNEL_NAMES.includes(c.name)),
       );
+      if (panelChannel && panelChannel.name !== PANEL_CHANNEL_NAME) {
+        try {
+          panelChannel = await panelChannel.setName(PANEL_CHANNEL_NAME);
+        } catch (e) {
+          console.error('[vc] legacy panel channel rename error:', e);
+        }
+      }
       if (!panelChannel) {
         panelChannel = await guild.channels.create({
           name: PANEL_CHANNEL_NAME,
@@ -352,7 +500,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
           name: NOTIFY_CHANNEL_NAME,
           type: ChannelType.GuildText,
           parent: category.id,
-          topic: '「簡易募集」から作成された募集が投稿されます',
+          topic: '「簡単募集」から作成された募集が投稿されます',
         });
       }
 
@@ -366,6 +514,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
             ViewChannel: true,
             SendMessages: true,
             EmbedLinks: true,
+            AddReactions: true,
           });
         } catch (e) {
           console.error('[vc] notify channel overwrite error:', e);
@@ -493,7 +642,7 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
   const key = sessionKey(interaction.guildId, interaction.user.id);
 
   if (interaction.customId === PANEL_BUTTON) {
-    const session: WizardSession = { audience: 'all', rank: 'none', touchedAt: Date.now() };
+    const session = newSession();
     saveSession(key, session);
     const games = await getGames(interaction.guildId);
     const wizard = buildWizard(session, games);
@@ -502,6 +651,16 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
       components: wizard.components,
       flags: MessageFlags.Ephemeral,
     });
+    return;
+  }
+
+  if (interaction.customId === NEXT_BUTTON || interaction.customId === PREV_BUTTON) {
+    const session = getOrInitSession(key);
+    session.page = interaction.customId === NEXT_BUTTON ? 2 : 1;
+    saveSession(key, session);
+    const games = await getGames(interaction.guildId);
+    const wizard = buildWizard(session, games);
+    await interaction.update({ content: wizard.content, components: wizard.components });
     return;
   }
 
@@ -560,6 +719,16 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       }
       session.game = value;
       break;
+    case SELECT_PURPOSE:
+      if (value === CUSTOM_PURPOSE_VALUE) {
+        saveSession(key, session);
+        await interaction.showModal(
+          buildTextModal(PURPOSE_MODAL, '募集目的を入力', 'value', '目的', '例: 練習 / エンジョイ / …', 40),
+        );
+        return;
+      }
+      session.purpose = value;
+      break;
     case SELECT_COUNT:
       session.count = value;
       break;
@@ -568,6 +737,16 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       break;
     case SELECT_RANK:
       session.rank = value;
+      break;
+    case SELECT_ROOM:
+      if (value === CUSTOM_ROOM_VALUE) {
+        saveSession(key, session);
+        await interaction.showModal(
+          buildTextModal(ROOM_MODAL, '部屋番号を入力', 'value', '部屋番号', '例: 123456', 20),
+        );
+        return;
+      }
+      session.room = value;
       break;
     default:
       return;
@@ -591,6 +770,14 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
       await addGame(interaction.guildId, name); // 次回以降のドロップダウンに追加保存
       session.game = name;
     }
+  } else if (interaction.customId === PURPOSE_MODAL) {
+    // 手動入力の目的は候補には追加しない（今回の募集のみに使う）
+    const purpose = interaction.fields.getTextInputValue('value').trim();
+    session.purpose = purpose || undefined;
+  } else if (interaction.customId === ROOM_MODAL) {
+    // 手動入力の部屋番号も候補には追加しない
+    const room = interaction.fields.getTextInputValue('value').trim();
+    session.room = room || undefined;
   } else if (interaction.customId === COMMENT_MODAL) {
     const comment = interaction.fields.getTextInputValue('comment').trim();
     session.comment = comment || undefined;
@@ -648,11 +835,16 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   }
 
   const userLimit = parseInt(session.count, 10) || 0; // 0 = 無制限
-  // VC名: 「ゲーム / 人数 / 対象者 / 対象ランク」
-  const channelName = truncate(
-    `🎙️ ${session.game} / ${countLabel(session.count)} / ${audienceLabel(session.audience)} / ${rankLabel(session.rank)}`,
-    95,
-  );
+  // VC名: 「ゲーム / 目的 / 人数 / 対象者 / 対象ランク」
+  // 目的は任意項目のため、未選択なら区切りに含めない。
+  const nameParts = [
+    session.game,
+    session.purpose ? purposeLabel(session.purpose) : null,
+    countLabel(session.count),
+    audienceLabel(session.audience),
+    rankLabel(session.rank),
+  ].filter((p): p is string => Boolean(p));
+  const channelName = truncate(`🎙️ ${nameParts.join(' / ')}`, 95);
 
   let channel: VoiceChannel;
   try {
@@ -661,7 +853,7 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
       type: ChannelType.GuildVoice,
       parent: categoryId,
       userLimit,
-      reason: `簡易VC募集: ${interaction.user.tag} が作成`,
+      reason: `簡単VC募集: ${interaction.user.tag} が作成`,
     });
   } catch (e) {
     console.error('[vc] channel create error:', e);
@@ -689,6 +881,19 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
       });
     } catch (e) {
       console.error('[vc] bot overwrite error:', e);
+    }
+  }
+
+  // 部屋番号が指定されていれば、VCの「チャンネルステータス」に「id: 888999」形式で表示する。
+  // このバージョンの discord.js には setVoiceStatus が無いため、REST を直接呼ぶ
+  // （PUT /channels/{id}/voice-status）。権限不足等で失敗しても続行する。
+  if (session.room) {
+    try {
+      await channel.client.rest.put(`/channels/${channel.id}/voice-status`, {
+        body: { status: `id: ${session.room}` },
+      });
+    } catch (e) {
+      console.error('[vc] set voice status error:', e);
     }
   }
 
@@ -727,10 +932,18 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   const infoLines = [
     `👤 **作成者：** <@${interaction.user.id}>`,
     `🎮 **ゲーム：** ${session.game}`,
-    `👥 **参加人数：** ${countLabel(session.count)}`,
-    `🎯 **対象者：** ${audienceLabel(session.audience)}`,
-    `🏆 **対象ランク：** ${rankLabel(session.rank)}`,
   ];
+  if (session.purpose) {
+    infoLines.push(`🎯 **目的：** ${purposeLabel(session.purpose)}`);
+  }
+  infoLines.push(
+    `👥 **参加人数：** ${countLabel(session.count)}`,
+    `🙌 **対象者：** ${audienceLabel(session.audience)}`,
+    `🏆 **対象ランク：** ${rankLabel(session.rank)}`,
+  );
+  if (session.room) {
+    infoLines.push(`🔑 **部屋番号：** ${roomLabel(session.room)}`);
+  }
   if (session.comment) {
     infoLines.push(`💬 **ひとこと：** ${truncate(session.comment, 200)}`);
   }
@@ -738,7 +951,9 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     .setColor(AUDIENCE_COLOR[session.audience] ?? 0x5865f2)
     .setTitle(`🎙️ ${session.game} 募集`)
     .setDescription(
-      `➡️ <#${channel.id}> に参加しよう！\n\n` + infoLines.join('\n'),
+      `➡️ <#${channel.id}> に参加しよう！\n\n` +
+        infoLines.join('\n') +
+        '\n\n👍 **参加予定の方はこのメッセージに 👍 を付けてください！**',
     )
     .setTimestamp(new Date());
 
@@ -747,11 +962,18 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     new ButtonBuilder().setLabel('VCへ移動').setEmoji('🔊').setStyle(ButtonStyle.Link).setURL(jumpUrl),
   );
 
+  // 「メンバー」ロールが存在すればメンションして参加を呼びかける（👍リアクションを促す）。
+  // ロールは RoleManager が常時キャッシュしているため、キャッシュ参照で十分。
+  // （募集作成はホットパスなので、ここで全ロールをAPI取得しない。無ければメンションなし）
+  const mentionRole = guild.roles.cache.find((r) => r.name === MENTION_ROLE_NAME) ?? null;
+
   // 募集通知チャンネル（未設定なら実行チャンネルにフォールバック）
+  // 投稿後に 👍 リアクションを自動付与する。
   const announce = await postAnnouncement(interaction, guild.id, {
+    content: mentionRole ? `<@&${mentionRole.id}>` : undefined,
     embeds: [embed],
     components: [linkRow],
-    allowedMentions: { parse: [] as const },
+    allowedMentions: mentionRole ? { roles: [mentionRole.id] } : { parse: [] as const },
   });
 
   await registerTempChannel({
@@ -840,6 +1062,7 @@ async function postAnnouncement(
     if (sendable) {
       try {
         const msg = await sendable.send(payload);
+        await addThumbsUp(msg);
         return { channelId: sendable.id, messageId: msg.id, via: 'notify' };
       } catch (e) {
         console.error('[vc] notify channel send error:', e);
@@ -856,6 +1079,7 @@ async function postAnnouncement(
   if (fallback) {
     try {
       const msg = await fallback.send(payload);
+      await addThumbsUp(msg);
       return {
         channelId: fallback.id,
         messageId: msg.id,
@@ -868,10 +1092,19 @@ async function postAnnouncement(
   return null;
 }
 
+/** 募集通知メッセージに 👍 リアクションを付与する（失敗しても無視）。 */
+async function addThumbsUp(msg: { react?: (emoji: string) => Promise<unknown> }): Promise<void> {
+  try {
+    await msg.react?.('👍');
+  } catch (e) {
+    console.error('[vc] add reaction error:', e);
+  }
+}
+
 /** テキスト送信可能なギルドチャンネルなら返す（そうでなければ null）。 */
 interface Sendable {
   id: string;
-  send: (payload: BaseMessageOptions) => Promise<{ id: string }>;
+  send: (payload: BaseMessageOptions) => Promise<{ id: string; react?: (emoji: string) => Promise<unknown> }>;
 }
 function getSendable(
   channel: GuildBasedChannel | null | undefined | ButtonInteraction['channel'],

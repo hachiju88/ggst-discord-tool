@@ -9,7 +9,7 @@ export function createClient(): Client {
       // /rolestats のロール人数集計に必要(特権インテント)。
       // Discord Developer Portal 側でも「Server Members Intent」を有効化すること。
       GatewayIntentBits.GuildMembers,
-      // 簡易VC募集: VC参加の検知・一時VCの自動削除に必要。
+      // 簡単VC募集: VC参加の検知・一時VCの自動削除に必要。
       GatewayIntentBits.GuildVoiceStates,
     ],
     rest: {
@@ -22,7 +22,7 @@ export function createClient(): Client {
     console.log(`Discord bot logged in as ${client.user?.tag}`);
   });
 
-  // VoiceState 更新（簡易VC募集: 参加回数の記録・一時VCの自動削除）
+  // VoiceState 更新（簡単VC募集: 参加回数の記録・一時VCの自動削除）
   client.on('voiceStateUpdate', async (oldState, newState) => {
     try {
       await handleVoiceStateUpdate(oldState, newState);
