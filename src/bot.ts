@@ -1,5 +1,6 @@
 import { Client, GatewayIntentBits, REST, Routes, MessageFlags } from 'discord.js';
 import { commandHandler, getAutocompleteHandler, getModalSubmitHandler, buttonHandler, selectMenuHandler, channelSelectMenuHandler, userSelectMenuHandler } from './commands';
+import { handleVoiceStateUpdate } from './services/VoiceRecruitService';
 
 export function createClient(): Client {
   const client = new Client({
@@ -8,6 +9,8 @@ export function createClient(): Client {
       // /rolestats のロール人数集計に必要(特権インテント)。
       // Discord Developer Portal 側でも「Server Members Intent」を有効化すること。
       GatewayIntentBits.GuildMembers,
+      // 簡易VC募集: VC参加の検知・一時VCの自動削除に必要。
+      GatewayIntentBits.GuildVoiceStates,
     ],
     rest: {
       timeout: 30000,
@@ -17,6 +20,15 @@ export function createClient(): Client {
   // Ready イベント
   client.once('clientReady', () => {
     console.log(`Discord bot logged in as ${client.user?.tag}`);
+  });
+
+  // VoiceState 更新（簡易VC募集: 参加回数の記録・一時VCの自動削除）
+  client.on('voiceStateUpdate', async (oldState, newState) => {
+    try {
+      await handleVoiceStateUpdate(oldState, newState);
+    } catch (error) {
+      console.error('[VoiceState] Error:', error);
+    }
   });
 
   // Interaction イベント（スラッシュコマンド処理）
