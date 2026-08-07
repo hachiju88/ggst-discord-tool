@@ -53,6 +53,9 @@ import {
 // ── setup で作成するチャンネル構成 ─────────────────────────────────────────
 const CATEGORY_NAME = '===== 簡単募集（ベータ版） =====';
 const PANEL_CHANNEL_NAME = '簡単募集';
+// 用語変更（簡易→簡単）前に作成されたパネルチャンネルの旧名。
+// setup 再実行時に重複作成しないよう、旧名も検出して新名へリネームする。
+const LEGACY_PANEL_CHANNEL_NAMES = ['簡易募集'];
 const NOTIFY_CHANNEL_NAME = '募集通知';
 
 // 募集通知でメンションするロール名（このロールに👍リアクションを促す）
@@ -461,12 +464,21 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       }
 
       // 簡単募集チャンネル（パネル設置先）
+      // 新名だけでなく旧名（簡易募集）も検出し、旧名があれば新名へリネームして再利用する。
+      // これをしないと用語変更後の setup 再実行で新旧2つのパネルチャンネルが並んでしまう。
       let panelChannel = guild.channels.cache.find(
         (c) =>
           c.type === ChannelType.GuildText &&
           c.parentId === category!.id &&
-          c.name === PANEL_CHANNEL_NAME,
+          (c.name === PANEL_CHANNEL_NAME || LEGACY_PANEL_CHANNEL_NAMES.includes(c.name)),
       );
+      if (panelChannel && panelChannel.name !== PANEL_CHANNEL_NAME) {
+        try {
+          panelChannel = await panelChannel.setName(PANEL_CHANNEL_NAME);
+        } catch (e) {
+          console.error('[vc] legacy panel channel rename error:', e);
+        }
+      }
       if (!panelChannel) {
         panelChannel = await guild.channels.create({
           name: PANEL_CHANNEL_NAME,
@@ -951,12 +963,9 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   );
 
   // 「メンバー」ロールが存在すればメンションして参加を呼びかける（👍リアクションを促す）。
-  const mentionRole =
-    guild.roles.cache.find((r) => r.name === MENTION_ROLE_NAME) ??
-    (await guild.roles
-      .fetch()
-      .then((roles) => roles.find((r) => r.name === MENTION_ROLE_NAME) ?? null)
-      .catch(() => null));
+  // ロールは RoleManager が常時キャッシュしているため、キャッシュ参照で十分。
+  // （募集作成はホットパスなので、ここで全ロールをAPI取得しない。無ければメンションなし）
+  const mentionRole = guild.roles.cache.find((r) => r.name === MENTION_ROLE_NAME) ?? null;
 
   // 募集通知チャンネル（未設定なら実行チャンネルにフォールバック）
   // 投稿後に 👍 リアクションを自動付与する。

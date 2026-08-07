@@ -221,8 +221,17 @@ async function deleteIfEmpty(channel: VoiceBasedChannel): Promise<boolean> {
 
   try {
     await channel.delete('簡単VC募集: 参加者が全員退出したため自動削除');
-  } catch {
-    // 既に消えている場合など
+  } catch (e) {
+    // 10003 = Unknown Channel（既に削除済み）。この場合は行だけ掃除して完了扱い。
+    const code = (e as { code?: number }).code;
+    if (code !== 10003) {
+      // 権限不足などで削除に失敗した場合は「行を消さずに」残す。
+      // ここで行を消してしまうと、退出イベント・空ガード・起動時sweepの
+      // どれも二度と再試行せず、空VCが永久に残ってしまう（自動削除が効かない原因）。
+      // 行を残せば次のトリガーで再試行できる。原因追跡のためエラーも握り潰さず記録する。
+      console.error(`[VoiceRecruit] channel delete failed (will retry): ${channel.id}`, e);
+      return false;
+    }
   }
   await deleteTempChannelRow(channel.id);
   return true;
