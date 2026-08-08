@@ -732,9 +732,15 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
     if (results.length === 0) {
       out += '追跡中の一時VCはありません（DBに対象行なし）。既に全て掃除済みか、そもそも登録されていません。';
     } else {
-      const deleted = results.filter((r) => r.outcome === 'deleted').length;
-      const gone = results.filter((r) => r.outcome === 'gone').length;
-      out += `対象 ${results.length}件 → 削除 ${deleted}件 / 既に消滅 ${gone}件\n\n`;
+      const n = (o: string) => results.filter((r) => r.outcome === o).length;
+      const deleted = n('deleted');
+      const gone = n('gone');
+      const occupied = n('occupied');
+      const failed = n('delete_failed');
+      const fetchFailed = n('fetch_failed');
+      out +=
+        `対象 ${results.length}件 → 削除 ${deleted} / 消滅 ${gone} / 在室で保留 ${occupied}` +
+        ` / 削除失敗 ${failed} / 取得失敗 ${fetchFailed}\n\n`;
       for (const r of results) {
         const nm = r.name ? `\`${r.name}\`` : `\`${r.channelId}\``;
         if (r.outcome === 'deleted') {
@@ -745,6 +751,8 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
           out +=
             `⏸️ ${nm}: **Botは在室${r.memberCount}人と認識**しているため保留（作成${fmtAge(r.ageMs)}前）\n` +
             '　→ 実際は誰もいないのにこの表示なら、ボイス状態キャッシュに幽霊メンバーが残っています。\n';
+        } else if (r.outcome === 'fetch_failed') {
+          out += `⚠️ ${nm}: チャンネル取得に一時失敗（行は保持・次回再試行）: ${r.detail ?? '理由不明'}\n`;
         } else {
           out += `❌ ${nm}: 削除に失敗（${r.detail ?? '理由不明'}）\n`;
         }

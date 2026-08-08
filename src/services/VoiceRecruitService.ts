@@ -188,14 +188,8 @@ function parseCreatedAtMs(s: string | null): number {
   return Number.isNaN(t) ? 0 : t;
 }
 
-async function getTempChannel(channelId: string): Promise<TempChannelRow | null> {
-  const db = getDatabase();
-  const res = await db.execute({
-    sql: 'SELECT * FROM temp_voice_channels WHERE channel_id = ?',
-    args: [channelId],
-  });
-  if (res.rows.length === 0) return null;
-  const r = res.rows[0] as any;
+/** DBの1行を TempChannelRow に整形する（列追加時の変更点を1箇所に集約）。 */
+function mapTempChannelRow(r: any): TempChannelRow {
   return {
     channel_id: String(r.channel_id),
     guild_id: String(r.guild_id),
@@ -204,6 +198,16 @@ async function getTempChannel(channelId: string): Promise<TempChannelRow | null>
     announce_message_id: r.announce_message_id ? String(r.announce_message_id) : null,
     created_at: r.created_at != null ? String(r.created_at) : null,
   };
+}
+
+async function getTempChannel(channelId: string): Promise<TempChannelRow | null> {
+  const db = getDatabase();
+  const res = await db.execute({
+    sql: 'SELECT * FROM temp_voice_channels WHERE channel_id = ?',
+    args: [channelId],
+  });
+  if (res.rows.length === 0) return null;
+  return mapTempChannelRow(res.rows[0]);
 }
 
 async function deleteTempChannelRow(channelId: string): Promise<void> {
@@ -232,14 +236,33 @@ async function getTempChannelsByGuild(guildId: string): Promise<TempChannelRow[]
     sql: 'SELECT * FROM temp_voice_channels WHERE guild_id = ?',
     args: [guildId],
   });
-  return res.rows.map((r: any) => ({
-    channel_id: String(r.channel_id),
-    guild_id: String(r.guild_id),
-    creator_id: String(r.creator_id),
-    announce_channel_id: r.announce_channel_id ? String(r.announce_channel_id) : null,
-    announce_message_id: r.announce_message_id ? String(r.announce_message_id) : null,
-    created_at: r.created_at != null ? String(r.created_at) : null,
-  }));
+  return res.rows.map(mapTempChannelRow);
+}
+
+/**
+ * 追跡中の一時VCをfetchした結果を「存在／本当に無い／一時的失敗」で区別する。
+ * guild.channels.fetch は存在しないと 10003 を投げる。10003 と型不一致だけを
+ * 「gone（行を消してよい）」とし、それ以外のネットワーク/API失敗は transient として
+ * 行を残す（誤って生存チャンネルの追跡を失わないため）。
+ */
+type FetchTempResult =
+  | { kind: 'channel'; channel: VoiceChannel }
+  | { kind: 'gone' }
+  | { kind: 'transient'; detail: string };
+
+async function fetchTempVoiceChannel(
+  guild: Guild,
+  channelId: string,
+): Promise<FetchTempResult> {
+  try {
+    const channel = await guild.channels.fetch(channelId);
+    if (!channel || channel.type !== ChannelType.GuildVoice) return { kind: 'gone' };
+    return { kind: 'channel', channel: channel as VoiceChannel };
+  } catch (e) {
+    const code = (e as { code?: number }).code;
+    if (code === 10003) return { kind: 'gone' }; // Unknown Channel = 本当に存在しない
+    return { kind: 'transient', detail: (e as { message?: string }).message ?? String(e) };
+  }
 }
 
 /** 1件の一時VCに対する即時掃除の結果（Discord上で原因を切り分けるための診断）。 */
@@ -248,34 +271,46 @@ export interface SweepDiagResult {
   name: string | null;
   ageMs: number | null; // 作成からの経過（created_at 不明なら null）
   memberCount: number | null; // Botが認識している在室人数（チャンネル消失なら null）
-  outcome: 'deleted' | 'occupied' | 'gone' | 'delete_failed';
-  detail?: string; // delete_failed の理由など
+  outcome: 'deleted' | 'occupied' | 'gone' | 'delete_failed' | 'fetch_failed';
+  detail?: string; // delete_failed / fetch_failed の理由など
 }
 
 /**
  * 指定ギルドの追跡中一時VCを、猶予なし・two-strikeなしで即時に掃除し、
  * 各VCについて「なぜ消えた／消えなかったか」を返す診断用関数。
  * 管理者が Discord 上から手動実行して原因を切り分ける（サーバーログ不要）。
+ *
+ * ※ 定期掃除と違い two-strike/猶予を挟まず即削除する。管理者が空を確認した上で
+ * 　明示的に押す「今すぐ削除」だからこの割り切りにしている。ただし理屈上、
+ * 　ゲートウェイ再接続直後にボイス状態キャッシュが未充填だと在室VCが空に見えうる。
+ * 　その場合は在室人数を results で提示し（occupied として表示）、実削除は
+ * 　members.size===0 の時のみ行うことで、誤削除の窓を最小化している。
  */
 export async function sweepGuildNow(guild: Guild): Promise<SweepDiagResult[]> {
   const rows = await getTempChannelsByGuild(guild.id);
   const now = Date.now();
   const results: SweepDiagResult[] = [];
   for (const row of rows) {
-    const channel = await guild.channels.fetch(row.channel_id).catch(() => null);
-    if (!channel || channel.type !== ChannelType.GuildVoice) {
-      await deleteTempChannelRow(row.channel_id);
+    const ageMs = row.created_at ? now - parseCreatedAtMs(row.created_at) : null;
+    const fetched = await fetchTempVoiceChannel(guild, row.channel_id);
+    if (fetched.kind === 'transient') {
+      // 一時的なfetch失敗。行は残して次回に委ねる（生存チャンネルの追跡を失わない）。
       results.push({
         channelId: row.channel_id,
-        name: channel?.name ?? null,
-        ageMs: row.created_at ? now - parseCreatedAtMs(row.created_at) : null,
+        name: null,
+        ageMs,
         memberCount: null,
-        outcome: 'gone',
+        outcome: 'fetch_failed',
+        detail: fetched.detail,
       });
       continue;
     }
-    const vc = channel as VoiceChannel;
-    const ageMs = row.created_at ? now - parseCreatedAtMs(row.created_at) : null;
+    if (fetched.kind === 'gone') {
+      await deleteTempChannelRow(row.channel_id);
+      results.push({ channelId: row.channel_id, name: null, ageMs, memberCount: null, outcome: 'gone' });
+      continue;
+    }
+    const vc = fetched.channel;
     const memberCount = vc.members.size;
     if (memberCount > 0) {
       results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'occupied' });
@@ -308,14 +343,7 @@ export async function sweepGuildNow(guild: Guild): Promise<SweepDiagResult[]> {
 async function getAllTempChannels(): Promise<TempChannelRow[]> {
   const db = getDatabase();
   const res = await db.execute({ sql: 'SELECT * FROM temp_voice_channels' });
-  return res.rows.map((r: any) => ({
-    channel_id: String(r.channel_id),
-    guild_id: String(r.guild_id),
-    creator_id: String(r.creator_id),
-    announce_channel_id: r.announce_channel_id ? String(r.announce_channel_id) : null,
-    announce_message_id: r.announce_message_id ? String(r.announce_message_id) : null,
-    created_at: r.created_at != null ? String(r.created_at) : null,
-  }));
+  return res.rows.map(mapTempChannelRow);
 }
 
 /**
@@ -431,19 +459,26 @@ export async function sweepTempChannels(
   }
 
   for (const [guildId, guildRows] of rowsByGuild) {
-    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    const guild =
+      client.guilds.cache.get(guildId) ??
+      (await client.guilds.fetch(guildId).catch(() => null));
+    // ギルドを取得できない＝Botが抜けた等の可能性。ただし一時的なfetch失敗も
+    // ありうるので、ここで行を消さずにこのサイクルは丸ごとスキップする
+    // （生存中のギルドの追跡を一括で失わないため）。
+    if (!guild) continue;
     for (const row of guildRows) {
       try {
-        if (!guild) {
-          await deleteTempChannelRow(row.channel_id);
+        const fetched = await fetchTempVoiceChannel(guild, row.channel_id);
+        if (fetched.kind === 'transient') {
+          // 一時的なfetch失敗。行は残し、候補集合も触らず次サイクルに委ねる。
           continue;
         }
-        const channel = await guild.channels.fetch(row.channel_id).catch(() => null);
-        if (!channel || channel.type !== ChannelType.GuildVoice) {
+        if (fetched.kind === 'gone') {
           await deleteTempChannelRow(row.channel_id);
+          confirmSet?.delete(row.channel_id);
           continue;
         }
-        const vc = channel as VoiceChannel;
+        const vc = fetched.channel;
         // 作成直後の猶予中、または在室中はスキップ（候補からも外す）。
         // ここでの在室判定は two-strike 集合の管理用。実削除の可否は
         // deleteIfEmpty 内の members.size チェックが最終的な拠り所（退出イベントや
