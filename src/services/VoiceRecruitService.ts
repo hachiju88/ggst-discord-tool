@@ -341,36 +341,49 @@ export async function sweepTempChannels(
   }
 
   const now = Date.now();
+  // 同一ギルドに複数の一時VCがあっても guild fetch を1回で済ませるためにまとめる。
+  const rowsByGuild = new Map<string, TempChannelRow[]>();
   for (const row of rows) {
-    try {
-      const guild = await client.guilds.fetch(row.guild_id).catch(() => null);
-      if (!guild) {
-        await deleteTempChannelRow(row.channel_id);
-        continue;
-      }
-      const channel = await guild.channels.fetch(row.channel_id).catch(() => null);
-      if (!channel || channel.type !== ChannelType.GuildVoice) {
-        await deleteTempChannelRow(row.channel_id);
-        continue;
-      }
-      const vc = channel as VoiceChannel;
-      // 作成直後の猶予中、または在室中はスキップ（候補からも外す）。
-      if (
-        (graceMs > 0 && now - parseCreatedAtMs(row.created_at) < graceMs) ||
-        vc.members.size > 0
-      ) {
+    const list = rowsByGuild.get(row.guild_id);
+    if (list) list.push(row);
+    else rowsByGuild.set(row.guild_id, [row]);
+  }
+
+  for (const [guildId, guildRows] of rowsByGuild) {
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    for (const row of guildRows) {
+      try {
+        if (!guild) {
+          await deleteTempChannelRow(row.channel_id);
+          continue;
+        }
+        const channel = await guild.channels.fetch(row.channel_id).catch(() => null);
+        if (!channel || channel.type !== ChannelType.GuildVoice) {
+          await deleteTempChannelRow(row.channel_id);
+          continue;
+        }
+        const vc = channel as VoiceChannel;
+        // 作成直後の猶予中、または在室中はスキップ（候補からも外す）。
+        // ここでの在室判定は two-strike 集合の管理用。実削除の可否は
+        // deleteIfEmpty 内の members.size チェックが最終的な拠り所（退出イベントや
+        // 空ガード経由の呼び出しではそちらだけが働く）ので、両者は役割が異なる。
+        if (
+          (graceMs > 0 && now - parseCreatedAtMs(row.created_at) < graceMs) ||
+          vc.members.size > 0
+        ) {
+          confirmSet?.delete(row.channel_id);
+          continue;
+        }
+        // 空。two-strike: 初回観測は候補に入れるだけで次サイクルに委ねる。
+        if (confirmSet && !confirmSet.has(row.channel_id)) {
+          confirmSet.add(row.channel_id);
+          continue;
+        }
+        await deleteIfEmpty(vc, row); // 取得済みの row を渡して再SELECTを避ける
         confirmSet?.delete(row.channel_id);
-        continue;
+      } catch (e) {
+        console.error(`[VoiceRecruit] sweep error for ${row.channel_id}:`, e);
       }
-      // 空。two-strike: 初回観測は候補に入れるだけで次サイクルに委ねる。
-      if (confirmSet && !confirmSet.has(row.channel_id)) {
-        confirmSet.add(row.channel_id);
-        continue;
-      }
-      await deleteIfEmpty(vc, row); // 取得済みの row を渡して再SELECTを避ける
-      confirmSet?.delete(row.channel_id);
-    } catch (e) {
-      console.error(`[VoiceRecruit] sweep error for ${row.channel_id}:`, e);
     }
   }
 
@@ -389,20 +402,33 @@ export async function sweepTempChannels(
  * 拾えず、per-channel の scheduleEmptyGuard は再起動で失われるため、参加者0のまま
  * 残るVCはこの定期掃除でのみ確実に回収される。
  * 負荷は対象が進行中の募集分の数行のみ・在室判定はキャッシュ参照のため軽微。
+ *
+ * 起動直後の初回掃除も含めて全ての削除を two-strike（seenEmpty 共有）で保護する。
+ * ゲートウェイ再接続やギルドキャッシュ充填の途中で在室VCが一瞬空に見えても、
+ * 2サイクル連続で空を確認するまで削除しないため、在室ユーザーを誤って追い出さない。
+ * 初回は initialDelayMs 待ってボイス状態キャッシュが揃ってから走る。
  */
 export function startTempChannelSweeper(
   client: Client,
   intervalMs = 10 * 60 * 1000,
   graceMs = EMPTY_VC_GRACE_MS,
+  initialDelayMs = 20 * 1000,
 ): () => void {
-  // two-strike 判定用に「前サイクルで空だったVC」を保持する。
+  // two-strike 判定用に「前サイクルで空だったVC」を保持する（起動時掃除とも共有）。
   const seenEmpty = new Set<string>();
-  const timer = setInterval(() => {
+  const run = () =>
     sweepTempChannels(client, graceMs, seenEmpty).catch((e) =>
       console.error('[VoiceRecruit] periodic sweep error:', e),
     );
-  }, intervalMs);
+  // 起動直後の初回（キャッシュ充填待ち）。two-strike の1打目としてシードし、
+  // 次サイクルでも空なら削除する。単発の即削除は行わない。
+  const first = setTimeout(run, initialDelayMs);
+  const timer = setInterval(run, intervalMs);
   // 定期掃除だけのためにプロセスを起こし続けない（Botはゲートウェイ接続で常時稼働）。
+  first.unref?.();
   timer.unref?.();
-  return () => clearInterval(timer);
+  return () => {
+    clearTimeout(first);
+    clearInterval(timer);
+  };
 }

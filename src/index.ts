@@ -5,11 +5,7 @@ import { initDatabase, closeDatabase } from './database';
 import { autoMigrate } from './database/auto-migrate';
 import { startScheduler } from './services/RankScheduler';
 import { startRoleStatsScheduler } from './services/RoleStatsScheduler';
-import {
-  sweepTempChannels,
-  startTempChannelSweeper,
-  EMPTY_VC_GRACE_MS,
-} from './services/VoiceRecruitService';
+import { startTempChannelSweeper } from './services/VoiceRecruitService';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -61,16 +57,10 @@ async function main() {
       console.log('✅ Rank scheduler started');
       stopRoleStatsScheduler = startRoleStatsScheduler(client);
       console.log('✅ Role stats scheduler started');
-      // 起動時に空になった一時VCを掃除。
-      // ボイス状態キャッシュが揃う前に走ると在室中のVCを誤削除しうるため、
-      // 少し待ってから実行する。
-      setTimeout(() => {
-        // 作成直後のVCを巻き込まないよう猶予を適用（残存物は十分古いので影響なし）。
-        sweepTempChannels(client, EMPTY_VC_GRACE_MS)
-          .then(() => console.log('✅ Temp voice channels swept'))
-          .catch((e) => console.error('Temp voice channel sweep error:', e));
-      }, 20000);
-      // 以降は定期掃除で「一度も入られなかった空VC」も確実に回収する。
+      // 一時VCの掃除を開始。起動直後の初回掃除も定期掃除もすべて two-strike で
+      // 保護されるため（キャッシュ未充填の在室VCを誤削除しない）、ここで個別の
+      // 起動時 sweep は行わず sweeper に一本化する。「一度も入られなかった空VC」も
+      // これで確実に回収される。
       stopTempChannelSweeper = startTempChannelSweeper(client);
       console.log('✅ Temp voice channel sweeper started');
     });
