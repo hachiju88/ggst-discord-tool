@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, PermissionsBitField, MessageFlags } from 'discord.js';
+import { ChatInputCommandInteraction, ButtonInteraction, PermissionsBitField, MessageFlags } from 'discord.js';
 import { SystemSettingModel } from '../models/SystemSetting';
 
 export enum PermissionLevel {
@@ -19,7 +19,7 @@ export enum PermissionLevel {
  * @returns 権限がある場合は true
  */
 export async function checkPermission(
-    interaction: ChatInputCommandInteraction,
+    interaction: ChatInputCommandInteraction | ButtonInteraction,
     requiredLevel: PermissionLevel
 ): Promise<boolean> {
     // GENERALは常に許可

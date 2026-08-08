@@ -1,5 +1,6 @@
 import {
   Client,
+  Guild,
   VoiceState,
   VoiceChannel,
   ChannelType,
@@ -222,6 +223,86 @@ export async function countTempChannelsByGuild(guildId: string): Promise<number>
   });
   const row = res.rows[0] as { n?: number | bigint } | undefined;
   return Number(row?.n ?? 0);
+}
+
+/** 指定ギルドで追跡中の一時VC行を取得する（診断用）。 */
+async function getTempChannelsByGuild(guildId: string): Promise<TempChannelRow[]> {
+  const db = getDatabase();
+  const res = await db.execute({
+    sql: 'SELECT * FROM temp_voice_channels WHERE guild_id = ?',
+    args: [guildId],
+  });
+  return res.rows.map((r: any) => ({
+    channel_id: String(r.channel_id),
+    guild_id: String(r.guild_id),
+    creator_id: String(r.creator_id),
+    announce_channel_id: r.announce_channel_id ? String(r.announce_channel_id) : null,
+    announce_message_id: r.announce_message_id ? String(r.announce_message_id) : null,
+    created_at: r.created_at != null ? String(r.created_at) : null,
+  }));
+}
+
+/** 1件の一時VCに対する即時掃除の結果（Discord上で原因を切り分けるための診断）。 */
+export interface SweepDiagResult {
+  channelId: string;
+  name: string | null;
+  ageMs: number | null; // 作成からの経過（created_at 不明なら null）
+  memberCount: number | null; // Botが認識している在室人数（チャンネル消失なら null）
+  outcome: 'deleted' | 'occupied' | 'gone' | 'delete_failed';
+  detail?: string; // delete_failed の理由など
+}
+
+/**
+ * 指定ギルドの追跡中一時VCを、猶予なし・two-strikeなしで即時に掃除し、
+ * 各VCについて「なぜ消えた／消えなかったか」を返す診断用関数。
+ * 管理者が Discord 上から手動実行して原因を切り分ける（サーバーログ不要）。
+ */
+export async function sweepGuildNow(guild: Guild): Promise<SweepDiagResult[]> {
+  const rows = await getTempChannelsByGuild(guild.id);
+  const now = Date.now();
+  const results: SweepDiagResult[] = [];
+  for (const row of rows) {
+    const channel = await guild.channels.fetch(row.channel_id).catch(() => null);
+    if (!channel || channel.type !== ChannelType.GuildVoice) {
+      await deleteTempChannelRow(row.channel_id);
+      results.push({
+        channelId: row.channel_id,
+        name: channel?.name ?? null,
+        ageMs: row.created_at ? now - parseCreatedAtMs(row.created_at) : null,
+        memberCount: null,
+        outcome: 'gone',
+      });
+      continue;
+    }
+    const vc = channel as VoiceChannel;
+    const ageMs = row.created_at ? now - parseCreatedAtMs(row.created_at) : null;
+    const memberCount = vc.members.size;
+    if (memberCount > 0) {
+      results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'occupied' });
+      continue;
+    }
+    try {
+      await vc.delete('簡単VC募集: 手動掃除（診断）');
+      await deleteTempChannelRow(vc.id);
+      results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'deleted' });
+    } catch (e) {
+      const code = (e as { code?: number }).code;
+      if (code === 10003) {
+        await deleteTempChannelRow(vc.id);
+        results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'gone' });
+      } else {
+        results.push({
+          channelId: vc.id,
+          name: vc.name,
+          ageMs,
+          memberCount,
+          outcome: 'delete_failed',
+          detail: (e as { message?: string }).message ?? String(e),
+        });
+      }
+    }
+  }
+  return results;
 }
 
 async function getAllTempChannels(): Promise<TempChannelRow[]> {
