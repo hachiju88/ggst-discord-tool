@@ -306,7 +306,7 @@ export function scheduleEmptyGuard(channel: VoiceChannel, delayMs = 3 * 60 * 100
 }
 
 // 空VCを削除するまでの猶予（作成直後で誰も入っていないVCを巻き込まないため）。
-export const EMPTY_VC_GRACE_MS = 3 * 60 * 1000;
+export const EMPTY_VC_GRACE_MS = 5 * 60 * 1000;
 
 /**
  * 追跡中の一時VCを一括で掃除する。
@@ -392,7 +392,7 @@ export async function sweepTempChannels(
  */
 export function startTempChannelSweeper(
   client: Client,
-  intervalMs = 2 * 60 * 1000,
+  intervalMs = 10 * 60 * 1000,
   graceMs = EMPTY_VC_GRACE_MS,
 ): () => void {
   // two-strike 判定用に「前サイクルで空だったVC」を保持する。
