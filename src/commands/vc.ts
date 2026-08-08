@@ -83,6 +83,9 @@ const PURPOSE_MODAL = 'vc:purposemodal';
 const ROOM_MODAL = 'vc:roommodal';
 const COMMENT_MODAL = 'vc:commentmodal';
 
+// 部屋番号を「指定なし」に戻すためのセンチネル値（部屋番号は任意のため空を許可）。
+const ROOM_NONE_VALUE = '__room_none__';
+
 // 対象者による色分け
 const AUDIENCE_COLOR: Record<string, number> = {
   all: 0x5865f2,
@@ -104,10 +107,49 @@ interface WizardSession {
 const sessions = new Map<string, WizardSession>();
 const sessionKey = (guildId: string, userId: string) => `${guildId}:${userId}`;
 
+// ── 作成レート制限（募集通知でロール全体を鳴らすため、連投スパムを抑止） ──
+// 同一ユーザー・同一ギルドで RATE_WINDOW_MS の間に RATE_MAX_CREATES 回まで作成できる。
+const RATE_WINDOW_MS = 10 * 60 * 1000;
+const RATE_MAX_CREATES = 5;
+// キー: `${guildId}:${userId}`（＝sessionKey） → 直近の作成成功時刻（ミリ秒）配列
+const createTimestamps = new Map<string, number[]>();
+
+/** 指定キーの、窓内に収まる直近作成時刻を返す（空になったらエントリを削除）。 */
+function recentCreates(rlKey: string, now: number): number[] {
+  const recent = (createTimestamps.get(rlKey) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (recent.length > 0) createTimestamps.set(rlKey, recent);
+  else createTimestamps.delete(rlKey);
+  return recent;
+}
+
+/** 上限に達しているか（消費はしない・実際に作成できた時のみ recordCreate で記録）。 */
+function isCreateRateLimited(rlKey: string): { limited: boolean; retryAfterMs?: number } {
+  const now = Date.now();
+  const recent = recentCreates(rlKey, now);
+  if (recent.length >= RATE_MAX_CREATES) {
+    return { limited: true, retryAfterMs: RATE_WINDOW_MS - (now - recent[0]) };
+  }
+  return { limited: false };
+}
+
+/** VCを実際に作成できた時に1回分を記録する。 */
+function recordCreate(rlKey: string): void {
+  const now = Date.now();
+  const recent = recentCreates(rlKey, now);
+  recent.push(now);
+  createTimestamps.set(rlKey, recent);
+}
+
+/** 古い/空のエントリを掃除（メモリ肥大防止・セッション掃除に便乗して呼ぶ）。 */
+function pruneCreateTimestamps(): void {
+  const now = Date.now();
+  for (const k of [...createTimestamps.keys()]) recentCreates(k, now);
+}
+
 /**
  * フォームの初期セッション。
  * ゲーム:GGST / 目的:プレイヤーマッチ / 参加人数:制限なし / 対象者:制限なし /
- * ランク:制限なし / 部屋番号:888999 を初期値にする。
+ * ランク:制限なし を初期値にする（部屋番号は既定なし＝任意）。
  */
 function newSession(): WizardSession {
   return {
@@ -116,7 +158,6 @@ function newSession(): WizardSession {
     count: '0',
     audience: 'all',
     rank: 'none',
-    room: '888999',
     page: 1,
     touchedAt: Date.now(),
   };
@@ -130,6 +171,8 @@ function pruneSessions(): void {
   for (const [k, s] of sessions) {
     if (now - s.touchedAt > SESSION_TTL_MS) sessions.delete(k);
   }
+  // レート制限マップの古い/空エントリも同時に掃除してメモリ肥大を防ぐ。
+  pruneCreateTimestamps();
 }
 
 /** セッションを保存（最終操作時刻を更新しつつ、古いものを掃除）。 */
@@ -240,12 +283,22 @@ function buildOptionSelect(
   placeholder: string,
   options: { value: string; label: string; description?: string }[],
   customValue: string,
+  noneOption?: { value: string; label: string; description?: string },
 ): StringSelectMenuBuilder {
-  const menuOptions = options.map((o) => {
+  const menuOptions: StringSelectMenuOptionBuilder[] = [];
+  // 先頭に「指定なし」を置く（任意項目を空に戻せるようにする）。
+  if (noneOption) {
+    const none = new StringSelectMenuOptionBuilder()
+      .setLabel(noneOption.label)
+      .setValue(noneOption.value);
+    if (noneOption.description) none.setDescription(noneOption.description);
+    menuOptions.push(none);
+  }
+  for (const o of options) {
     const opt = new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value);
     if (o.description) opt.setDescription(o.description);
-    return opt;
-  });
+    menuOptions.push(opt);
+  }
   menuOptions.push(
     new StringSelectMenuOptionBuilder()
       .setLabel('その他（手動入力）…')
@@ -322,9 +375,10 @@ function buildWizard(session: WizardSession, games: string[]) {
 
   const roomSelect = buildOptionSelect(
     SELECT_ROOM,
-    `⑥ 部屋番号：${session.room ? roomLabel(session.room) : '未設定'}`,
+    `⑥ 部屋番号：${session.room ? roomLabel(session.room) : '指定なし'}`,
     ROOM_OPTIONS,
     CUSTOM_ROOM_VALUE,
+    { value: ROOM_NONE_VALUE, label: '指定なし（部屋番号を付けない）' },
   );
 
   const ready = Boolean(session.game && session.count);
@@ -338,7 +392,7 @@ function buildWizard(session: WizardSession, games: string[]) {
     `> 👥 定員: **${session.count ? countLabel(session.count) : '未選択'}**\n` +
     `> 🙌 対象者: **${audienceLabel(session.audience)}**\n` +
     `> 🏆 対象ランク: **${rankLabel(session.rank)}**\n` +
-    `> 🔑 部屋番号: **${session.room ? roomLabel(session.room) : '（未設定）'}**\n` +
+    `> 🔑 部屋番号: **${session.room ? roomLabel(session.room) : '（指定なし）'}**\n` +
     `> 💬 ひとこと: **${session.comment ? truncate(session.comment, 100) : '（なし）'}**\n` +
     (session.page === 1
       ? '\n① 〜 ④ を選んで「次へ ▶」。'
@@ -423,14 +477,6 @@ function buildTextModal(
     .setCustomId(customId)
     .setTitle(title)
     .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
-}
-
-function getDisplayName(interaction: ButtonInteraction): string {
-  // キャッシュ済みギルドなら member は GuildMember に絞り込まれ displayName を持つ
-  if (interaction.inCachedGuild()) {
-    return interaction.member.displayName;
-  }
-  return interaction.user.username;
 }
 
 // ── スラッシュコマンド ────────────────────────────────────────────────────
@@ -878,7 +924,8 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
         );
         return;
       }
-      session.room = value;
+      // 「指定なし」を選んだら部屋番号を空に戻す（任意項目）。
+      session.room = value === ROOM_NONE_VALUE ? undefined : value;
       break;
     default:
       return;
@@ -949,6 +996,21 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     return;
   }
 
+  // 連投による @メンバー メンションのスパムを抑止する（この時点では消費しない。
+  // 実際にVCを作成できた時だけ recordCreate で1回分を記録するので、設定不備や
+  // 権限エラーで作成に至らなかった試行は枠を消費しない）。
+  const rate = isCreateRateLimited(key);
+  if (rate.limited) {
+    const mins = Math.ceil((rate.retryAfterMs ?? RATE_WINDOW_MS) / 60000);
+    await interaction.editReply({
+      content:
+        `⏱️ 短時間に募集を作りすぎです（${RATE_WINDOW_MS / 60000}分あたり${RATE_MAX_CREATES}回まで）。` +
+        `約${mins}分後にまたお試しください。`,
+      components: [],
+    });
+    return;
+  }
+
   const categoryId = await getCategoryId(guild.id);
   if (!categoryId) {
     await interaction.editReply({
@@ -998,6 +1060,8 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   }
 
   sessions.delete(key);
+  // VCを実際に作成できたのでレート制限を1回分消費する（作成失敗時は消費しない）。
+  recordCreate(key);
 
   // Bot自身にこのVCの操作権限を上書きで付与しておく（付与できなくても続行）。
   // - ViewChannel/Connect/MoveMembers: メンバー移動に必要（カテゴリが @everyone の
@@ -1125,7 +1189,8 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     announceMessageId: announce?.messageId ?? null,
   });
 
-  // 誰も入らなかった場合の保険（3分後に空なら削除）
+  // 誰も入らなかった場合の保険（30分後に空なら削除）。
+  // メンションを見た人が来る時間を確保するため短すぎない値にしている。
   scheduleEmptyGuard(channel);
 
   // 移動結果を作成者に伝える。

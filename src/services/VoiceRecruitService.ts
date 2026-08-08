@@ -333,6 +333,7 @@ export async function sweepGuildNow(guild: Guild): Promise<SweepDiagResult[]> {
       continue;
     }
     if (fetched.kind === 'gone') {
+      await reactAnnouncementEnded(guild.client, row);
       await deleteTempChannelRow(row.channel_id);
       results.push({ channelId: row.channel_id, name: null, ageMs, memberCount: null, outcome: 'gone' });
       continue;
@@ -346,6 +347,7 @@ export async function sweepGuildNow(guild: Guild): Promise<SweepDiagResult[]> {
     }
     try {
       await vc.delete('簡単VC募集: 手動掃除（診断）');
+      await reactAnnouncementEnded(guild.client, row);
       await deleteTempChannelRow(vc.id);
       results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'deleted', perms });
     } catch (e) {
@@ -375,9 +377,30 @@ async function getAllTempChannels(): Promise<TempChannelRow[]> {
   return res.rows.map(mapTempChannelRow);
 }
 
+// VCが閉じたことを示すため募集通知メッセージに付けるリアクション。
+const ANNOUNCE_ENDED_EMOJI = '🏁';
+
+/**
+ * 募集通知メッセージに「終了」を示すリアクションを付ける（VC削除の起点で呼ぶ）。
+ * 通知メッセージ自体は残す方針なので、編集ではなくリアクションで終了を示す。
+ * 通知情報が無い/取得できない/失敗しても無視する。
+ */
+async function reactAnnouncementEnded(client: Client, row: TempChannelRow): Promise<void> {
+  if (!row.announce_channel_id || !row.announce_message_id) return;
+  try {
+    const ch = await client.channels.fetch(row.announce_channel_id).catch(() => null);
+    if (!ch || !ch.isTextBased()) return;
+    const msg = await ch.messages.fetch(row.announce_message_id).catch(() => null);
+    if (!msg) return;
+    await msg.react(ANNOUNCE_ENDED_EMOJI);
+  } catch (e) {
+    console.error('[VoiceRecruit] mark announcement ended error:', e);
+  }
+}
+
 /**
  * 一時VCが空になっていれば削除する。削除したら true。
- * 募集通知メッセージ側には手を加えない（終了時の編集は行わない）。
+ * 募集通知メッセージは残すが、削除を起点に「終了」を示すリアクションを付ける。
  *
  * knownRow を渡すと管理行の再取得（DB SELECT）を省略する（掃除ループ用）。
  * undefined のときのみ getTempChannel で取得する。
@@ -404,6 +427,7 @@ async function deleteIfEmpty(
       return false;
     }
   }
+  await reactAnnouncementEnded(channel.client, row);
   await deleteTempChannelRow(channel.id);
   return true;
 }
@@ -430,7 +454,7 @@ export async function handleVoiceStateUpdate(
  * VC作成直後に呼ぶ。一定時間後にまだ誰も入っていなければ削除する保険。
  * （募集主が結局VCに入らなかったケースの掃除）
  */
-export function scheduleEmptyGuard(channel: VoiceChannel, delayMs = 3 * 60 * 1000): void {
+export function scheduleEmptyGuard(channel: VoiceChannel, delayMs = 30 * 60 * 1000): void {
   setTimeout(async () => {
     try {
       const fresh = await channel.guild.channels.fetch(channel.id).catch(() => null);
@@ -495,6 +519,8 @@ export async function sweepTempChannels(
           continue;
         }
         if (fetched.kind === 'gone') {
+          // 外部削除（管理者が手動削除・Bot停止中に削除など）でも終了を示す。
+          await reactAnnouncementEnded(client, row);
           await deleteTempChannelRow(row.channel_id);
           confirmSet?.delete(row.channel_id);
           continue;
