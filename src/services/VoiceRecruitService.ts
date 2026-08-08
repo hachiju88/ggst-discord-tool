@@ -38,7 +38,7 @@ export const COUNT_OPTIONS: Option[] = [
 
 // 募集目的（固定候補 + 「その他」は手動入力。候補には追加しない）
 export const PURPOSE_OPTIONS: Option[] = [
-  { value: 'プレマ', label: 'プレマ' },
+  { value: 'プレイヤーマッチ', label: 'プレイヤーマッチ' },
   { value: 'ランクマ', label: 'ランクマ' },
   { value: 'コーチング', label: 'コーチング' },
 ];
@@ -53,7 +53,6 @@ export const ROOM_OPTIONS: Option[] = [
 
 export const AUDIENCE_OPTIONS: Option[] = [
   { value: 'all', label: '制限なし', description: 'どなたでも歓迎' },
-  { value: 'regular', label: 'イツメン', description: '常連さん向け' },
   { value: 'newcomer', label: 'サーバー初心者', description: 'サーバーに来て間もない方向け' },
 ];
 
@@ -334,6 +333,7 @@ export async function sweepGuildNow(guild: Guild): Promise<SweepDiagResult[]> {
       continue;
     }
     if (fetched.kind === 'gone') {
+      await reactAnnouncementEnded(guild.client, row);
       await deleteTempChannelRow(row.channel_id);
       results.push({ channelId: row.channel_id, name: null, ageMs, memberCount: null, outcome: 'gone' });
       continue;
@@ -347,6 +347,7 @@ export async function sweepGuildNow(guild: Guild): Promise<SweepDiagResult[]> {
     }
     try {
       await vc.delete('簡単VC募集: 手動掃除（診断）');
+      await reactAnnouncementEnded(guild.client, row);
       await deleteTempChannelRow(vc.id);
       results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'deleted', perms });
     } catch (e) {
@@ -376,9 +377,30 @@ async function getAllTempChannels(): Promise<TempChannelRow[]> {
   return res.rows.map(mapTempChannelRow);
 }
 
+// VCが閉じたことを示すため募集通知メッセージに付けるリアクション。
+const ANNOUNCE_ENDED_EMOJI = '🏁';
+
+/**
+ * 募集通知メッセージに「終了」を示すリアクションを付ける（VC削除の起点で呼ぶ）。
+ * 通知メッセージ自体は残す方針なので、編集ではなくリアクションで終了を示す。
+ * 通知情報が無い/取得できない/失敗しても無視する。
+ */
+async function reactAnnouncementEnded(client: Client, row: TempChannelRow): Promise<void> {
+  if (!row.announce_channel_id || !row.announce_message_id) return;
+  try {
+    const ch = await client.channels.fetch(row.announce_channel_id).catch(() => null);
+    if (!ch || !ch.isTextBased()) return;
+    const msg = await ch.messages.fetch(row.announce_message_id).catch(() => null);
+    if (!msg) return;
+    await msg.react(ANNOUNCE_ENDED_EMOJI);
+  } catch (e) {
+    console.error('[VoiceRecruit] mark announcement ended error:', e);
+  }
+}
+
 /**
  * 一時VCが空になっていれば削除する。削除したら true。
- * 募集通知メッセージ側には手を加えない（終了時の編集は行わない）。
+ * 募集通知メッセージは残すが、削除を起点に「終了」を示すリアクションを付ける。
  *
  * knownRow を渡すと管理行の再取得（DB SELECT）を省略する（掃除ループ用）。
  * undefined のときのみ getTempChannel で取得する。
@@ -405,6 +427,7 @@ async function deleteIfEmpty(
       return false;
     }
   }
+  await reactAnnouncementEnded(channel.client, row);
   await deleteTempChannelRow(channel.id);
   return true;
 }
@@ -431,7 +454,7 @@ export async function handleVoiceStateUpdate(
  * VC作成直後に呼ぶ。一定時間後にまだ誰も入っていなければ削除する保険。
  * （募集主が結局VCに入らなかったケースの掃除）
  */
-export function scheduleEmptyGuard(channel: VoiceChannel, delayMs = 3 * 60 * 1000): void {
+export function scheduleEmptyGuard(channel: VoiceChannel, delayMs = 30 * 60 * 1000): void {
   setTimeout(async () => {
     try {
       const fresh = await channel.guild.channels.fetch(channel.id).catch(() => null);
@@ -444,31 +467,24 @@ export function scheduleEmptyGuard(channel: VoiceChannel, delayMs = 3 * 60 * 100
   }, delayMs).unref?.();
 }
 
-// 空VCを削除するまでの猶予（作成直後で誰も入っていないVCを巻き込まないため）。
-export const EMPTY_VC_GRACE_MS = 5 * 60 * 1000;
-
 /**
  * 追跡中の一時VCを一括で掃除する。
  * - チャンネルが既に無い → 行だけ削除
- * - 空 かつ 作成から graceMs 以上経過 → チャンネルとともに削除
- *
- * graceMs は「作成直後でまだ誰も入っていないVC」を消さないための猶予。
+ * - 空（在室0） → チャンネルとともに削除
  *
  * confirmSet を渡すと「2サイクル連続で空だった時だけ削除」する（two-strike）。
  * ゲートウェイ再接続直後などボイス状態キャッシュが未充填の瞬間は在室VCでも
  * members.size が 0 に見えることがあり、定期掃除がその瞬間に当たると在室VCを
  * 誤削除しうる。1回空を観測したら候補に入れるだけにし、次サイクルでも空なら削除
- * することで、一時的な空読みでの誤削除を防ぐ。起動時掃除（confirmSet未指定）は
- * 20秒待ってキャッシュ充填後に走るため即削除でよい。
+ * することで、一時的な空読みでの誤削除を防ぐ。
  *
- * ※ 本来 voiceStateUpdate（退出時）で消えるが、募集主が自動移動できず
- * 　「一度も誰も入らなかったVC」は退出イベントが発生しないため消えない。
- * 　その取りこぼしと、再起動で scheduleEmptyGuard タイマーが失われるケースを
- * 　この掃除が救う。
+ * ※ 本来 voiceStateUpdate（退出時）で消えるので、通常フロー（移動 or 入室→退出）は
+ * 　即座に削除される。この掃除が拾うのは「一度も誰も入らなかったVC」＝退出イベントが
+ * 　発生しないケースの保険。two-strike があるため作成直後の猶予は設けていない
+ * 　（誰も入らないまま2サイクル継続した時だけ消える）。
  */
 export async function sweepTempChannels(
   client: Client,
-  graceMs = 0,
   confirmSet?: Set<string>,
 ): Promise<void> {
   let rows: TempChannelRow[];
@@ -479,7 +495,6 @@ export async function sweepTempChannels(
     return;
   }
 
-  const now = Date.now();
   // 同一ギルドに複数の一時VCがあっても guild fetch を1回で済ませるためにまとめる。
   const rowsByGuild = new Map<string, TempChannelRow[]>();
   for (const row of rows) {
@@ -504,19 +519,18 @@ export async function sweepTempChannels(
           continue;
         }
         if (fetched.kind === 'gone') {
+          // 外部削除（管理者が手動削除・Bot停止中に削除など）でも終了を示す。
+          await reactAnnouncementEnded(client, row);
           await deleteTempChannelRow(row.channel_id);
           confirmSet?.delete(row.channel_id);
           continue;
         }
         const vc = fetched.channel;
-        // 作成直後の猶予中、または在室中はスキップ（候補からも外す）。
+        // 在室中はスキップ（候補からも外す）。
         // ここでの在室判定は two-strike 集合の管理用。実削除の可否は
         // deleteIfEmpty 内の members.size チェックが最終的な拠り所（退出イベントや
         // 空ガード経由の呼び出しではそちらだけが働く）ので、両者は役割が異なる。
-        if (
-          (graceMs > 0 && now - parseCreatedAtMs(row.created_at) < graceMs) ||
-          vc.members.size > 0
-        ) {
+        if (vc.members.size > 0) {
           confirmSet?.delete(row.channel_id);
           continue;
         }
@@ -542,11 +556,10 @@ export async function sweepTempChannels(
 
 /**
  * 一時VCの定期掃除を開始する。返り値を呼ぶと停止する。
- * 「空 かつ 作成から graceMs 以上経過」のVCを intervalMs ごとに削除する。
+ * 空（在室0）のVCを intervalMs ごとに削除する。
  *
- * これが本命の保険。退出イベント（voiceStateUpdate）は「一度も入られなかったVC」を
- * 拾えず、per-channel の scheduleEmptyGuard は再起動で失われるため、参加者0のまま
- * 残るVCはこの定期掃除でのみ確実に回収される。
+ * 通常フロー（移動 or 入室→退出）は voiceStateUpdate で即削除されるため、これは
+ * 「一度も誰も入らなかったVC」だけを拾う保険。頻度が高い必要はないので既定は60分。
  * 負荷は対象が進行中の募集分の数行のみ・在室判定はキャッシュ参照のため軽微。
  *
  * 起動直後の初回掃除も含めて全ての削除を two-strike（seenEmpty 共有）で保護する。
@@ -556,14 +569,13 @@ export async function sweepTempChannels(
  */
 export function startTempChannelSweeper(
   client: Client,
-  intervalMs = 10 * 60 * 1000,
-  graceMs = EMPTY_VC_GRACE_MS,
+  intervalMs = 60 * 60 * 1000,
   initialDelayMs = 20 * 1000,
 ): () => void {
   // two-strike 判定用に「前サイクルで空だったVC」を保持する（起動時掃除とも共有）。
   const seenEmpty = new Set<string>();
   const run = () =>
-    sweepTempChannels(client, graceMs, seenEmpty).catch((e) =>
+    sweepTempChannels(client, seenEmpty).catch((e) =>
       console.error('[VoiceRecruit] periodic sweep error:', e),
     );
   // 起動直後の初回（キャッシュ充填待ち）。two-strike の1打目としてシードし、

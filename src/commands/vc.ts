@@ -83,10 +83,12 @@ const PURPOSE_MODAL = 'vc:purposemodal';
 const ROOM_MODAL = 'vc:roommodal';
 const COMMENT_MODAL = 'vc:commentmodal';
 
+// 部屋番号を「指定なし」に戻すためのセンチネル値（部屋番号は任意のため空を許可）。
+const ROOM_NONE_VALUE = '__room_none__';
+
 // 対象者による色分け
 const AUDIENCE_COLOR: Record<string, number> = {
   all: 0x5865f2,
-  regular: 0xf1c40f,
   newcomer: 0x2ecc71,
 };
 
@@ -105,10 +107,54 @@ interface WizardSession {
 const sessions = new Map<string, WizardSession>();
 const sessionKey = (guildId: string, userId: string) => `${guildId}:${userId}`;
 
-/** フォームの初期セッション（ゲーム:GGST / 参加人数:制限なし を初期値に）。 */
+// ── 作成レート制限（募集通知でロール全体を鳴らすため、連投スパムを抑止） ──
+// 同一ユーザー・同一ギルドで RATE_WINDOW_MS の間に RATE_MAX_CREATES 回まで作成できる。
+const RATE_WINDOW_MS = 10 * 60 * 1000;
+const RATE_MAX_CREATES = 5;
+// キー: `${guildId}:${userId}`（＝sessionKey） → 直近の作成成功時刻（ミリ秒）配列
+const createTimestamps = new Map<string, number[]>();
+
+/** 指定キーの、窓内に収まる直近作成時刻を返す（空になったらエントリを削除）。 */
+function recentCreates(rlKey: string, now: number): number[] {
+  const recent = (createTimestamps.get(rlKey) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (recent.length > 0) createTimestamps.set(rlKey, recent);
+  else createTimestamps.delete(rlKey);
+  return recent;
+}
+
+/** 上限に達しているか（消費はしない・実際に作成できた時のみ recordCreate で記録）。 */
+function isCreateRateLimited(rlKey: string): { limited: boolean; retryAfterMs?: number } {
+  const now = Date.now();
+  const recent = recentCreates(rlKey, now);
+  if (recent.length >= RATE_MAX_CREATES) {
+    return { limited: true, retryAfterMs: RATE_WINDOW_MS - (now - recent[0]) };
+  }
+  return { limited: false };
+}
+
+/** VCを実際に作成できた時に1回分を記録する。 */
+function recordCreate(rlKey: string): void {
+  const now = Date.now();
+  const recent = recentCreates(rlKey, now);
+  recent.push(now);
+  createTimestamps.set(rlKey, recent);
+}
+
+/** 古い/空のエントリを掃除（メモリ肥大防止・セッション掃除に便乗して呼ぶ）。 */
+function pruneCreateTimestamps(): void {
+  const now = Date.now();
+  for (const k of [...createTimestamps.keys()]) recentCreates(k, now);
+}
+
+/**
+ * フォームの初期セッション。
+ * ゲーム:GGST / 目的:プレイヤーマッチ / 参加人数:制限なし / 対象者:制限なし /
+ * ランク:制限なし を初期値にする（部屋番号は既定なし＝任意）。
+ */
 function newSession(): WizardSession {
   return {
     game: 'GGST',
+    purpose: 'プレイヤーマッチ',
     count: '0',
     audience: 'all',
     rank: 'none',
@@ -125,6 +171,8 @@ function pruneSessions(): void {
   for (const [k, s] of sessions) {
     if (now - s.touchedAt > SESSION_TTL_MS) sessions.delete(k);
   }
+  // レート制限マップの古い/空エントリも同時に掃除してメモリ肥大を防ぐ。
+  pruneCreateTimestamps();
 }
 
 /** セッションを保存（最終操作時刻を更新しつつ、古いものを掃除）。 */
@@ -223,22 +271,34 @@ function buildPanelMessage() {
   return { embeds: [embed], components: [row] };
 }
 
-/** 固定候補のセレクトを組み立てる（末尾に「その他（手動入力）」を付与）。 */
+/**
+ * 固定候補のセレクトを組み立てる（末尾に「その他（手動入力）」を付与）。
+ *
+ * ラベルを分かりやすくするため、選択済みでもラベルが消えないよう setDefault は使わず、
+ * placeholder に「項目名：現在値」を埋め込む（Discordはセレクトに値が選択されると
+ * placeholder ではなく選択値を表示してしまい、どの欄が何なのか分からなくなるため）。
+ */
 function buildOptionSelect(
   customId: string,
   placeholder: string,
   options: { value: string; label: string; description?: string }[],
-  selected: string | undefined,
   customValue: string,
+  noneOption?: { value: string; label: string; description?: string },
 ): StringSelectMenuBuilder {
-  const menuOptions = options.map((o) => {
-    const opt = new StringSelectMenuOptionBuilder()
-      .setLabel(o.label)
-      .setValue(o.value)
-      .setDefault(selected === o.value);
+  const menuOptions: StringSelectMenuOptionBuilder[] = [];
+  // 先頭に「指定なし」を置く（任意項目を空に戻せるようにする）。
+  if (noneOption) {
+    const none = new StringSelectMenuOptionBuilder()
+      .setLabel(noneOption.label)
+      .setValue(noneOption.value);
+    if (noneOption.description) none.setDescription(noneOption.description);
+    menuOptions.push(none);
+  }
+  for (const o of options) {
+    const opt = new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value);
     if (o.description) opt.setDescription(o.description);
-    return opt;
-  });
+    menuOptions.push(opt);
+  }
   menuOptions.push(
     new StringSelectMenuOptionBuilder()
       .setLabel('その他（手動入力）…')
@@ -248,7 +308,7 @@ function buildOptionSelect(
   );
   return new StringSelectMenuBuilder()
     .setCustomId(customId)
-    .setPlaceholder(placeholder)
+    .setPlaceholder(truncate(placeholder, 150))
     .addOptions(menuOptions);
 }
 
@@ -257,12 +317,13 @@ function buildOptionSelect(
 //   ページ1: ゲーム / 募集目的 / 参加人数 / 対象者
 //   ページ2: 対象ランク / 部屋番号
 function buildWizard(session: WizardSession, games: string[]) {
+  // セレクトは値が選択されると placeholder が消えて選択値だけ表示され、どの欄が
+  // 何なのか分からなくなる。そこで setDefault は使わず、placeholder に「項目名：現在値」
+  // を埋め込んでラベル代わりにする（選択後も欄の意味が一目で分かる）。
+
   // ゲーム: 最大25件制限のため候補を24件までに絞り、末尾に「その他」を足す
   const gameOptions = games.slice(0, 24).map((g) =>
-    new StringSelectMenuOptionBuilder()
-      .setLabel(truncate(g, 100))
-      .setValue(truncate(g, 100))
-      .setDefault(session.game === g),
+    new StringSelectMenuOptionBuilder().setLabel(truncate(g, 100)).setValue(truncate(g, 100)),
   );
   gameOptions.push(
     new StringSelectMenuOptionBuilder()
@@ -273,38 +334,31 @@ function buildWizard(session: WizardSession, games: string[]) {
   );
   const gameSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_GAME)
-    .setPlaceholder('① 募集するゲームを選択')
+    .setPlaceholder(truncate(`① ゲーム：${session.game ?? '未選択'}`, 150))
     .addOptions(gameOptions);
 
   const purposeSelect = buildOptionSelect(
     SELECT_PURPOSE,
-    '② 募集目的を選択',
+    `② 目的：${session.purpose ? purposeLabel(session.purpose) : '未選択'}`,
     PURPOSE_OPTIONS,
-    session.purpose,
     CUSTOM_PURPOSE_VALUE,
   );
 
   const countSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_COUNT)
-    .setPlaceholder('③ 参加人数を選択')
+    .setPlaceholder(truncate(`③ 定員：${session.count ? countLabel(session.count) : '未選択'}`, 150))
     .addOptions(
       COUNT_OPTIONS.map((o) =>
-        new StringSelectMenuOptionBuilder()
-          .setLabel(o.label)
-          .setValue(o.value)
-          .setDefault(session.count === o.value),
+        new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value),
       ),
     );
 
   const audienceSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_AUDIENCE)
-    .setPlaceholder('④ 対象者を選択')
+    .setPlaceholder(truncate(`④ 対象者：${audienceLabel(session.audience)}`, 150))
     .addOptions(
       AUDIENCE_OPTIONS.map((o) => {
-        const opt = new StringSelectMenuOptionBuilder()
-          .setLabel(o.label)
-          .setValue(o.value)
-          .setDefault(session.audience === o.value);
+        const opt = new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value);
         if (o.description) opt.setDescription(o.description);
         return opt;
       }),
@@ -312,22 +366,19 @@ function buildWizard(session: WizardSession, games: string[]) {
 
   const rankSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_RANK)
-    .setPlaceholder('⑤ 対象ランクを選択')
+    .setPlaceholder(truncate(`⑤ 対象ランク：${rankLabel(session.rank)}`, 150))
     .addOptions(
       RANK_OPTIONS.map((o) =>
-        new StringSelectMenuOptionBuilder()
-          .setLabel(o.label)
-          .setValue(o.value)
-          .setDefault(session.rank === o.value),
+        new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value),
       ),
     );
 
   const roomSelect = buildOptionSelect(
     SELECT_ROOM,
-    '⑥ 部屋番号を選択',
+    `⑥ 部屋番号：${session.room ? roomLabel(session.room) : '指定なし'}`,
     ROOM_OPTIONS,
-    session.room,
     CUSTOM_ROOM_VALUE,
+    { value: ROOM_NONE_VALUE, label: '指定なし（部屋番号を付けない）' },
   );
 
   const ready = Boolean(session.game && session.count);
@@ -341,7 +392,7 @@ function buildWizard(session: WizardSession, games: string[]) {
     `> 👥 定員: **${session.count ? countLabel(session.count) : '未選択'}**\n` +
     `> 🙌 対象者: **${audienceLabel(session.audience)}**\n` +
     `> 🏆 対象ランク: **${rankLabel(session.rank)}**\n` +
-    `> 🔑 部屋番号: **${session.room ? roomLabel(session.room) : '（未設定）'}**\n` +
+    `> 🔑 部屋番号: **${session.room ? roomLabel(session.room) : '（指定なし）'}**\n` +
     `> 💬 ひとこと: **${session.comment ? truncate(session.comment, 100) : '（なし）'}**\n` +
     (session.page === 1
       ? '\n① 〜 ④ を選んで「次へ ▶」。'
@@ -426,14 +477,6 @@ function buildTextModal(
     .setCustomId(customId)
     .setTitle(title)
     .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
-}
-
-function getDisplayName(interaction: ButtonInteraction): string {
-  // キャッシュ済みギルドなら member は GuildMember に絞り込まれ displayName を持つ
-  if (interaction.inCachedGuild()) {
-    return interaction.member.displayName;
-  }
-  return interaction.user.username;
 }
 
 // ── スラッシュコマンド ────────────────────────────────────────────────────
@@ -881,7 +924,8 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
         );
         return;
       }
-      session.room = value;
+      // 「指定なし」を選んだら部屋番号を空に戻す（任意項目）。
+      session.room = value === ROOM_NONE_VALUE ? undefined : value;
       break;
     default:
       return;
@@ -952,6 +996,21 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     return;
   }
 
+  // 連投による @メンバー メンションのスパムを抑止する（この時点では消費しない。
+  // 実際にVCを作成できた時だけ recordCreate で1回分を記録するので、設定不備や
+  // 権限エラーで作成に至らなかった試行は枠を消費しない）。
+  const rate = isCreateRateLimited(key);
+  if (rate.limited) {
+    const mins = Math.ceil((rate.retryAfterMs ?? RATE_WINDOW_MS) / 60000);
+    await interaction.editReply({
+      content:
+        `⏱️ 短時間に募集を作りすぎです（${RATE_WINDOW_MS / 60000}分あたり${RATE_MAX_CREATES}回まで）。` +
+        `約${mins}分後にまたお試しください。`,
+      components: [],
+    });
+    return;
+  }
+
   const categoryId = await getCategoryId(guild.id);
   if (!categoryId) {
     await interaction.editReply({
@@ -1001,6 +1060,8 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   }
 
   sessions.delete(key);
+  // VCを実際に作成できたのでレート制限を1回分消費する（作成失敗時は消費しない）。
+  recordCreate(key);
 
   // Bot自身にこのVCの操作権限を上書きで付与しておく（付与できなくても続行）。
   // - ViewChannel/Connect/MoveMembers: メンバー移動に必要（カテゴリが @everyone の
@@ -1102,19 +1163,23 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     new ButtonBuilder().setLabel('VCへ移動').setEmoji('🔊').setStyle(ButtonStyle.Link).setURL(jumpUrl),
   );
 
-  // 【一時無効化】機能が未完成のため、「メンバー」ロールへのメンション通知は行わない。
-  // 完成後に以下を復活させる（+ payload の content / allowedMentions を戻す）:
-  //   const mentionRole = guild.roles.cache.find((r) => r.name === MENTION_ROLE_NAME) ?? null;
-  //   content: mentionRole ? `<@&${mentionRole.id}>` : undefined,
-  //   allowedMentions: mentionRole ? { roles: [mentionRole.id] } : { parse: [] as const },
+  // 「メンバー」ロールにメンション通知する（👍で参加意思表示を促す）。
+  // ロールが見つからなければメンションなしで投稿する。実際のメンション付与は
+  // postAnnouncement 側で「設定済みの募集通知チャンネルに投稿する時だけ」行う。
+  const mentionRole = guild.roles.cache.find((r) => r.name === MENTION_ROLE_NAME) ?? null;
 
   // 募集通知チャンネル（未設定なら実行チャンネルにフォールバック）
   // 投稿後に 👍 リアクションを自動付与する（👍自体は通知を飛ばさないため継続）。
-  const announce = await postAnnouncement(interaction, guild.id, {
-    embeds: [embed],
-    components: [linkRow],
-    allowedMentions: { parse: [] as const },
-  });
+  const announce = await postAnnouncement(
+    interaction,
+    guild.id,
+    {
+      embeds: [embed],
+      components: [linkRow],
+      allowedMentions: { parse: [] as const },
+    },
+    mentionRole?.id ?? null,
+  );
 
   await registerTempChannel({
     channelId: channel.id,
@@ -1124,7 +1189,8 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     announceMessageId: announce?.messageId ?? null,
   });
 
-  // 誰も入らなかった場合の保険（3分後に空なら削除）
+  // 誰も入らなかった場合の保険（30分後に空なら削除）。
+  // メンションを見た人が来る時間を確保するため短すぎない値にしている。
   scheduleEmptyGuard(channel);
 
   // 移動結果を作成者に伝える。
@@ -1187,9 +1253,17 @@ async function postAnnouncement(
   interaction: ButtonInteraction,
   guildId: string,
   payload: BaseMessageOptions,
+  mentionRoleId?: string | null,
 ): Promise<{ channelId: string; messageId: string; via: AnnounceVia } | null> {
   const guild = interaction.guild;
   if (!guild) return null;
+
+  // メンションは「設定された募集通知チャンネル」に投稿する時だけ付ける。
+  // フォールバック（未設定/失敗時に実行チャンネルへ投稿）では、意図しない
+  // チャンネルでロール全体を鳴らさないよう、メンションを外して送る。
+  const notifyPayload: BaseMessageOptions = mentionRoleId
+    ? { ...payload, content: `<@&${mentionRoleId}>`, allowedMentions: { roles: [mentionRoleId] } }
+    : payload;
 
   // 優先: 設定された募集通知チャンネル
   const notifyId = await getNotifyChannelId(guildId);
@@ -1201,7 +1275,7 @@ async function postAnnouncement(
     const sendable = getSendable(ch);
     if (sendable) {
       try {
-        const msg = await sendable.send(payload);
+        const msg = await sendable.send(notifyPayload);
         await addThumbsUp(msg);
         return { channelId: sendable.id, messageId: msg.id, via: 'notify' };
       } catch (e) {
@@ -1214,7 +1288,7 @@ async function postAnnouncement(
     }
   }
 
-  // フォールバック: 実行したチャンネル
+  // フォールバック: 実行したチャンネル（メンションは付けない）
   const fallback = getSendable(interaction.channel);
   if (fallback) {
     try {
