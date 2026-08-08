@@ -5,7 +5,11 @@ import { initDatabase, closeDatabase } from './database';
 import { autoMigrate } from './database/auto-migrate';
 import { startScheduler } from './services/RankScheduler';
 import { startRoleStatsScheduler } from './services/RoleStatsScheduler';
-import { sweepTempChannels } from './services/VoiceRecruitService';
+import {
+  sweepTempChannels,
+  startTempChannelSweeper,
+  EMPTY_VC_GRACE_MS,
+} from './services/VoiceRecruitService';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -51,6 +55,7 @@ async function main() {
     // ランクスケジューラはクライアント準備完了後に開始
     let stopRankScheduler: (() => void) | null = null;
     let stopRoleStatsScheduler: (() => void) | null = null;
+    let stopTempChannelSweeper: (() => void) | null = null;
     client.once('clientReady', () => {
       stopRankScheduler = startScheduler(client);
       console.log('✅ Rank scheduler started');
@@ -60,10 +65,14 @@ async function main() {
       // ボイス状態キャッシュが揃う前に走ると在室中のVCを誤削除しうるため、
       // 少し待ってから実行する。
       setTimeout(() => {
-        sweepTempChannels(client)
+        // 作成直後のVCを巻き込まないよう猶予を適用（残存物は十分古いので影響なし）。
+        sweepTempChannels(client, EMPTY_VC_GRACE_MS)
           .then(() => console.log('✅ Temp voice channels swept'))
           .catch((e) => console.error('Temp voice channel sweep error:', e));
       }, 20000);
+      // 以降は定期掃除で「一度も入られなかった空VC」も確実に回収する。
+      stopTempChannelSweeper = startTempChannelSweeper(client);
+      console.log('✅ Temp voice channel sweeper started');
     });
 
     // Graceful shutdown
@@ -71,6 +80,7 @@ async function main() {
       console.log('Shutting down...');
       stopRankScheduler?.();
       stopRoleStatsScheduler?.();
+      stopTempChannelSweeper?.();
       server.close();
       client.destroy();
       await closeDatabase();
