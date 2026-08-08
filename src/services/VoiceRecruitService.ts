@@ -198,6 +198,17 @@ async function deleteTempChannelRow(channelId: string): Promise<void> {
   });
 }
 
+/** 指定ギルドで追跡中（＝自動削除対象として登録済み）の一時VC数。診断用。 */
+export async function countTempChannelsByGuild(guildId: string): Promise<number> {
+  const db = getDatabase();
+  const res = await db.execute({
+    sql: 'SELECT COUNT(*) AS n FROM temp_voice_channels WHERE guild_id = ?',
+    args: [guildId],
+  });
+  const row = res.rows[0] as { n?: number | bigint } | undefined;
+  return Number(row?.n ?? 0);
+}
+
 async function getAllTempChannels(): Promise<TempChannelRow[]> {
   const db = getDatabase();
   const res = await db.execute({ sql: 'SELECT * FROM temp_voice_channels' });

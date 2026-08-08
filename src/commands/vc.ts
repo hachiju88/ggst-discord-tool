@@ -11,6 +11,7 @@ import {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
+  PermissionFlagsBits,
 } from 'discord.js';
 import type {
   ChatInputCommandInteraction,
@@ -48,6 +49,7 @@ import {
   removeGame,
   registerTempChannel,
   scheduleEmptyGuard,
+  countTempChannelsByGuild,
 } from '../services/VoiceRecruitService';
 
 // ── setup で作成するチャンネル構成 ─────────────────────────────────────────
@@ -611,15 +613,73 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   if (sub === 'settings') {
     if (!(await checkPermission(interaction, PermissionLevel.ADMIN))) return;
+    // 診断でチャンネル取得（ネットワーク）を行うため、3秒制限を避けて先に応答を保留する。
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const categoryId = await getCategoryId(guild.id);
     const notifyId = await getNotifyChannelId(guild.id);
     const games = await getGames(guild.id);
+
+    // 独立したI/Oは並列で取得する。
+    const [category, notify, trackedCount] = await Promise.all([
+      categoryId ? guild.channels.fetch(categoryId).catch(() => null) : Promise.resolve(null),
+      notifyId ? guild.channels.fetch(notifyId).catch(() => null) : Promise.resolve(null),
+      countTempChannelsByGuild(guild.id).catch(() => -1),
+    ]);
+
     let content = '⚙️ **VC募集設定**\n\n';
     content += `📁 作成先カテゴリ: ${categoryId ? `<#${categoryId}>` : '未設定（`/vc setup` または `/vc set-category`）'}\n`;
     content += `📣 募集通知チャンネル: ${notifyId ? `<#${notifyId}>` : '未設定（`/vc set-notify`）'}\n`;
     content += `🎮 ゲーム候補 (${games.length}): ${games.map((g) => `\`${g}\``).join(' ') || 'なし'}\n`;
+
+    // ── 自動削除の状態診断（サーバーログを見られなくても切り分けできるように） ──
+    content += '\n🔍 **自動削除の診断**\n';
+    // カテゴリ内に現存する募集VC数と、削除対象として追跡中の行数を突き合わせる。
+    const liveVcCount = categoryId
+      ? guild.channels.cache.filter(
+          (c) => c.parentId === categoryId && c.type === ChannelType.GuildVoice,
+        ).size
+      : 0;
+    content += `・追跡中の一時VC(DB): ${trackedCount < 0 ? '取得失敗' : `${trackedCount}件`}`;
+    if (categoryId) content += ` / カテゴリ内の現存VC: ${liveVcCount}件`;
+    content += '\n';
+    if (trackedCount === 0 && liveVcCount > 0) {
+      content +=
+        '　⚠️ VCは在るのにDBに追跡行がありません。**登録経路の問題**（作成時の登録失敗）が疑われます。\n';
+    } else if (trackedCount > 0) {
+      content +=
+        '　ℹ️ 追跡はできています。空になっても消えない場合は下の権限（チャンネルの管理）を確認してください。\n';
+    }
+
+    // Bot権限のチェック
+    const me = guild.members.me;
+    const mark = (ok: boolean) => (ok ? '✅' : '❌');
+    if (me) {
+      if (category) {
+        const p = me.permissionsIn(category.id);
+        content +=
+          `・カテゴリ権限: ${mark(p.has(PermissionFlagsBits.ManageChannels))} チャンネルの管理` +
+          ` / ${mark(p.has(PermissionFlagsBits.MoveMembers))} メンバーの移動` +
+          ` / ${mark(p.has(PermissionFlagsBits.Connect))} 接続\n`;
+        if (!p.has(PermissionFlagsBits.ManageChannels)) {
+          content +=
+            '　→ 「チャンネルの管理」が❌の場合、空VCを削除できません。Botロールまたはカテゴリの権限を確認してください。\n';
+        }
+      } else if (categoryId) {
+        content += '・カテゴリ権限: カテゴリを取得できませんでした（削除された可能性）\n';
+      }
+      if (notify) {
+        const p = me.permissionsIn(notify.id);
+        content +=
+          `・募集通知権限: ${mark(p.has(PermissionFlagsBits.SendMessages))} 送信` +
+          ` / ${mark(p.has(PermissionFlagsBits.EmbedLinks))} 埋め込み` +
+          ` / ${mark(p.has(PermissionFlagsBits.AddReactions))} リアクション追加\n`;
+      } else if (notifyId) {
+        content += '・募集通知権限: チャンネルを取得できませんでした\n';
+      }
+    }
+
     content += `\nℹ️ 対象者・対象ランクは募集通知に表示するラベルで、入室そのものは制限しません。`;
-    await interaction.reply({ content: truncate(content, 1990), flags: MessageFlags.Ephemeral });
+    await interaction.editReply({ content: truncate(content, 1990) });
     return;
   }
 }
@@ -871,6 +931,8 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   // 作成先カテゴリが @everyone の接続を制限していると、新規VCもその制限を継承し、
   // ギルド全体で「メンバーの移動」権限があっても移動に失敗する。これを避けるため、
   // Bot自身に接続・移動を許可する権限上書きを付与しておく（付与できなくても続行）。
+  // （ManageChannels は付与しない: VC作成が成功している時点でBotは同権限を持っており、
+  //   継承されるため削除も可能。ここに束ねると権限上書き全体が失敗し移動修正まで壊れ得る）
   const me = guild.members.me;
   if (me) {
     try {
