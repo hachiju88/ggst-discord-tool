@@ -755,6 +755,17 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
           out += `⚠️ ${nm}: チャンネル取得に一時失敗（行は保持・次回再試行）: ${r.detail ?? '理由不明'}\n`;
         } else {
           out += `❌ ${nm}: 削除に失敗（${r.detail ?? '理由不明'}）\n`;
+          if (r.perms) {
+            const b = (ok: boolean) => (ok ? '✅' : '❌');
+            out +=
+              `　このVCでのBot権限: ${b(r.perms.view)}見る / ${b(r.perms.manageChannels)}チャンネル管理` +
+              ` / ${b(r.perms.manageRoles)}権限管理 / ${b(r.perms.connect)}接続 / ${b(r.perms.moveMembers)}移動\n`;
+            if (!r.perms.view || !r.perms.manageChannels) {
+              out +=
+                '　→ ❌の権限が削除失敗の原因です。Botロールに「チャンネルを見る」と「チャンネルの管理」を付与してください' +
+                '（カテゴリの権限上書きでBotロールを許可、または管理者権限の付与でも可）。\n';
+            }
+          }
         }
       }
       out +=
@@ -991,12 +1002,14 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
 
   sessions.delete(key);
 
-  // 作成したVCへメンバーを移動するには、Bot自身がそのVCに「接続」できる必要がある。
-  // 作成先カテゴリが @everyone の接続を制限していると、新規VCもその制限を継承し、
-  // ギルド全体で「メンバーの移動」権限があっても移動に失敗する。これを避けるため、
-  // Bot自身に接続・移動を許可する権限上書きを付与しておく（付与できなくても続行）。
-  // （ManageChannels は付与しない: VC作成が成功している時点でBotは同権限を持っており、
-  //   継承されるため削除も可能。ここに束ねると権限上書き全体が失敗し移動修正まで壊れ得る）
+  // Bot自身にこのVCの操作権限を上書きで付与しておく（付与できなくても続行）。
+  // - ViewChannel/Connect/MoveMembers: メンバー移動に必要（カテゴリが @everyone の
+  //   接続/表示を制限していると新規VCもそれを継承し、ギルド全体で権限があっても失敗する）。
+  // - ManageChannels: 空になった後にこのVCを削除するのに必要。カテゴリ設定によっては
+  //   作成後のVCで Bot が実効的に持たず、削除が Missing Access になることがあるため。
+  // 1回の edit にまとめる（アトミックに適用され、片方だけ欠けた状態を作らない）。
+  // ※ 恒久的な対策は「Botロールにカテゴリで ViewChannel/ManageChannels を許可」する
+  //   サーバー側設定。ここでの自己付与は Bot が権限を編集できる場合のみ有効。
   const me = guild.members.me;
   if (me) {
     try {
@@ -1004,6 +1017,7 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
         ViewChannel: true,
         Connect: true,
         MoveMembers: true,
+        ManageChannels: true,
       });
     } catch (e) {
       console.error('[vc] bot overwrite error:', e);
