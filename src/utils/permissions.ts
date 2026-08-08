@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, PermissionsBitField, MessageFlags } from 'discord.js';
+import { ChatInputCommandInteraction, ButtonInteraction, PermissionsBitField, MessageFlags } from 'discord.js';
 import { SystemSettingModel } from '../models/SystemSetting';
 
 export enum PermissionLevel {
@@ -19,7 +19,7 @@ export enum PermissionLevel {
  * @returns 権限がある場合は true
  */
 export async function checkPermission(
-    interaction: ChatInputCommandInteraction,
+    interaction: ChatInputCommandInteraction | ButtonInteraction,
     requiredLevel: PermissionLevel
 ): Promise<boolean> {
     // GENERALは常に許可
@@ -29,14 +29,25 @@ export async function checkPermission(
 
     const member = interaction.member;
 
-    // メンバー情報が取れない場合は拒否 (DMなど)
-    if (!member || typeof member.permissions === 'string') {
+    // メンバー情報が取れない場合は拒否 (DMなど)。
+    // ボタン等では未応答のまま return すると「interaction failed」表示になるため、
+    // 拒否時は必ずインタラクションを確定させる。
+    const denyUnavailable = async (): Promise<false> => {
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.reply({
+                content: '🚫 権限を確認できませんでした（サーバー内で実行してください）。',
+                flags: MessageFlags.Ephemeral,
+            });
+        }
         return false;
+    };
+    if (!member || typeof member.permissions === 'string') {
+        return denyUnavailable();
     }
 
     // member.roles の型チェック (null/undefined除外)
     if (!member.roles) {
-        return false;
+        return denyUnavailable();
     }
 
     // Discord本来の管理者権限 (ロックアウト防止のため常に最強)

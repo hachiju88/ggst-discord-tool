@@ -50,6 +50,7 @@ import {
   registerTempChannel,
   scheduleEmptyGuard,
   countTempChannelsByGuild,
+  sweepGuildNow,
 } from '../services/VoiceRecruitService';
 
 // ── setup で作成するチャンネル構成 ─────────────────────────────────────────
@@ -76,6 +77,7 @@ const CANCEL_BUTTON = 'vc:cancel';
 const COMMENT_BUTTON = 'vc:comment';
 const NEXT_BUTTON = 'vc:next';
 const PREV_BUTTON = 'vc:prev';
+const SWEEP_NOW_BUTTON = 'vc:sweepnow';
 const GAME_MODAL = 'vc:gamemodal';
 const PURPOSE_MODAL = 'vc:purposemodal';
 const ROOM_MODAL = 'vc:roommodal';
@@ -679,7 +681,15 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     }
 
     content += `\nℹ️ 対象者・対象ランクは募集通知に表示するラベルで、入室そのものは制限しません。`;
-    await interaction.editReply({ content: truncate(content, 1990) });
+    content +=
+      '\n\n🧹 下のボタンで**今すぐ掃除＆診断**を実行できます（空VCの即時削除と、消えない場合の理由表示）。';
+    const sweepRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(SWEEP_NOW_BUTTON)
+        .setLabel('🧹 今すぐ掃除＆診断')
+        .setStyle(ButtonStyle.Danger),
+    );
+    await interaction.editReply({ content: truncate(content, 1990), components: [sweepRow] });
     return;
   }
 }
@@ -700,6 +710,60 @@ export async function autocomplete(interaction: AutocompleteInteraction): Promis
 export async function handleButtonInteract(interaction: ButtonInteraction): Promise<void> {
   if (!interaction.guildId) return;
   const key = sessionKey(interaction.guildId, interaction.user.id);
+
+  if (interaction.customId === SWEEP_NOW_BUTTON) {
+    if (!(await checkPermission(interaction, PermissionLevel.ADMIN))) return;
+    const guild = interaction.guild;
+    if (!guild) return;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    let results;
+    try {
+      results = await sweepGuildNow(guild);
+    } catch (e) {
+      await interaction.editReply({
+        content: `🧹 掃除に失敗しました: ${(e as { message?: string }).message ?? String(e)}`,
+      });
+      return;
+    }
+
+    const fmtAge = (ms: number | null) =>
+      ms == null ? '不明' : `${Math.floor(ms / 60000)}分`;
+    let out = '🧹 **今すぐ掃除＆診断の結果**\n';
+    if (results.length === 0) {
+      out += '追跡中の一時VCはありません（DBに対象行なし）。既に全て掃除済みか、そもそも登録されていません。';
+    } else {
+      const n = (o: string) => results.filter((r) => r.outcome === o).length;
+      const deleted = n('deleted');
+      const gone = n('gone');
+      const occupied = n('occupied');
+      const failed = n('delete_failed');
+      const fetchFailed = n('fetch_failed');
+      out +=
+        `対象 ${results.length}件 → 削除 ${deleted} / 消滅 ${gone} / 在室で保留 ${occupied}` +
+        ` / 削除失敗 ${failed} / 取得失敗 ${fetchFailed}\n\n`;
+      for (const r of results) {
+        const nm = r.name ? `\`${r.name}\`` : `\`${r.channelId}\``;
+        if (r.outcome === 'deleted') {
+          out += `✅ ${nm}: 削除しました（作成${fmtAge(r.ageMs)}前・在室0）\n`;
+        } else if (r.outcome === 'gone') {
+          out += `🗑️ ${nm}: 既にチャンネルが存在しないため追跡行のみ削除\n`;
+        } else if (r.outcome === 'occupied') {
+          out +=
+            `⏸️ ${nm}: **Botは在室${r.memberCount}人と認識**しているため保留（作成${fmtAge(r.ageMs)}前）\n` +
+            '　→ 実際は誰もいないのにこの表示なら、ボイス状態キャッシュに幽霊メンバーが残っています。\n';
+        } else if (r.outcome === 'fetch_failed') {
+          out += `⚠️ ${nm}: チャンネル取得に一時失敗（行は保持・次回再試行）: ${r.detail ?? '理由不明'}\n`;
+        } else {
+          out += `❌ ${nm}: 削除に失敗（${r.detail ?? '理由不明'}）\n`;
+        }
+      }
+      out +=
+        '\nℹ️ すべて「在室◯人で保留」なら誤検知（幽霊メンバー）、「削除に失敗」なら権限/API、' +
+        '「削除しました」なら定期掃除の未反映（再デプロイ／再起動）が原因です。';
+    }
+    await interaction.editReply({ content: truncate(out, 1990) });
+    return;
+  }
 
   if (interaction.customId === PANEL_BUTTON) {
     const session = newSession();
