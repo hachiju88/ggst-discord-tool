@@ -64,6 +64,11 @@ const NOTIFY_CHANNEL_NAME = '募集通知';
 // 募集通知でメンションするロール名（このロールに👍リアクションを促す）
 const MENTION_ROLE_NAME = 'メンバー';
 
+// 読み上げBotのロール名。作成したVCがカテゴリの制限（@everyone の
+// 表示/接続オフ）を継承すると読み上げBotが入室・閲覧できなくなるため、
+// 作成時にこれらのロールへ ViewChannel/Connect を明示的に許可する。
+const TTS_BOT_ROLE_NAMES = ['ずんだもんβ', 'Vocalis', 'Vocalis2', 'Vocalis3'];
+
 // ── customId 定義 ─────────────────────────────────────────────────────────
 const PANEL_BUTTON = 'vc:open';
 const SELECT_GAME = 'vc:sel:game';
@@ -1082,6 +1087,23 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
       });
     } catch (e) {
       console.error('[vc] bot overwrite error:', e);
+    }
+  }
+
+  // 読み上げBotのロールにこのVCの表示/接続を許可する（付与できなくても続行）。
+  // カテゴリが @everyone の ViewChannel/Connect を制限していると新規VCもそれを
+  // 継承し、読み上げBotが入室・閲覧できなくなる。名前でロールを解決し、存在する
+  // ものだけを上書きする（未作成ロールは静かにスキップ）。Discordは同名ロールを
+  // 許容するため find ではなく filter で該当する全ロールを対象にする。
+  const ttsRoles = guild.roles.cache.filter((r) => TTS_BOT_ROLE_NAMES.includes(r.name));
+  for (const role of ttsRoles.values()) {
+    try {
+      await channel.permissionOverwrites.edit(role, {
+        ViewChannel: true,
+        Connect: true,
+      });
+    } catch (e) {
+      console.error(`[vc] tts bot role overwrite error (${role.name}):`, e);
     }
   }
 
