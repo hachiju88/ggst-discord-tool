@@ -1093,17 +1093,17 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   // 読み上げBotのロールにこのVCの表示/接続を許可する（付与できなくても続行）。
   // カテゴリが @everyone の ViewChannel/Connect を制限していると新規VCもそれを
   // 継承し、読み上げBotが入室・閲覧できなくなる。名前でロールを解決し、存在する
-  // ものだけをまとめて1回ずつ上書きする（未作成のロールは静かにスキップ）。
-  for (const roleName of TTS_BOT_ROLE_NAMES) {
-    const role = guild.roles.cache.find((r) => r.name === roleName);
-    if (!role) continue;
+  // ものだけを上書きする（未作成ロールは静かにスキップ）。Discordは同名ロールを
+  // 許容するため find ではなく filter で該当する全ロールを対象にする。
+  const ttsRoles = guild.roles.cache.filter((r) => TTS_BOT_ROLE_NAMES.includes(r.name));
+  for (const role of ttsRoles.values()) {
     try {
       await channel.permissionOverwrites.edit(role, {
         ViewChannel: true,
         Connect: true,
       });
     } catch (e) {
-      console.error(`[vc] tts bot role overwrite error (${roleName}):`, e);
+      console.error(`[vc] tts bot role overwrite error (${role.name}):`, e);
     }
   }
 
