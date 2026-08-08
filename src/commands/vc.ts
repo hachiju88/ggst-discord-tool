@@ -1024,18 +1024,18 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     new ButtonBuilder().setLabel('VCへ移動').setEmoji('🔊').setStyle(ButtonStyle.Link).setURL(jumpUrl),
   );
 
-  // 「メンバー」ロールが存在すればメンションして参加を呼びかける（👍リアクションを促す）。
-  // ロールは RoleManager が常時キャッシュしているため、キャッシュ参照で十分。
-  // （募集作成はホットパスなので、ここで全ロールをAPI取得しない。無ければメンションなし）
-  const mentionRole = guild.roles.cache.find((r) => r.name === MENTION_ROLE_NAME) ?? null;
+  // 【一時無効化】機能が未完成のため、「メンバー」ロールへのメンション通知は行わない。
+  // 完成後に以下を復活させる（+ payload の content / allowedMentions を戻す）:
+  //   const mentionRole = guild.roles.cache.find((r) => r.name === MENTION_ROLE_NAME) ?? null;
+  //   content: mentionRole ? `<@&${mentionRole.id}>` : undefined,
+  //   allowedMentions: mentionRole ? { roles: [mentionRole.id] } : { parse: [] as const },
 
   // 募集通知チャンネル（未設定なら実行チャンネルにフォールバック）
-  // 投稿後に 👍 リアクションを自動付与する。
+  // 投稿後に 👍 リアクションを自動付与する（👍自体は通知を飛ばさないため継続）。
   const announce = await postAnnouncement(interaction, guild.id, {
-    content: mentionRole ? `<@&${mentionRole.id}>` : undefined,
     embeds: [embed],
     components: [linkRow],
-    allowedMentions: mentionRole ? { roles: [mentionRole.id] } : { parse: [] as const },
+    allowedMentions: { parse: [] as const },
   });
 
   await registerTempChannel({
