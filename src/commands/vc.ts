@@ -86,7 +86,6 @@ const COMMENT_MODAL = 'vc:commentmodal';
 // 対象者による色分け
 const AUDIENCE_COLOR: Record<string, number> = {
   all: 0x5865f2,
-  regular: 0xf1c40f,
   newcomer: 0x2ecc71,
 };
 
@@ -105,13 +104,19 @@ interface WizardSession {
 const sessions = new Map<string, WizardSession>();
 const sessionKey = (guildId: string, userId: string) => `${guildId}:${userId}`;
 
-/** フォームの初期セッション（ゲーム:GGST / 参加人数:制限なし を初期値に）。 */
+/**
+ * フォームの初期セッション。
+ * ゲーム:GGST / 目的:プレイヤーマッチ / 参加人数:制限なし / 対象者:制限なし /
+ * ランク:制限なし / 部屋番号:888999 を初期値にする。
+ */
 function newSession(): WizardSession {
   return {
     game: 'GGST',
+    purpose: 'プレイヤーマッチ',
     count: '0',
     audience: 'all',
     rank: 'none',
+    room: '888999',
     page: 1,
     touchedAt: Date.now(),
   };
@@ -223,19 +228,21 @@ function buildPanelMessage() {
   return { embeds: [embed], components: [row] };
 }
 
-/** 固定候補のセレクトを組み立てる（末尾に「その他（手動入力）」を付与）。 */
+/**
+ * 固定候補のセレクトを組み立てる（末尾に「その他（手動入力）」を付与）。
+ *
+ * ラベルを分かりやすくするため、選択済みでもラベルが消えないよう setDefault は使わず、
+ * placeholder に「項目名：現在値」を埋め込む（Discordはセレクトに値が選択されると
+ * placeholder ではなく選択値を表示してしまい、どの欄が何なのか分からなくなるため）。
+ */
 function buildOptionSelect(
   customId: string,
   placeholder: string,
   options: { value: string; label: string; description?: string }[],
-  selected: string | undefined,
   customValue: string,
 ): StringSelectMenuBuilder {
   const menuOptions = options.map((o) => {
-    const opt = new StringSelectMenuOptionBuilder()
-      .setLabel(o.label)
-      .setValue(o.value)
-      .setDefault(selected === o.value);
+    const opt = new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value);
     if (o.description) opt.setDescription(o.description);
     return opt;
   });
@@ -248,7 +255,7 @@ function buildOptionSelect(
   );
   return new StringSelectMenuBuilder()
     .setCustomId(customId)
-    .setPlaceholder(placeholder)
+    .setPlaceholder(truncate(placeholder, 150))
     .addOptions(menuOptions);
 }
 
@@ -257,12 +264,13 @@ function buildOptionSelect(
 //   ページ1: ゲーム / 募集目的 / 参加人数 / 対象者
 //   ページ2: 対象ランク / 部屋番号
 function buildWizard(session: WizardSession, games: string[]) {
+  // セレクトは値が選択されると placeholder が消えて選択値だけ表示され、どの欄が
+  // 何なのか分からなくなる。そこで setDefault は使わず、placeholder に「項目名：現在値」
+  // を埋め込んでラベル代わりにする（選択後も欄の意味が一目で分かる）。
+
   // ゲーム: 最大25件制限のため候補を24件までに絞り、末尾に「その他」を足す
   const gameOptions = games.slice(0, 24).map((g) =>
-    new StringSelectMenuOptionBuilder()
-      .setLabel(truncate(g, 100))
-      .setValue(truncate(g, 100))
-      .setDefault(session.game === g),
+    new StringSelectMenuOptionBuilder().setLabel(truncate(g, 100)).setValue(truncate(g, 100)),
   );
   gameOptions.push(
     new StringSelectMenuOptionBuilder()
@@ -273,38 +281,31 @@ function buildWizard(session: WizardSession, games: string[]) {
   );
   const gameSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_GAME)
-    .setPlaceholder('① 募集するゲームを選択')
+    .setPlaceholder(truncate(`① ゲーム：${session.game ?? '未選択'}`, 150))
     .addOptions(gameOptions);
 
   const purposeSelect = buildOptionSelect(
     SELECT_PURPOSE,
-    '② 募集目的を選択',
+    `② 目的：${session.purpose ? purposeLabel(session.purpose) : '未選択'}`,
     PURPOSE_OPTIONS,
-    session.purpose,
     CUSTOM_PURPOSE_VALUE,
   );
 
   const countSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_COUNT)
-    .setPlaceholder('③ 参加人数を選択')
+    .setPlaceholder(truncate(`③ 定員：${session.count ? countLabel(session.count) : '未選択'}`, 150))
     .addOptions(
       COUNT_OPTIONS.map((o) =>
-        new StringSelectMenuOptionBuilder()
-          .setLabel(o.label)
-          .setValue(o.value)
-          .setDefault(session.count === o.value),
+        new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value),
       ),
     );
 
   const audienceSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_AUDIENCE)
-    .setPlaceholder('④ 対象者を選択')
+    .setPlaceholder(truncate(`④ 対象者：${audienceLabel(session.audience)}`, 150))
     .addOptions(
       AUDIENCE_OPTIONS.map((o) => {
-        const opt = new StringSelectMenuOptionBuilder()
-          .setLabel(o.label)
-          .setValue(o.value)
-          .setDefault(session.audience === o.value);
+        const opt = new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value);
         if (o.description) opt.setDescription(o.description);
         return opt;
       }),
@@ -312,21 +313,17 @@ function buildWizard(session: WizardSession, games: string[]) {
 
   const rankSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_RANK)
-    .setPlaceholder('⑤ 対象ランクを選択')
+    .setPlaceholder(truncate(`⑤ 対象ランク：${rankLabel(session.rank)}`, 150))
     .addOptions(
       RANK_OPTIONS.map((o) =>
-        new StringSelectMenuOptionBuilder()
-          .setLabel(o.label)
-          .setValue(o.value)
-          .setDefault(session.rank === o.value),
+        new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value),
       ),
     );
 
   const roomSelect = buildOptionSelect(
     SELECT_ROOM,
-    '⑥ 部屋番号を選択',
+    `⑥ 部屋番号：${session.room ? roomLabel(session.room) : '未設定'}`,
     ROOM_OPTIONS,
-    session.room,
     CUSTOM_ROOM_VALUE,
   );
 
@@ -1102,19 +1099,23 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     new ButtonBuilder().setLabel('VCへ移動').setEmoji('🔊').setStyle(ButtonStyle.Link).setURL(jumpUrl),
   );
 
-  // 【一時無効化】機能が未完成のため、「メンバー」ロールへのメンション通知は行わない。
-  // 完成後に以下を復活させる（+ payload の content / allowedMentions を戻す）:
-  //   const mentionRole = guild.roles.cache.find((r) => r.name === MENTION_ROLE_NAME) ?? null;
-  //   content: mentionRole ? `<@&${mentionRole.id}>` : undefined,
-  //   allowedMentions: mentionRole ? { roles: [mentionRole.id] } : { parse: [] as const },
+  // 「メンバー」ロールにメンション通知する（👍で参加意思表示を促す）。
+  // ロールが見つからなければメンションなしで投稿する。実際のメンション付与は
+  // postAnnouncement 側で「設定済みの募集通知チャンネルに投稿する時だけ」行う。
+  const mentionRole = guild.roles.cache.find((r) => r.name === MENTION_ROLE_NAME) ?? null;
 
   // 募集通知チャンネル（未設定なら実行チャンネルにフォールバック）
   // 投稿後に 👍 リアクションを自動付与する（👍自体は通知を飛ばさないため継続）。
-  const announce = await postAnnouncement(interaction, guild.id, {
-    embeds: [embed],
-    components: [linkRow],
-    allowedMentions: { parse: [] as const },
-  });
+  const announce = await postAnnouncement(
+    interaction,
+    guild.id,
+    {
+      embeds: [embed],
+      components: [linkRow],
+      allowedMentions: { parse: [] as const },
+    },
+    mentionRole?.id ?? null,
+  );
 
   await registerTempChannel({
     channelId: channel.id,
@@ -1187,9 +1188,17 @@ async function postAnnouncement(
   interaction: ButtonInteraction,
   guildId: string,
   payload: BaseMessageOptions,
+  mentionRoleId?: string | null,
 ): Promise<{ channelId: string; messageId: string; via: AnnounceVia } | null> {
   const guild = interaction.guild;
   if (!guild) return null;
+
+  // メンションは「設定された募集通知チャンネル」に投稿する時だけ付ける。
+  // フォールバック（未設定/失敗時に実行チャンネルへ投稿）では、意図しない
+  // チャンネルでロール全体を鳴らさないよう、メンションを外して送る。
+  const notifyPayload: BaseMessageOptions = mentionRoleId
+    ? { ...payload, content: `<@&${mentionRoleId}>`, allowedMentions: { roles: [mentionRoleId] } }
+    : payload;
 
   // 優先: 設定された募集通知チャンネル
   const notifyId = await getNotifyChannelId(guildId);
@@ -1201,7 +1210,7 @@ async function postAnnouncement(
     const sendable = getSendable(ch);
     if (sendable) {
       try {
-        const msg = await sendable.send(payload);
+        const msg = await sendable.send(notifyPayload);
         await addThumbsUp(msg);
         return { channelId: sendable.id, messageId: msg.id, via: 'notify' };
       } catch (e) {
@@ -1214,7 +1223,7 @@ async function postAnnouncement(
     }
   }
 
-  // フォールバック: 実行したチャンネル
+  // フォールバック: 実行したチャンネル（メンションは付けない）
   const fallback = getSendable(interaction.channel);
   if (fallback) {
     try {
