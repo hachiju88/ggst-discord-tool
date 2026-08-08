@@ -22,19 +22,18 @@ jobs:
             git checkout main
             git pull origin main
 
-            # ディスク確保: 未使用イメージとビルドキャッシュを掃除する。
-            # 稼働中コンテナが使用中のイメージは対象外なので安全。
-            # （--no-cache ビルドの積み重ねでディスクが枯渇し、npm install が
-            #   "no space left on device" で失敗するのを防ぐ）
+            # ビルド前に空きディスクを最大化する。
+            # 先に既存コンテナを停止・削除しておくと、それが使っていた旧イメージも
+            # prune の対象になり最大限に回収できる（--no-cache ビルドの積み重ねで
+            # ディスクが枯渇し npm install が "no space left on device" で失敗する
+            # のを防ぐ）。ビルド中はBotが一時停止するが復旧は数分内。
+            docker stop ggst-bot || true
+            docker rm ggst-bot || true
             docker image prune -af || true
             docker builder prune -af || true
 
-            # 新イメージを先にビルドし、成功してから既存コンテナを差し替える。
-            # こうすることでビルド失敗時に稼働中のBotを落とさない（set -e で中断）。
             docker build --no-cache -t ggst-bot .
 
-            docker stop ggst-bot || true
-            docker rm ggst-bot || true
             docker run -d \
               --restart=always \
               --env-file .env \
@@ -42,8 +41,5 @@ jobs:
               --name ggst-bot \
               ggst-bot
             echo "✅ Deploy complete"
-
-            # 差し替えで不要になった旧イメージを掃除（次回に持ち越さない）。
-            docker image prune -af || true
 
             docker logs --tail=20 ggst-bot

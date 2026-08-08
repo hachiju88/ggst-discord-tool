@@ -4,6 +4,7 @@ import {
   VoiceState,
   VoiceChannel,
   ChannelType,
+  PermissionFlagsBits,
 } from 'discord.js';
 import type { VoiceBasedChannel } from 'discord.js';
 import { getDatabase } from '../database';
@@ -265,6 +266,15 @@ async function fetchTempVoiceChannel(
   }
 }
 
+/** そのVCに対するBotの実効権限（Missing Access等の原因特定用）。 */
+export interface BotChannelPerms {
+  view: boolean; // チャンネルを見る（不足すると多くの操作が Missing Access になる）
+  manageChannels: boolean; // チャンネルの管理（削除に必要）
+  manageRoles: boolean; // 権限の管理（権限上書きの編集に必要）
+  connect: boolean;
+  moveMembers: boolean;
+}
+
 /** 1件の一時VCに対する即時掃除の結果（Discord上で原因を切り分けるための診断）。 */
 export interface SweepDiagResult {
   channelId: string;
@@ -273,6 +283,24 @@ export interface SweepDiagResult {
   memberCount: number | null; // Botが認識している在室人数（チャンネル消失なら null）
   outcome: 'deleted' | 'occupied' | 'gone' | 'delete_failed' | 'fetch_failed';
   detail?: string; // delete_failed / fetch_failed の理由など
+  perms?: BotChannelPerms; // チャンネルが存在する場合のBot実効権限
+}
+
+/** そのVCに対するBotの実効権限を取り出す。 */
+function getBotChannelPerms(guild: Guild, vc: VoiceChannel): BotChannelPerms | undefined {
+  const me = guild.members.me;
+  if (!me) return undefined;
+  // permissionsFor はメンバーを解決できないと null を返しうる。null で .has を
+  // 呼ぶと throw して掃除全体が失敗するため、その場合は undefined を返す。
+  const p = vc.permissionsFor(me);
+  if (!p) return undefined;
+  return {
+    view: p.has(PermissionFlagsBits.ViewChannel),
+    manageChannels: p.has(PermissionFlagsBits.ManageChannels),
+    manageRoles: p.has(PermissionFlagsBits.ManageRoles),
+    connect: p.has(PermissionFlagsBits.Connect),
+    moveMembers: p.has(PermissionFlagsBits.MoveMembers),
+  };
 }
 
 /**
@@ -311,20 +339,21 @@ export async function sweepGuildNow(guild: Guild): Promise<SweepDiagResult[]> {
       continue;
     }
     const vc = fetched.channel;
+    const perms = getBotChannelPerms(guild, vc);
     const memberCount = vc.members.size;
     if (memberCount > 0) {
-      results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'occupied' });
+      results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'occupied', perms });
       continue;
     }
     try {
       await vc.delete('簡単VC募集: 手動掃除（診断）');
       await deleteTempChannelRow(vc.id);
-      results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'deleted' });
+      results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'deleted', perms });
     } catch (e) {
       const code = (e as { code?: number }).code;
       if (code === 10003) {
         await deleteTempChannelRow(vc.id);
-        results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'gone' });
+        results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'gone', perms });
       } else {
         results.push({
           channelId: vc.id,
@@ -333,6 +362,7 @@ export async function sweepGuildNow(guild: Guild): Promise<SweepDiagResult[]> {
           memberCount,
           outcome: 'delete_failed',
           detail: (e as { message?: string }).message ?? String(e),
+          perms,
         });
       }
     }
