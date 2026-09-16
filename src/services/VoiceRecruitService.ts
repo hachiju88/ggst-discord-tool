@@ -219,13 +219,18 @@ export async function registerTempChannel(params: {
   // 予約VCの削除保護時刻（エポックms）。この時刻までは空でも自動削除しない。
   // 「今から」の即開始VCは null（＝保護なし＝従来どおり）。
   protectUntilMs?: number | null;
+  // 予約VCで、開始時刻に差し替えるチャンネルステータス。
+  //  - "id: 888999" のような文字列 … 開始時刻にこの内容へ差し替える
+  //  - ""（空文字）           … 開始時刻にステータスをクリアする
+  //  - null                   … 差し替え予定なし（即開始VCや適用済み）
+  postStartStatus?: string | null;
 }): Promise<void> {
   const db = getDatabase();
   await db.execute({
     sql: `
       INSERT OR REPLACE INTO temp_voice_channels
-        (channel_id, guild_id, creator_id, announce_channel_id, announce_message_id, protect_until_ms, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        (channel_id, guild_id, creator_id, announce_channel_id, announce_message_id, protect_until_ms, post_start_status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `,
     args: [
       params.channelId,
@@ -234,6 +239,7 @@ export async function registerTempChannel(params: {
       params.announceChannelId ?? null,
       params.announceMessageId ?? null,
       params.protectUntilMs ?? null,
+      params.postStartStatus ?? null,
     ],
   });
 }
@@ -246,6 +252,7 @@ interface TempChannelRow {
   announce_message_id: string | null;
   created_at: string | null;
   protect_until_ms: number | null;
+  post_start_status: string | null;
 }
 
 /**
@@ -271,6 +278,8 @@ function mapTempChannelRow(r: any): TempChannelRow {
     announce_message_id: r.announce_message_id ? String(r.announce_message_id) : null,
     created_at: r.created_at != null ? String(r.created_at) : null,
     protect_until_ms: r.protect_until_ms != null ? Number(r.protect_until_ms) : null,
+    // 空文字（＝開始時にクリア）と null（＝差し替え予定なし）を区別して保持する。
+    post_start_status: r.post_start_status != null ? String(r.post_start_status) : null,
   };
 }
 
@@ -580,6 +589,93 @@ export function scheduleEmptyGuard(
       // 無視
     }
   }, delayMs).unref?.();
+}
+
+// ── 予約VC: 開始時刻でのチャンネルステータス差し替え ─────────────────────────
+/** DBの post_start_status を消す（開始後ステータス適用済みの印）。 */
+async function clearPostStartStatus(channelId: string): Promise<void> {
+  const db = getDatabase();
+  await db.execute({
+    sql: 'UPDATE temp_voice_channels SET post_start_status = NULL WHERE channel_id = ?',
+    args: [channelId],
+  });
+}
+
+/**
+ * 予約VCの開始時刻に、チャンネルステータスを開始後の表示へ差し替える。
+ * status が空文字ならステータスをクリアする（"20:00開始 / id: 888999" → "id: 888999"、
+ * 部屋番号が無ければ完全にクリア）。適用後は post_start_status を消し、
+ * 再起動時の再武装での二重適用を防ぐ。失敗してもVC運用には影響しないため握り潰す。
+ */
+async function finalizeVoiceStatus(channel: VoiceChannel, status: string): Promise<void> {
+  try {
+    // 空文字は null を送って明示的にクリアする（APIは status を nullable として受ける）。
+    await channel.client.rest.put(`/channels/${channel.id}/voice-status`, {
+      body: { status: status || null },
+    });
+  } catch (e) {
+    console.error('[VoiceRecruit] finalize voice status error:', e);
+  }
+  await clearPostStartStatus(channel.id).catch((e) =>
+    console.error('[VoiceRecruit] clear post_start_status error:', e),
+  );
+}
+
+/**
+ * 予約VCの開始時刻にチャンネルステータスを差し替えるタイマーを仕込む（作成直後に呼ぶ）。
+ * このタイマーは再起動で失われるが、起動時の rearmReservedStatusFinalizers で復旧する。
+ */
+export function scheduleStatusFinalize(
+  channel: VoiceChannel,
+  delayMs: number,
+  status: string,
+): void {
+  const delay = Math.min(Math.max(delayMs, 0), MAX_TIMEOUT_MS);
+  setTimeout(async () => {
+    try {
+      const fresh = await channel.guild.channels.fetch(channel.id).catch(() => null);
+      if (fresh && fresh.type === ChannelType.GuildVoice) {
+        await finalizeVoiceStatus(fresh as VoiceChannel, status);
+      } else {
+        // チャンネルが既に無ければ差し替え不要。行は掃除側で消えるが念のため印だけ消す。
+        await clearPostStartStatus(channel.id).catch(() => {});
+      }
+    } catch (e) {
+      console.error('[VoiceRecruit] scheduleStatusFinalize error:', e);
+    }
+  }, delay).unref?.();
+}
+
+/**
+ * 起動時に、開始後ステータス差し替えが未適用の予約VC（post_start_status が残る行）を
+ * 再武装する。開始時刻を過ぎていれば即適用、未来ならタイマーを仕込む。
+ * 再起動で失われた scheduleStatusFinalize を復旧するための保険。
+ */
+export async function rearmReservedStatusFinalizers(client: Client): Promise<void> {
+  let rows: TempChannelRow[];
+  try {
+    rows = await getAllTempChannels();
+  } catch (e) {
+    console.error('[VoiceRecruit] rearm status finalizers load error:', e);
+    return;
+  }
+  const now = Date.now();
+  for (const row of rows) {
+    if (row.post_start_status == null) continue; // 差し替え予定なし or 適用済み
+    try {
+      const guild =
+        client.guilds.cache.get(row.guild_id) ??
+        (await client.guilds.fetch(row.guild_id).catch(() => null));
+      if (!guild) continue;
+      const fetched = await fetchTempVoiceChannel(guild, row.channel_id);
+      if (fetched.kind !== 'channel') continue; // 無い/一時失敗は触らない（掃除に委ねる）
+      const delay = (row.protect_until_ms ?? now) - now;
+      if (delay <= 0) await finalizeVoiceStatus(fetched.channel, row.post_start_status);
+      else scheduleStatusFinalize(fetched.channel, delay, row.post_start_status);
+    } catch (e) {
+      console.error(`[VoiceRecruit] rearm status finalizer error for ${row.channel_id}:`, e);
+    }
+  }
 }
 
 /**

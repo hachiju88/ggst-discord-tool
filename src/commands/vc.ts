@@ -54,6 +54,7 @@ import {
   removeGame,
   registerTempChannel,
   scheduleEmptyGuard,
+  scheduleStatusFinalize,
   countTempChannelsByGuild,
   sweepGuildNow,
 } from '../services/VoiceRecruitService';
@@ -1068,6 +1069,9 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   const protectUntilMs = resolveProtectUntilMs(session.startAt, nowMs);
   const isReserved = protectUntilMs != null;
   const startClock = isReserved ? formatJstClock(protectUntilMs, nowMs) : null;
+  // 予約VCで開始時刻に差し替えるステータス。部屋番号があれば「id: 888999」、無ければ
+  // 空文字（＝開始時にステータスをクリア）。即開始VCは差し替えなし（null）。
+  const postStartStatus: string | null = isReserved ? (session.room ? `id: ${session.room}` : '') : null;
 
   // VC名: GGST系は「［ランク］ゲーム名(目的)」、それ以外は「ゲーム名(目的)」。
   // 人数・対象者は名前に含めない（これらは募集通知に表示する）。
@@ -1258,11 +1262,17 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     announceChannelId: announce?.channelId ?? null,
     announceMessageId: announce?.messageId ?? null,
     protectUntilMs, // 予約VCは開始予定時刻まで空でも削除しない
+    postStartStatus, // 開始時刻にステータスを「id: 888999」等へ差し替え（即開始は null）
   });
 
   // 誰も入らなかった場合の保険（空なら削除）。メンションを見た人が来る時間を確保するため
   // 短すぎない値にしている。予約VCは開始予定時刻を起点に猶予を与える（それまでは保護）。
   scheduleEmptyGuard(channel, { protectUntilMs });
+
+  // 予約VC: 開始予定時刻にチャンネルステータスから「◯◯開始」を外して差し替える。
+  if (isReserved && protectUntilMs != null) {
+    scheduleStatusFinalize(channel, protectUntilMs - Date.now(), postStartStatus ?? '');
+  }
 
   // 移動結果を作成者に伝える。
   // Discordの仕様上、Botはどのボイスチャンネルにも接続していないユーザーを
