@@ -5,7 +5,7 @@ import { initDatabase, closeDatabase } from './database';
 import { autoMigrate } from './database/auto-migrate';
 import { startScheduler } from './services/RankScheduler';
 import { startRoleStatsScheduler } from './services/RoleStatsScheduler';
-import { startTempChannelSweeper } from './services/VoiceRecruitService';
+import { startTempChannelSweeper, rearmReservedStatusFinalizers } from './services/VoiceRecruitService';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -63,6 +63,11 @@ async function main() {
       // これで確実に回収される。
       stopTempChannelSweeper = startTempChannelSweeper(client);
       console.log('✅ Temp voice channel sweeper started');
+      // 予約VCの「開始時刻にステータスを差し替える」タイマーを再武装する。
+      // 再起動で失われた scheduleStatusFinalize を復旧する保険（過去分は即適用）。
+      rearmReservedStatusFinalizers(client).catch((e) =>
+        console.error('Failed to rearm reserved VC status finalizers:', e),
+      );
     });
 
     // Graceful shutdown

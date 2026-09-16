@@ -80,6 +80,79 @@ export function rankLabel(value: string): string {
   return RANK_OPTIONS.find((o) => o.value === value)?.label ?? '制限なし';
 }
 
+// ── VC開始時間（予約） ──────────────────────────────────────────────────────
+// 「今から（即開始）」を表すセンチネル値。これ以外は選択時刻のエポックms文字列。
+export const START_NOW_VALUE = 'now';
+// 開始時間の刻み（15分）と、ドロップダウンで先読みするスロット数。
+// Discordのセレクトは最大25個。先頭の「今から」を除いた24枠＝最大6時間先まで。
+const START_STEP_MS = 15 * 60 * 1000;
+const START_SLOT_COUNT = 24;
+// 最も近いスロットの最小リード。境界の直前（例 19:44:40 の 19:45 枠は20秒後）を候補に
+// 出すと、フォーム記入中に時刻を過ぎて即開始VCへ化けるため、この分だけ先の境界から並べる。
+const START_MIN_LEAD_MS = 60 * 1000;
+// 表示・スロット境界はJST（UTC+9）基準。9時間は15分の倍数なので、UTCの15分境界と
+// JSTの15分境界は一致する（ceil をUTCエポックで取れば正しいJST境界になる）。
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** エポックms を JST の "HH:MM" にする。翌日分は "翌HH:MM" と表す（nowMs 指定時のみ）。 */
+export function formatJstClock(epochMs: number, nowMs?: number): string {
+  const d = new Date(epochMs + JST_OFFSET_MS);
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  let prefix = '';
+  if (nowMs != null) {
+    const dayOf = (t: number) => Math.floor((t + JST_OFFSET_MS) / DAY_MS);
+    const diff = dayOf(epochMs) - dayOf(nowMs);
+    if (diff === 1) prefix = '翌';
+    else if (diff >= 2) prefix = `${diff}日後 `;
+  }
+  return `${prefix}${hh}:${mm}`;
+}
+
+/** 選択済みの開始時間（session.startAt）を表示用ラベルにする。 */
+export function startTimeLabel(startAt: string | undefined, nowMs = Date.now()): string {
+  // 過去/不正値は resolveProtectUntilMs と同じく「今から」扱いにする（プレビューと
+  // 実際の作成挙動を一致させる。フォームを開いたまま選択時刻を過ぎたケース対策）。
+  if (!startAt || startAt === START_NOW_VALUE) return '今から（即開始）';
+  const ms = Number(startAt);
+  if (!Number.isFinite(ms) || ms <= nowMs) return '今から（即開始）';
+  return `${formatJstClock(ms, nowMs)}〜`;
+}
+
+/**
+ * 開始時間ドロップダウンの選択肢を組み立てる（先頭「今から」＋15分刻みで24枠）。
+ * スロットは呼び出し時刻（nowMs）を起点に、次の15分境界から並べる（JST表示）。
+ */
+export function buildStartTimeChoices(
+  nowMs = Date.now(),
+): { value: string; label: string }[] {
+  const first = Math.ceil((nowMs + START_MIN_LEAD_MS) / START_STEP_MS) * START_STEP_MS;
+  const choices: { value: string; label: string }[] = [
+    { value: START_NOW_VALUE, label: '今から（即開始）' },
+  ];
+  for (let i = 0; i < START_SLOT_COUNT; i++) {
+    const t = first + i * START_STEP_MS;
+    choices.push({ value: String(t), label: `${formatJstClock(t, nowMs)}〜` });
+  }
+  return choices;
+}
+
+/**
+ * 予約VCの削除保護に使う時刻を、選択値（startAt）から解決する。
+ * - 「今から」/未選択/過去/不正値 → null（＝即開始・保護なし＝既存挙動）
+ * - 未来の時刻 → そのエポックms（この時刻までは空でも削除しない）
+ */
+export function resolveProtectUntilMs(
+  startAt: string | undefined,
+  nowMs = Date.now(),
+): number | null {
+  if (!startAt || startAt === START_NOW_VALUE) return null;
+  const ms = Number(startAt);
+  if (!Number.isFinite(ms) || ms <= nowMs) return null;
+  return ms;
+}
+
 // ── 設定（system_settings に guild 単位で保存） ─────────────────────────────
 const CATEGORY_KEY = (guildId: string) => `vc_recruit_category:${guildId}`;
 const NOTIFY_KEY = (guildId: string) => `vc_recruit_notify:${guildId}`;
@@ -148,13 +221,21 @@ export async function registerTempChannel(params: {
   creatorId: string;
   announceChannelId?: string | null;
   announceMessageId?: string | null;
+  // 予約VCの削除保護時刻（エポックms）。この時刻までは空でも自動削除しない。
+  // 「今から」の即開始VCは null（＝保護なし＝従来どおり）。
+  protectUntilMs?: number | null;
+  // 予約VCで、開始時刻に差し替えるチャンネルステータス。
+  //  - "id: 888999" のような文字列 … 開始時刻にこの内容へ差し替える
+  //  - ""（空文字）           … 開始時刻にステータスをクリアする
+  //  - null                   … 差し替え予定なし（即開始VCや適用済み）
+  postStartStatus?: string | null;
 }): Promise<void> {
   const db = getDatabase();
   await db.execute({
     sql: `
       INSERT OR REPLACE INTO temp_voice_channels
-        (channel_id, guild_id, creator_id, announce_channel_id, announce_message_id, created_at)
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        (channel_id, guild_id, creator_id, announce_channel_id, announce_message_id, protect_until_ms, post_start_status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `,
     args: [
       params.channelId,
@@ -162,6 +243,8 @@ export async function registerTempChannel(params: {
       params.creatorId,
       params.announceChannelId ?? null,
       params.announceMessageId ?? null,
+      params.protectUntilMs ?? null,
+      params.postStartStatus ?? null,
     ],
   });
 }
@@ -173,6 +256,8 @@ interface TempChannelRow {
   announce_channel_id: string | null;
   announce_message_id: string | null;
   created_at: string | null;
+  protect_until_ms: number | null;
+  post_start_status: string | null;
 }
 
 /**
@@ -197,7 +282,15 @@ function mapTempChannelRow(r: any): TempChannelRow {
     announce_channel_id: r.announce_channel_id ? String(r.announce_channel_id) : null,
     announce_message_id: r.announce_message_id ? String(r.announce_message_id) : null,
     created_at: r.created_at != null ? String(r.created_at) : null,
+    protect_until_ms: r.protect_until_ms != null ? Number(r.protect_until_ms) : null,
+    // 空文字（＝開始時にクリア）と null（＝差し替え予定なし）を区別して保持する。
+    post_start_status: r.post_start_status != null ? String(r.post_start_status) : null,
   };
+}
+
+/** 予約VCの削除保護が有効か（now が保護時刻より前なら true＝まだ削除しない）。 */
+function isProtected(row: TempChannelRow, nowMs = Date.now()): boolean {
+  return row.protect_until_ms != null && nowMs < row.protect_until_ms;
 }
 
 async function getTempChannel(channelId: string): Promise<TempChannelRow | null> {
@@ -280,8 +373,8 @@ export interface SweepDiagResult {
   name: string | null;
   ageMs: number | null; // 作成からの経過（created_at 不明なら null）
   memberCount: number | null; // Botが認識している在室人数（チャンネル消失なら null）
-  outcome: 'deleted' | 'occupied' | 'gone' | 'delete_failed' | 'fetch_failed';
-  detail?: string; // delete_failed / fetch_failed の理由など
+  outcome: 'deleted' | 'occupied' | 'gone' | 'delete_failed' | 'fetch_failed' | 'protected';
+  detail?: string; // delete_failed / fetch_failed の理由など / protected の開始予定時刻
   perms?: BotChannelPerms; // チャンネルが存在する場合のBot実効権限
 }
 
@@ -343,6 +436,20 @@ export async function sweepGuildNow(guild: Guild): Promise<SweepDiagResult[]> {
     const memberCount = vc.members.size;
     if (memberCount > 0) {
       results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'occupied', perms });
+      continue;
+    }
+    // 予約VC: 開始予定時刻まではここでも削除しない（誤削除防止）。
+    // 手動掃除でも保護を尊重し、開始予定時刻を detail に添えて理由を提示する。
+    if (isProtected(row, now)) {
+      results.push({
+        channelId: vc.id,
+        name: vc.name,
+        ageMs,
+        memberCount,
+        outcome: 'protected',
+        detail: `${formatJstClock(row.protect_until_ms as number, now)}開始予定`,
+        perms,
+      });
       continue;
     }
     try {
@@ -412,6 +519,9 @@ async function deleteIfEmpty(
   const row = knownRow !== undefined ? knownRow : await getTempChannel(channel.id);
   if (!row) return false; // 管理対象外
   if (channel.members.size > 0) return false; // まだ人がいる
+  // 予約VC: 開始時刻まで（保護時刻まで）は空でも削除しない。時刻を過ぎたら
+  // 以降は通常どおり（この関数を通る全経路＝退室イベント/空ガード/定期掃除）で削除される。
+  if (isProtected(row)) return false;
 
   try {
     await channel.delete('簡単VC募集: 参加者が全員退出したため自動削除');
@@ -432,6 +542,55 @@ async function deleteIfEmpty(
   return true;
 }
 
+/** 予約VCの取り下げ結果。 */
+export type WithdrawResult = 'ok' | 'not_found' | 'not_creator' | 'occupied' | 'delete_failed';
+
+/**
+ * 募集主が自分の一時VCを取り下げる（VCを削除し追跡行も消す）。
+ * 保護（開始時刻まで削除しない）を無視して削除できるのは、作成者本人の明示操作だから。
+ * - 追跡対象外 → 'not_found'
+ * - 作成者以外 → 'not_creator'
+ * - 参加者がいる → 'occupied'（誤って人を追い出さない）
+ * - 既に消えている → 行だけ消して 'ok'
+ * - 削除失敗（権限等）→ 'delete_failed'（行は残し再試行の余地を残す）
+ */
+export async function withdrawTempChannel(
+  guild: Guild,
+  channelId: string,
+  requesterId: string,
+): Promise<WithdrawResult> {
+  const row = await getTempChannel(channelId);
+  if (!row) return 'not_found';
+  if (row.creator_id !== requesterId) return 'not_creator';
+
+  const fetched = await fetchTempVoiceChannel(guild, channelId);
+  if (fetched.kind === 'gone') {
+    await reactAnnouncementEnded(guild.client, row);
+    await deleteTempChannelRow(channelId);
+    return 'ok';
+  }
+  if (fetched.kind === 'transient') return 'delete_failed';
+
+  const vc = fetched.channel;
+  // 空、または在室が作成者本人だけなら取り下げ可（自分の部屋を畳むケース）。
+  // 他の参加者が居る場合は突然追い出さないよう拒否する。
+  if (!vc.members.every((m) => m.id === requesterId)) return 'occupied';
+  try {
+    await vc.delete('簡単VC募集: 募集主が取り下げ');
+  } catch (e) {
+    const code = (e as { code?: number }).code;
+    if (code !== 10003) {
+      console.error(`[VoiceRecruit] withdraw delete failed: ${channelId}`, e);
+      return 'delete_failed';
+    }
+  }
+  // 他の削除経路と同様、募集通知に「終了」リアクションを付ける。呼び出し側は
+  // 併せてメッセージ本文も更新するが、その更新が失敗しても終了印が残るようにする。
+  await reactAnnouncementEnded(guild.client, row);
+  await deleteTempChannelRow(channelId);
+  return 'ok';
+}
+
 /**
  * voiceStateUpdate から呼ぶ。
  * - 一時VCが空になったら自動削除
@@ -450,11 +609,30 @@ export async function handleVoiceStateUpdate(
   }
 }
 
+/** 空ガードの既定猶予（作成 or 開始予定時刻から、誰も来なければ削除するまでの時間）。 */
+const EMPTY_GUARD_GRACE_MS = 30 * 60 * 1000;
+// setTimeout の遅延は 32bit(約24.8日)を超えると即発火扱いになるため上限を設ける。
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
 /**
  * VC作成直後に呼ぶ。一定時間後にまだ誰も入っていなければ削除する保険。
  * （募集主が結局VCに入らなかったケースの掃除）
+ *
+ * protectUntilMs（予約VCの開始予定時刻）を渡すと、その時刻＋猶予後に発火するよう
+ * 遅延を延ばす。予約VCは開始時刻まで削除保護されるため、作成直後の既定猶予で発火しても
+ * deleteIfEmpty 側で弾かれて掃除されない。開始時刻を起点に猶予を与えることで、
+ * 「誰も来なかった予約VC」を開始予定を過ぎてから確実に片付ける。
  */
-export function scheduleEmptyGuard(channel: VoiceChannel, delayMs = 30 * 60 * 1000): void {
+export function scheduleEmptyGuard(
+  channel: VoiceChannel,
+  opts: { protectUntilMs?: number | null; graceMs?: number } = {},
+): void {
+  const grace = opts.graceMs ?? EMPTY_GUARD_GRACE_MS;
+  const base =
+    opts.protectUntilMs && opts.protectUntilMs > Date.now()
+      ? opts.protectUntilMs - Date.now() // 開始予定時刻を起点にする
+      : 0;
+  const delayMs = Math.min(base + grace, MAX_TIMEOUT_MS);
   setTimeout(async () => {
     try {
       const fresh = await channel.guild.channels.fetch(channel.id).catch(() => null);
@@ -465,6 +643,99 @@ export function scheduleEmptyGuard(channel: VoiceChannel, delayMs = 30 * 60 * 10
       // 無視
     }
   }, delayMs).unref?.();
+}
+
+// ── 予約VC: 開始時刻でのチャンネルステータス差し替え ─────────────────────────
+/** DBの post_start_status を消す（開始後ステータス適用済みの印）。 */
+async function clearPostStartStatus(channelId: string): Promise<void> {
+  const db = getDatabase();
+  await db.execute({
+    sql: 'UPDATE temp_voice_channels SET post_start_status = NULL WHERE channel_id = ?',
+    args: [channelId],
+  });
+}
+
+/**
+ * 予約VCの開始時刻に、チャンネルステータスを開始後の表示へ差し替える。
+ * status が空文字ならステータスをクリアする（"20:00開始 / id: 888999" → "id: 888999"、
+ * 部屋番号が無ければ完全にクリア）。適用後は post_start_status を消し、
+ * 再起動時の再武装での二重適用を防ぐ。失敗してもVC運用には影響しないため握り潰す。
+ */
+async function finalizeVoiceStatus(channel: VoiceChannel, status: string): Promise<void> {
+  try {
+    // status は文字列（空文字でクリア）。初期セットと同じ文字列形で送る（null は
+    // 受け付けられない可能性があるため使わない）。
+    await channel.client.rest.put(`/channels/${channel.id}/voice-status`, {
+      body: { status },
+    });
+  } catch (e) {
+    // 差し替えに失敗したら marker（post_start_status）は残す。消してしまうと
+    // 「20:00開始」表示が残ったまま二度と直せなくなるため、次回起動時の
+    // rearmReservedStatusFinalizers で再試行できるようにする。
+    console.error('[VoiceRecruit] finalize voice status error (will retry on restart):', e);
+    return;
+  }
+  // 成功時のみ marker を消す（＝適用済み。再武装での二重適用を防ぐ）。
+  await clearPostStartStatus(channel.id).catch((e) =>
+    console.error('[VoiceRecruit] clear post_start_status error:', e),
+  );
+}
+
+/**
+ * 予約VCの開始時刻にチャンネルステータスを差し替えるタイマーを仕込む（作成直後に呼ぶ）。
+ * このタイマーは再起動で失われるが、起動時の rearmReservedStatusFinalizers で復旧する。
+ */
+export function scheduleStatusFinalize(
+  channel: VoiceChannel,
+  delayMs: number,
+  status: string,
+): void {
+  const delay = Math.min(Math.max(delayMs, 0), MAX_TIMEOUT_MS);
+  setTimeout(async () => {
+    try {
+      const fresh = await channel.guild.channels.fetch(channel.id).catch(() => null);
+      if (fresh && fresh.type === ChannelType.GuildVoice) {
+        await finalizeVoiceStatus(fresh as VoiceChannel, status);
+      } else {
+        // チャンネルが既に無ければ差し替え不要。行は掃除側で消えるが念のため印だけ消す。
+        await clearPostStartStatus(channel.id).catch(() => {});
+      }
+    } catch (e) {
+      console.error('[VoiceRecruit] scheduleStatusFinalize error:', e);
+    }
+  }, delay).unref?.();
+}
+
+/**
+ * 起動時に、開始後ステータス差し替えが未適用の予約VC（post_start_status が残る行）を
+ * 再武装する。開始時刻を過ぎていれば即適用、未来ならタイマーを仕込む。
+ * 再起動で失われた scheduleStatusFinalize を復旧するための保険。
+ */
+export async function rearmReservedStatusFinalizers(client: Client): Promise<void> {
+  let rows: TempChannelRow[];
+  try {
+    rows = await getAllTempChannels();
+  } catch (e) {
+    console.error('[VoiceRecruit] rearm status finalizers load error:', e);
+    return;
+  }
+  const now = Date.now();
+  for (const row of rows) {
+    if (row.post_start_status == null) continue; // 差し替え予定なし or 適用済み
+    try {
+      const guild =
+        client.guilds.cache.get(row.guild_id) ??
+        (await client.guilds.fetch(row.guild_id).catch(() => null));
+      if (!guild) continue;
+      const fetched = await fetchTempVoiceChannel(guild, row.channel_id);
+      if (fetched.kind !== 'channel') continue; // 無い/一時失敗は触らない（掃除に委ねる）
+      const delay = (row.protect_until_ms ?? now) - now;
+      if (delay <= 0) await finalizeVoiceStatus(fetched.channel, row.post_start_status);
+      else scheduleStatusFinalize(fetched.channel, delay, row.post_start_status);
+    } catch (e) {
+      console.error(`[VoiceRecruit] rearm status finalizer error for ${row.channel_id}:`, e);
+    }
+  }
 }
 
 /**
@@ -531,6 +802,11 @@ export async function sweepTempChannels(
         // deleteIfEmpty 内の members.size チェックが最終的な拠り所（退出イベントや
         // 空ガード経由の呼び出しではそちらだけが働く）ので、両者は役割が異なる。
         if (vc.members.size > 0) {
+          confirmSet?.delete(row.channel_id);
+          continue;
+        }
+        // 予約VC: 開始予定時刻まではスキップ（削除候補にも入れない）。
+        if (isProtected(row)) {
           confirmSet?.delete(row.channel_id);
           continue;
         }
