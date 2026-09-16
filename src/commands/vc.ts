@@ -1280,18 +1280,16 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   // なるため、取り下げボタンは失効しない「募集通知」側にだけ置く。
   const linkRow = new ActionRowBuilder<ButtonBuilder>().addComponents(jumpButton());
 
-  // 募集通知に載せるボタン。予約VCには募集主向けの「取り下げ」ボタンを追加する
+  // 募集通知に載せるボタン。募集主向けの「取り下げ」ボタンを即時VC・予約VCとも付ける
   // （customId に対象チャンネルIDを埋め込み、押下時に作成者本人か検証する）。
-  const announceRow = new ActionRowBuilder<ButtonBuilder>().addComponents(jumpButton());
-  if (isReserved) {
-    announceRow.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${WITHDRAW_PREFIX}${channel.id}`)
-        .setLabel('募集を取り下げる')
-        .setEmoji('🗑️')
-        .setStyle(ButtonStyle.Danger),
-    );
-  }
+  const announceRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    jumpButton(),
+    new ButtonBuilder()
+      .setCustomId(`${WITHDRAW_PREFIX}${channel.id}`)
+      .setLabel('募集を取り下げる')
+      .setEmoji('🗑️')
+      .setStyle(ButtonStyle.Danger),
+  );
 
   // 「メンバー」ロールにメンション通知する（👍で参加意思表示を促す）。
   // ロールが見つからなければメンションなしで投稿する。実際のメンション付与は
@@ -1339,8 +1337,7 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     // 予約VCは自動移動しない。開始予定時刻までVCは保持される旨を案内する。
     moveLine =
       `🕐 **${startClock}〜 開始予定**で作成しました。開始予定の時刻までは、空でも自動削除されません。\n` +
-      '🔊 時間になったら下の「VCへ移動」ボタンから参加してください。\n' +
-      '🗑️ 予定を取り下げる場合は、募集通知の「募集を取り下げる」ボタンを押してください。';
+      '🔊 時間になったら下の「VCへ移動」ボタンから参加してください。';
   } else if (moved) {
     moveLine = '➡️ 作成したVCに移動しました。';
   } else if (wasInVoice && moveFailure === 'permission') {
@@ -1381,7 +1378,8 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
       announceLine +
       (isReserved
         ? '\n（**開始予定の時刻までは保持**され、それ以降に参加者が全員退出すると自動的に削除されます）'
-        : '\n（**参加者が全員退出すると自動的に削除**されます）'),
+        : '\n（**参加者が全員退出すると自動的に削除**されます）') +
+      '\n🗑️ 取り下げる場合は、募集通知の「募集を取り下げる」ボタンを押してください。',
     components: [linkRow],
   });
 }

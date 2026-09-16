@@ -572,7 +572,9 @@ export async function withdrawTempChannel(
   if (fetched.kind === 'transient') return 'delete_failed';
 
   const vc = fetched.channel;
-  if (vc.members.size > 0) return 'occupied';
+  // 空、または在室が作成者本人だけなら取り下げ可（自分の部屋を畳むケース）。
+  // 他の参加者が居る場合は突然追い出さないよう拒否する。
+  if (!vc.members.every((m) => m.id === requesterId)) return 'occupied';
   try {
     await vc.delete('簡単VC募集: 募集主が取り下げ');
   } catch (e) {
