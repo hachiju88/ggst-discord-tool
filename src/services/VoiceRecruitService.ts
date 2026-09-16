@@ -87,6 +87,9 @@ export const START_NOW_VALUE = 'now';
 // Discordのセレクトは最大25個。先頭の「今から」を除いた24枠＝最大6時間先まで。
 const START_STEP_MS = 15 * 60 * 1000;
 const START_SLOT_COUNT = 24;
+// 最も近いスロットの最小リード。境界の直前（例 19:44:40 の 19:45 枠は20秒後）を候補に
+// 出すと、フォーム記入中に時刻を過ぎて即開始VCへ化けるため、この分だけ先の境界から並べる。
+const START_MIN_LEAD_MS = 60 * 1000;
 // 表示・スロット境界はJST（UTC+9）基準。9時間は15分の倍数なので、UTCの15分境界と
 // JSTの15分境界は一致する（ceil をUTCエポックで取れば正しいJST境界になる）。
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -109,9 +112,11 @@ export function formatJstClock(epochMs: number, nowMs?: number): string {
 
 /** 選択済みの開始時間（session.startAt）を表示用ラベルにする。 */
 export function startTimeLabel(startAt: string | undefined, nowMs = Date.now()): string {
+  // 過去/不正値は resolveProtectUntilMs と同じく「今から」扱いにする（プレビューと
+  // 実際の作成挙動を一致させる。フォームを開いたまま選択時刻を過ぎたケース対策）。
   if (!startAt || startAt === START_NOW_VALUE) return '今から（即開始）';
   const ms = Number(startAt);
-  if (!Number.isFinite(ms)) return '今から（即開始）';
+  if (!Number.isFinite(ms) || ms <= nowMs) return '今から（即開始）';
   return `${formatJstClock(ms, nowMs)}〜`;
 }
 
@@ -122,7 +127,7 @@ export function startTimeLabel(startAt: string | undefined, nowMs = Date.now()):
 export function buildStartTimeChoices(
   nowMs = Date.now(),
 ): { value: string; label: string }[] {
-  const first = Math.ceil(nowMs / START_STEP_MS) * START_STEP_MS;
+  const first = Math.ceil((nowMs + START_MIN_LEAD_MS) / START_STEP_MS) * START_STEP_MS;
   const choices: { value: string; label: string }[] = [
     { value: START_NOW_VALUE, label: '今から（即開始）' },
   ];
@@ -614,8 +619,13 @@ async function finalizeVoiceStatus(channel: VoiceChannel, status: string): Promi
       body: { status: status || null },
     });
   } catch (e) {
-    console.error('[VoiceRecruit] finalize voice status error:', e);
+    // 差し替えに失敗したら marker（post_start_status）は残す。消してしまうと
+    // 「20:00開始」表示が残ったまま二度と直せなくなるため、次回起動時の
+    // rearmReservedStatusFinalizers で再試行できるようにする。
+    console.error('[VoiceRecruit] finalize voice status error (will retry on restart):', e);
+    return;
   }
+  // 成功時のみ marker を消す（＝適用済み。再武装での二重適用を防ぐ）。
   await clearPostStartStatus(channel.id).catch((e) =>
     console.error('[VoiceRecruit] clear post_start_status error:', e),
   );
