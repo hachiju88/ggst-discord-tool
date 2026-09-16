@@ -1046,8 +1046,8 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   // GGST=🟦 / GGST（Switch）=🟥 / その他=🟪。
   const gameEmoji = isGgstSwitch ? '🟥' : isGgst ? '🟦' : '🟪';
   const purposePart = session.purpose ? `(${purposeLabel(session.purpose)})` : '';
-  const rankPrefix = isGgst ? `［${rankLabel(session.rank)}］` : '';
-  const channelName = truncate(`${gameEmoji} ${rankPrefix}${session.game}${purposePart}`, 95);
+  const rankPrefix = isGgst ? `[${rankLabel(session.rank)}]` : '';
+  const channelName = truncate(`${gameEmoji}${rankPrefix}${session.game}${purposePart}`, 95);
 
   let channel: VoiceChannel;
   try {
