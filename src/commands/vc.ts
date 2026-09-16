@@ -1039,15 +1039,19 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   // ランクを末尾ではなく先頭の［］に出すのは、名前が長いとランクが見切れて
   // 対象外ランクの人が入ってしまう事故を防ぐため。目的は任意なので未選択なら省略。
   // GGST（Switch）などの派生も GGST 扱いでランクを付ける。
-  const game = session.game ?? '';
-  const isGgst = game.startsWith('GGST');
+  // session.game は上のガードで truthy が保証済み（string に絞り込まれている）。
+  const game = session.game;
+  // ゲーム名は手動追加できる自由入力のため、大小文字は無視して判定する。
+  const isGgst = game.toUpperCase().startsWith('GGST');
   const isGgstSwitch = isGgst && /switch/i.test(game); // GGST（Switch）系
   // 先頭の絵文字はゲーム種別で色分けする（一覧でひと目で見分けられるように）:
   // GGST=🟦 / GGST（Switch）=🟥 / その他=🟪。
   const gameEmoji = isGgstSwitch ? '🟥' : isGgst ? '🟦' : '🟪';
   const purposePart = session.purpose ? `(${purposeLabel(session.purpose)})` : '';
-  const rankPrefix = isGgst ? `[${rankLabel(session.rank)}]` : '';
-  const channelName = truncate(`${gameEmoji}${rankPrefix}${session.game}${purposePart}`, 95);
+  // ランク制限がある GGST 系のみ先頭に [ランク] を付ける。「制限なし」は
+  // 情報量が無く名前尺を食うだけなので付けない。
+  const rankPrefix = isGgst && session.rank !== 'none' ? `[${rankLabel(session.rank)}]` : '';
+  const channelName = truncate(`${gameEmoji}${rankPrefix}${game}${purposePart}`, 95);
 
   let channel: VoiceChannel;
   try {
