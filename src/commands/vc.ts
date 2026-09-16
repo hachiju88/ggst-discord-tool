@@ -1034,16 +1034,15 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   }
 
   const userLimit = parseInt(session.count, 10) || 0; // 0 = 無制限
-  // VC名: 「ゲーム / 目的 / 人数 / 対象者 / 対象ランク」
-  // 目的は任意項目のため、未選択なら区切りに含めない。
-  const nameParts = [
-    session.game,
-    session.purpose ? purposeLabel(session.purpose) : null,
-    countLabel(session.count),
-    audienceLabel(session.audience),
-    rankLabel(session.rank),
-  ].filter((p): p is string => Boolean(p));
-  const channelName = truncate(`🎙️ ${nameParts.join(' / ')}`, 95);
+  // VC名: GGST系は「［ランク］ゲーム名(目的)」、それ以外は「ゲーム名(目的)」。
+  // 人数・対象者は名前に含めない（これらは募集通知に表示する）。
+  // ランクを末尾ではなく先頭の［］に出すのは、名前が長いとランクが見切れて
+  // 対象外ランクの人が入ってしまう事故を防ぐため。目的は任意なので未選択なら省略。
+  // GGST（Switch）などの派生も GGST 扱いでランクを付ける。
+  const isGgst = (session.game ?? '').startsWith('GGST');
+  const purposePart = session.purpose ? `(${purposeLabel(session.purpose)})` : '';
+  const rankPrefix = isGgst ? `［${rankLabel(session.rank)}］` : '';
+  const channelName = truncate(`🎙️ ${rankPrefix}${session.game}${purposePart}`, 95);
 
   let channel: VoiceChannel;
   try {
