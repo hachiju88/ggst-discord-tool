@@ -53,6 +53,7 @@ import {
   addGame,
   removeGame,
   registerTempChannel,
+  withdrawTempChannel,
   scheduleEmptyGuard,
   scheduleStatusFinalize,
   countTempChannelsByGuild,
@@ -90,6 +91,8 @@ const COMMENT_BUTTON = 'vc:comment';
 const NEXT_BUTTON = 'vc:next';
 const PREV_BUTTON = 'vc:prev';
 const SWEEP_NOW_BUTTON = 'vc:sweepnow';
+// 予約VCの「取り下げ」ボタン。customId は `vc:withdraw:<channelId>` 形式。
+const WITHDRAW_PREFIX = 'vc:withdraw:';
 const GAME_MODAL = 'vc:gamemodal';
 const PURPOSE_MODAL = 'vc:purposemodal';
 const ROOM_MODAL = 'vc:roommodal';
@@ -780,6 +783,44 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
   if (!interaction.guildId) return;
   const key = sessionKey(interaction.guildId, interaction.user.id);
 
+  // 予約VCの取り下げ（募集通知のボタン）。作成者本人のみ実行できる。
+  if (interaction.customId.startsWith(WITHDRAW_PREFIX)) {
+    const guild = interaction.guild;
+    if (!guild) return;
+    const channelId = interaction.customId.slice(WITHDRAW_PREFIX.length);
+    // 削除・fetch でネットワークを伴うため、3秒制限を避けて先に応答を保留する
+    // （deferUpdate は元メッセージを保持したまま確定を返す）。
+    await interaction.deferUpdate();
+    const result = await withdrawTempChannel(guild, channelId, interaction.user.id);
+    if (result === 'ok') {
+      // 募集通知（このボタンが載っているメッセージ）を「取り下げ済み」に更新し、ボタンを外す。
+      try {
+        await interaction.editReply({
+          content: '🗑️ この募集は募集主により取り下げられました。',
+          embeds: [],
+          components: [],
+        });
+      } catch {
+        await interaction.followUp({
+          content: '🗑️ 募集を取り下げ、VCを削除しました。',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      return;
+    }
+    // 失敗系は元メッセージを変えず、押した本人にだけ理由を返す。
+    const msg =
+      result === 'not_creator'
+        ? '⚠️ この募集を取り下げられるのは作成者本人だけです。'
+        : result === 'occupied'
+          ? '⚠️ 参加者がいるため取り下げできません（全員退出すると自動削除されます）。'
+          : result === 'not_found'
+            ? 'ℹ️ この募集は既に終了・削除済みです。'
+            : '❌ 取り下げに失敗しました。Botの「チャンネルの管理」権限を確認してください。';
+    await interaction.followUp({ content: msg, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
   if (interaction.customId === SWEEP_NOW_BUTTON) {
     if (!(await checkPermission(interaction, PermissionLevel.ADMIN))) return;
     const guild = interaction.guild;
@@ -1233,9 +1274,24 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     .setTimestamp(new Date());
 
   const jumpUrl = `https://discord.com/channels/${guild.id}/${channel.id}`;
-  const linkRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setLabel('VCへ移動').setEmoji('🔊').setStyle(ButtonStyle.Link).setURL(jumpUrl),
-  );
+  const jumpButton = () =>
+    new ButtonBuilder().setLabel('VCへ移動').setEmoji('🔊').setStyle(ButtonStyle.Link).setURL(jumpUrl);
+  // 作成者の手元（ephemeral）には移動ボタンのみ。ephemeral はトークン失効で操作不能に
+  // なるため、取り下げボタンは失効しない「募集通知」側にだけ置く。
+  const linkRow = new ActionRowBuilder<ButtonBuilder>().addComponents(jumpButton());
+
+  // 募集通知に載せるボタン。予約VCには募集主向けの「取り下げ」ボタンを追加する
+  // （customId に対象チャンネルIDを埋め込み、押下時に作成者本人か検証する）。
+  const announceRow = new ActionRowBuilder<ButtonBuilder>().addComponents(jumpButton());
+  if (isReserved) {
+    announceRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${WITHDRAW_PREFIX}${channel.id}`)
+        .setLabel('募集を取り下げる')
+        .setEmoji('🗑️')
+        .setStyle(ButtonStyle.Danger),
+    );
+  }
 
   // 「メンバー」ロールにメンション通知する（👍で参加意思表示を促す）。
   // ロールが見つからなければメンションなしで投稿する。実際のメンション付与は
@@ -1249,7 +1305,7 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     guild.id,
     {
       embeds: [embed],
-      components: [linkRow],
+      components: [announceRow],
       allowedMentions: { parse: [] as const },
     },
     mentionRole?.id ?? null,
@@ -1283,7 +1339,8 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     // 予約VCは自動移動しない。開始予定時刻までVCは保持される旨を案内する。
     moveLine =
       `🕐 **${startClock}〜 開始予定**で作成しました。開始予定の時刻までは、空でも自動削除されません。\n` +
-      '🔊 時間になったら下の「VCへ移動」ボタンから参加してください。';
+      '🔊 時間になったら下の「VCへ移動」ボタンから参加してください。\n' +
+      '🗑️ 予定を取り下げる場合は、募集通知の「募集を取り下げる」ボタンを押してください。';
   } else if (moved) {
     moveLine = '➡️ 作成したVCに移動しました。';
   } else if (wasInVoice && moveFailure === 'permission') {

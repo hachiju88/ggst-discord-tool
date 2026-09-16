@@ -542,6 +542,50 @@ async function deleteIfEmpty(
   return true;
 }
 
+/** 予約VCの取り下げ結果。 */
+export type WithdrawResult = 'ok' | 'not_found' | 'not_creator' | 'occupied' | 'delete_failed';
+
+/**
+ * 募集主が自分の一時VCを取り下げる（VCを削除し追跡行も消す）。
+ * 保護（開始時刻まで削除しない）を無視して削除できるのは、作成者本人の明示操作だから。
+ * - 追跡対象外 → 'not_found'
+ * - 作成者以外 → 'not_creator'
+ * - 参加者がいる → 'occupied'（誤って人を追い出さない）
+ * - 既に消えている → 行だけ消して 'ok'
+ * - 削除失敗（権限等）→ 'delete_failed'（行は残し再試行の余地を残す）
+ */
+export async function withdrawTempChannel(
+  guild: Guild,
+  channelId: string,
+  requesterId: string,
+): Promise<WithdrawResult> {
+  const row = await getTempChannel(channelId);
+  if (!row) return 'not_found';
+  if (row.creator_id !== requesterId) return 'not_creator';
+
+  const fetched = await fetchTempVoiceChannel(guild, channelId);
+  if (fetched.kind === 'gone') {
+    await reactAnnouncementEnded(guild.client, row);
+    await deleteTempChannelRow(channelId);
+    return 'ok';
+  }
+  if (fetched.kind === 'transient') return 'delete_failed';
+
+  const vc = fetched.channel;
+  if (vc.members.size > 0) return 'occupied';
+  try {
+    await vc.delete('簡単VC募集: 募集主が取り下げ');
+  } catch (e) {
+    const code = (e as { code?: number }).code;
+    if (code !== 10003) {
+      console.error(`[VoiceRecruit] withdraw delete failed: ${channelId}`, e);
+      return 'delete_failed';
+    }
+  }
+  await deleteTempChannelRow(channelId);
+  return 'ok';
+}
+
 /**
  * voiceStateUpdate から呼ぶ。
  * - 一時VCが空になったら自動削除
