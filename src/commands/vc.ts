@@ -1039,10 +1039,15 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   // ランクを末尾ではなく先頭の［］に出すのは、名前が長いとランクが見切れて
   // 対象外ランクの人が入ってしまう事故を防ぐため。目的は任意なので未選択なら省略。
   // GGST（Switch）などの派生も GGST 扱いでランクを付ける。
-  const isGgst = (session.game ?? '').startsWith('GGST');
+  const game = session.game ?? '';
+  const isGgst = game.startsWith('GGST');
+  const isGgstSwitch = isGgst && /switch/i.test(game); // GGST（Switch）系
+  // 先頭の絵文字はゲーム種別で色分けする（一覧でひと目で見分けられるように）:
+  // GGST=🟦 / GGST（Switch）=🟥 / その他=🟪。
+  const gameEmoji = isGgstSwitch ? '🟥' : isGgst ? '🟦' : '🟪';
   const purposePart = session.purpose ? `(${purposeLabel(session.purpose)})` : '';
   const rankPrefix = isGgst ? `［${rankLabel(session.rank)}］` : '';
-  const channelName = truncate(`🎙️ ${rankPrefix}${session.game}${purposePart}`, 95);
+  const channelName = truncate(`${gameEmoji} ${rankPrefix}${session.game}${purposePart}`, 95);
 
   let channel: VoiceChannel;
   try {
