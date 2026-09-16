@@ -80,6 +80,74 @@ export function rankLabel(value: string): string {
   return RANK_OPTIONS.find((o) => o.value === value)?.label ?? '制限なし';
 }
 
+// ── VC開始時間（予約） ──────────────────────────────────────────────────────
+// 「今から（即開始）」を表すセンチネル値。これ以外は選択時刻のエポックms文字列。
+export const START_NOW_VALUE = 'now';
+// 開始時間の刻み（15分）と、ドロップダウンで先読みするスロット数。
+// Discordのセレクトは最大25個。先頭の「今から」を除いた24枠＝最大6時間先まで。
+const START_STEP_MS = 15 * 60 * 1000;
+const START_SLOT_COUNT = 24;
+// 表示・スロット境界はJST（UTC+9）基準。9時間は15分の倍数なので、UTCの15分境界と
+// JSTの15分境界は一致する（ceil をUTCエポックで取れば正しいJST境界になる）。
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** エポックms を JST の "HH:MM" にする。翌日分は "翌HH:MM" と表す（nowMs 指定時のみ）。 */
+export function formatJstClock(epochMs: number, nowMs?: number): string {
+  const d = new Date(epochMs + JST_OFFSET_MS);
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  let prefix = '';
+  if (nowMs != null) {
+    const dayOf = (t: number) => Math.floor((t + JST_OFFSET_MS) / DAY_MS);
+    const diff = dayOf(epochMs) - dayOf(nowMs);
+    if (diff === 1) prefix = '翌';
+    else if (diff >= 2) prefix = `${diff}日後 `;
+  }
+  return `${prefix}${hh}:${mm}`;
+}
+
+/** 選択済みの開始時間（session.startAt）を表示用ラベルにする。 */
+export function startTimeLabel(startAt: string | undefined, nowMs = Date.now()): string {
+  if (!startAt || startAt === START_NOW_VALUE) return '今から（即開始）';
+  const ms = Number(startAt);
+  if (!Number.isFinite(ms)) return '今から（即開始）';
+  return `${formatJstClock(ms, nowMs)}〜`;
+}
+
+/**
+ * 開始時間ドロップダウンの選択肢を組み立てる（先頭「今から」＋15分刻みで24枠）。
+ * スロットは呼び出し時刻（nowMs）を起点に、次の15分境界から並べる（JST表示）。
+ */
+export function buildStartTimeChoices(
+  nowMs = Date.now(),
+): { value: string; label: string }[] {
+  const first = Math.ceil(nowMs / START_STEP_MS) * START_STEP_MS;
+  const choices: { value: string; label: string }[] = [
+    { value: START_NOW_VALUE, label: '今から（即開始）' },
+  ];
+  for (let i = 0; i < START_SLOT_COUNT; i++) {
+    const t = first + i * START_STEP_MS;
+    choices.push({ value: String(t), label: `${formatJstClock(t, nowMs)}〜` });
+  }
+  return choices;
+}
+
+/**
+ * 予約VCの削除保護に使う時刻を、選択値（startAt）から解決する。
+ * - 「今から」/未選択/過去/不正値 → null（＝即開始・保護なし＝既存挙動）
+ * - 未来の時刻 → そのエポックms（この時刻までは空でも削除しない）
+ */
+export function resolveProtectUntilMs(
+  startAt: string | undefined,
+  nowMs = Date.now(),
+): number | null {
+  if (!startAt || startAt === START_NOW_VALUE) return null;
+  const ms = Number(startAt);
+  if (!Number.isFinite(ms) || ms <= nowMs) return null;
+  return ms;
+}
+
 // ── 設定（system_settings に guild 単位で保存） ─────────────────────────────
 const CATEGORY_KEY = (guildId: string) => `vc_recruit_category:${guildId}`;
 const NOTIFY_KEY = (guildId: string) => `vc_recruit_notify:${guildId}`;
@@ -148,13 +216,16 @@ export async function registerTempChannel(params: {
   creatorId: string;
   announceChannelId?: string | null;
   announceMessageId?: string | null;
+  // 予約VCの削除保護時刻（エポックms）。この時刻までは空でも自動削除しない。
+  // 「今から」の即開始VCは null（＝保護なし＝従来どおり）。
+  protectUntilMs?: number | null;
 }): Promise<void> {
   const db = getDatabase();
   await db.execute({
     sql: `
       INSERT OR REPLACE INTO temp_voice_channels
-        (channel_id, guild_id, creator_id, announce_channel_id, announce_message_id, created_at)
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        (channel_id, guild_id, creator_id, announce_channel_id, announce_message_id, protect_until_ms, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `,
     args: [
       params.channelId,
@@ -162,6 +233,7 @@ export async function registerTempChannel(params: {
       params.creatorId,
       params.announceChannelId ?? null,
       params.announceMessageId ?? null,
+      params.protectUntilMs ?? null,
     ],
   });
 }
@@ -173,6 +245,7 @@ interface TempChannelRow {
   announce_channel_id: string | null;
   announce_message_id: string | null;
   created_at: string | null;
+  protect_until_ms: number | null;
 }
 
 /**
@@ -197,7 +270,13 @@ function mapTempChannelRow(r: any): TempChannelRow {
     announce_channel_id: r.announce_channel_id ? String(r.announce_channel_id) : null,
     announce_message_id: r.announce_message_id ? String(r.announce_message_id) : null,
     created_at: r.created_at != null ? String(r.created_at) : null,
+    protect_until_ms: r.protect_until_ms != null ? Number(r.protect_until_ms) : null,
   };
+}
+
+/** 予約VCの削除保護が有効か（now が保護時刻より前なら true＝まだ削除しない）。 */
+function isProtected(row: TempChannelRow, nowMs = Date.now()): boolean {
+  return row.protect_until_ms != null && nowMs < row.protect_until_ms;
 }
 
 async function getTempChannel(channelId: string): Promise<TempChannelRow | null> {
@@ -280,8 +359,8 @@ export interface SweepDiagResult {
   name: string | null;
   ageMs: number | null; // 作成からの経過（created_at 不明なら null）
   memberCount: number | null; // Botが認識している在室人数（チャンネル消失なら null）
-  outcome: 'deleted' | 'occupied' | 'gone' | 'delete_failed' | 'fetch_failed';
-  detail?: string; // delete_failed / fetch_failed の理由など
+  outcome: 'deleted' | 'occupied' | 'gone' | 'delete_failed' | 'fetch_failed' | 'protected';
+  detail?: string; // delete_failed / fetch_failed の理由など / protected の開始予定時刻
   perms?: BotChannelPerms; // チャンネルが存在する場合のBot実効権限
 }
 
@@ -343,6 +422,20 @@ export async function sweepGuildNow(guild: Guild): Promise<SweepDiagResult[]> {
     const memberCount = vc.members.size;
     if (memberCount > 0) {
       results.push({ channelId: vc.id, name: vc.name, ageMs, memberCount, outcome: 'occupied', perms });
+      continue;
+    }
+    // 予約VC: 開始予定時刻まではここでも削除しない（誤削除防止）。
+    // 手動掃除でも保護を尊重し、開始予定時刻を detail に添えて理由を提示する。
+    if (isProtected(row, now)) {
+      results.push({
+        channelId: vc.id,
+        name: vc.name,
+        ageMs,
+        memberCount,
+        outcome: 'protected',
+        detail: `${formatJstClock(row.protect_until_ms as number, now)}開始予定`,
+        perms,
+      });
       continue;
     }
     try {
@@ -412,6 +505,9 @@ async function deleteIfEmpty(
   const row = knownRow !== undefined ? knownRow : await getTempChannel(channel.id);
   if (!row) return false; // 管理対象外
   if (channel.members.size > 0) return false; // まだ人がいる
+  // 予約VC: 開始時刻まで（保護時刻まで）は空でも削除しない。時刻を過ぎたら
+  // 以降は通常どおり（この関数を通る全経路＝退室イベント/空ガード/定期掃除）で削除される。
+  if (isProtected(row)) return false;
 
   try {
     await channel.delete('簡単VC募集: 参加者が全員退出したため自動削除');
@@ -450,11 +546,30 @@ export async function handleVoiceStateUpdate(
   }
 }
 
+/** 空ガードの既定猶予（作成 or 開始予定時刻から、誰も来なければ削除するまでの時間）。 */
+const EMPTY_GUARD_GRACE_MS = 30 * 60 * 1000;
+// setTimeout の遅延は 32bit(約24.8日)を超えると即発火扱いになるため上限を設ける。
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
 /**
  * VC作成直後に呼ぶ。一定時間後にまだ誰も入っていなければ削除する保険。
  * （募集主が結局VCに入らなかったケースの掃除）
+ *
+ * protectUntilMs（予約VCの開始予定時刻）を渡すと、その時刻＋猶予後に発火するよう
+ * 遅延を延ばす。予約VCは開始時刻まで削除保護されるため、作成直後の既定猶予で発火しても
+ * deleteIfEmpty 側で弾かれて掃除されない。開始時刻を起点に猶予を与えることで、
+ * 「誰も来なかった予約VC」を開始予定を過ぎてから確実に片付ける。
  */
-export function scheduleEmptyGuard(channel: VoiceChannel, delayMs = 30 * 60 * 1000): void {
+export function scheduleEmptyGuard(
+  channel: VoiceChannel,
+  opts: { protectUntilMs?: number | null; graceMs?: number } = {},
+): void {
+  const grace = opts.graceMs ?? EMPTY_GUARD_GRACE_MS;
+  const base =
+    opts.protectUntilMs && opts.protectUntilMs > Date.now()
+      ? opts.protectUntilMs - Date.now() // 開始予定時刻を起点にする
+      : 0;
+  const delayMs = Math.min(base + grace, MAX_TIMEOUT_MS);
   setTimeout(async () => {
     try {
       const fresh = await channel.guild.channels.fetch(channel.id).catch(() => null);
@@ -531,6 +646,11 @@ export async function sweepTempChannels(
         // deleteIfEmpty 内の members.size チェックが最終的な拠り所（退出イベントや
         // 空ガード経由の呼び出しではそちらだけが働く）ので、両者は役割が異なる。
         if (vc.members.size > 0) {
+          confirmSet?.delete(row.channel_id);
+          continue;
+        }
+        // 予約VC: 開始予定時刻まではスキップ（削除候補にも入れない）。
+        if (isProtected(row)) {
           confirmSet?.delete(row.channel_id);
           continue;
         }

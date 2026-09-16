@@ -416,10 +416,21 @@ export async function autoMigrate() {
         creator_id TEXT NOT NULL,
         announce_channel_id TEXT,
         announce_message_id TEXT,
+        protect_until_ms INTEGER,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )` })
       await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_temp_vc_guild ON temp_voice_channels(guild_id)' })
       console.log('✅ temp_voice_channels table created')
+    } else {
+      // 予約VCの削除保護時刻カラム（既存テーブルへの追加）。この時刻までは空でも削除しない。
+      const tvcInfo = await db.execute({ sql: 'PRAGMA table_info(temp_voice_channels)' })
+      const hasProtectUntil = tvcInfo.rows.some((r: any) => r.name === 'protect_until_ms')
+      if (!hasProtectUntil) {
+        await db.execute({ sql: 'ALTER TABLE temp_voice_channels ADD COLUMN protect_until_ms INTEGER' })
+        console.log('✅ protect_until_ms column added to temp_voice_channels')
+      } else {
+        console.log('✅ temp_voice_channels.protect_until_ms already exists')
+      }
     }
 
     console.log('Database schema check complete');

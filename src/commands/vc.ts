@@ -40,6 +40,11 @@ import {
   rankLabel,
   purposeLabel,
   roomLabel,
+  START_NOW_VALUE,
+  startTimeLabel,
+  buildStartTimeChoices,
+  resolveProtectUntilMs,
+  formatJstClock,
   getCategoryId,
   setCategoryId,
   getNotifyChannelId,
@@ -71,6 +76,7 @@ const TTS_BOT_ROLE_NAMES = ['ずんだもんβ', 'Vocalis', 'Vocalis2', 'Vocalis
 
 // ── customId 定義 ─────────────────────────────────────────────────────────
 const PANEL_BUTTON = 'vc:open';
+const SELECT_START = 'vc:sel:start';
 const SELECT_GAME = 'vc:sel:game';
 const SELECT_PURPOSE = 'vc:sel:purpose';
 const SELECT_COUNT = 'vc:sel:count';
@@ -99,6 +105,7 @@ const AUDIENCE_COLOR: Record<string, number> = {
 
 // ── ウィザードのセッション（ユーザー単位・メモリ保持） ───────────────────────
 interface WizardSession {
+  startAt?: string; // 開始時間。未設定/'now'=今から。それ以外は開始時刻のエポックms文字列
   game?: string; // default 'GGST'
   purpose?: string; // 募集目的（任意）
   count?: string; // default '0'（制限なし）
@@ -153,11 +160,12 @@ function pruneCreateTimestamps(): void {
 
 /**
  * フォームの初期セッション。
- * ゲーム:GGST / 目的:プレイヤーマッチ / 参加人数:制限なし / 対象者:制限なし /
- * ランク:制限なし を初期値にする（部屋番号は既定なし＝任意）。
+ * 開始時間:今から / ゲーム:GGST / 目的:プレイヤーマッチ / 参加人数:制限なし /
+ * 対象者:制限なし / ランク:制限なし を初期値にする（部屋番号は既定なし＝任意）。
  */
 function newSession(): WizardSession {
   return {
+    startAt: START_NOW_VALUE, // 既定は「今から（即開始）」
     game: 'GGST',
     purpose: 'プレイヤーマッチ',
     count: '0',
@@ -317,14 +325,24 @@ function buildOptionSelect(
     .addOptions(menuOptions);
 }
 
-// Discord のメッセージは最大5アクション行のため、6個のセレクトを1画面に置けない。
+// Discord のメッセージは最大5アクション行のため、全セレクトを1画面に置けない。
 // そこでウィザードを2ページに分割する:
-//   ページ1: ゲーム / 募集目的 / 参加人数 / 対象者
-//   ページ2: 対象ランク / 部屋番号
+//   ページ1: 開始時間 / ゲーム / 募集目的 / 参加人数
+//   ページ2: 対象者 / 対象ランク / 部屋番号
 function buildWizard(session: WizardSession, games: string[]) {
   // セレクトは値が選択されると placeholder が消えて選択値だけ表示され、どの欄が
   // 何なのか分からなくなる。そこで setDefault は使わず、placeholder に「項目名：現在値」
   // を埋め込んでラベル代わりにする（選択後も欄の意味が一目で分かる）。
+
+  // 開始時間: 先頭「今から」＋15分刻みの候補（JST表示）。スロットは表示時刻起点で毎回組み直す。
+  const startSelect = new StringSelectMenuBuilder()
+    .setCustomId(SELECT_START)
+    .setPlaceholder(truncate(`① 開始時間：${startTimeLabel(session.startAt)}`, 150))
+    .addOptions(
+      buildStartTimeChoices().map((o) =>
+        new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value),
+      ),
+    );
 
   // ゲーム: 最大25件制限のため候補を24件までに絞り、末尾に「その他」を足す
   const gameOptions = games.slice(0, 24).map((g) =>
@@ -339,19 +357,19 @@ function buildWizard(session: WizardSession, games: string[]) {
   );
   const gameSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_GAME)
-    .setPlaceholder(truncate(`① ゲーム：${session.game ?? '未選択'}`, 150))
+    .setPlaceholder(truncate(`② ゲーム：${session.game ?? '未選択'}`, 150))
     .addOptions(gameOptions);
 
   const purposeSelect = buildOptionSelect(
     SELECT_PURPOSE,
-    `② 目的：${session.purpose ? purposeLabel(session.purpose) : '未選択'}`,
+    `③ 目的：${session.purpose ? purposeLabel(session.purpose) : '未選択'}`,
     PURPOSE_OPTIONS,
     CUSTOM_PURPOSE_VALUE,
   );
 
   const countSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_COUNT)
-    .setPlaceholder(truncate(`③ 定員：${session.count ? countLabel(session.count) : '未選択'}`, 150))
+    .setPlaceholder(truncate(`④ 定員：${session.count ? countLabel(session.count) : '未選択'}`, 150))
     .addOptions(
       COUNT_OPTIONS.map((o) =>
         new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value),
@@ -360,7 +378,7 @@ function buildWizard(session: WizardSession, games: string[]) {
 
   const audienceSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_AUDIENCE)
-    .setPlaceholder(truncate(`④ 対象者：${audienceLabel(session.audience)}`, 150))
+    .setPlaceholder(truncate(`⑤ 対象者：${audienceLabel(session.audience)}`, 150))
     .addOptions(
       AUDIENCE_OPTIONS.map((o) => {
         const opt = new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value);
@@ -371,7 +389,7 @@ function buildWizard(session: WizardSession, games: string[]) {
 
   const rankSelect = new StringSelectMenuBuilder()
     .setCustomId(SELECT_RANK)
-    .setPlaceholder(truncate(`⑤ 対象ランク：${rankLabel(session.rank)}`, 150))
+    .setPlaceholder(truncate(`⑥ 対象ランク：${rankLabel(session.rank)}`, 150))
     .addOptions(
       RANK_OPTIONS.map((o) =>
         new StringSelectMenuOptionBuilder().setLabel(o.label).setValue(o.value),
@@ -380,7 +398,7 @@ function buildWizard(session: WizardSession, games: string[]) {
 
   const roomSelect = buildOptionSelect(
     SELECT_ROOM,
-    `⑥ 部屋番号：${session.room ? roomLabel(session.room) : '指定なし'}`,
+    `⑦ 部屋番号：${session.room ? roomLabel(session.room) : '指定なし'}`,
     ROOM_OPTIONS,
     CUSTOM_ROOM_VALUE,
     { value: ROOM_NONE_VALUE, label: '指定なし（部屋番号を付けない）' },
@@ -392,6 +410,7 @@ function buildWizard(session: WizardSession, games: string[]) {
   const content =
     '**🎙️ VC募集フォーム**' +
     `（${session.page}/2 ページ）\n` +
+    `> 🕐 開始: **${startTimeLabel(session.startAt)}**\n` +
     `> 🎮 ゲーム: **${session.game ?? '未選択'}**\n` +
     `> 🎯 目的: **${session.purpose ? purposeLabel(session.purpose) : '（未選択）'}**\n` +
     `> 👥 定員: **${session.count ? countLabel(session.count) : '未選択'}**\n` +
@@ -409,7 +428,7 @@ function buildWizard(session: WizardSession, games: string[]) {
     const nav = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(NEXT_BUTTON)
-        .setLabel('次へ（ランク・部屋番号）')
+        .setLabel('次へ（対象者・ランク・部屋番号）')
         .setEmoji('▶️')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
@@ -420,10 +439,10 @@ function buildWizard(session: WizardSession, games: string[]) {
     return {
       content,
       components: [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(startSelect),
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(gameSelect),
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(purposeSelect),
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(countSelect),
-        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(audienceSelect),
         nav,
       ],
     };
@@ -455,6 +474,7 @@ function buildWizard(session: WizardSession, games: string[]) {
   return {
     content,
     components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(audienceSelect),
       new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(rankSelect),
       new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(roomSelect),
       buttonRow,
@@ -784,11 +804,12 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
       const deleted = n('deleted');
       const gone = n('gone');
       const occupied = n('occupied');
+      const protectedCount = n('protected');
       const failed = n('delete_failed');
       const fetchFailed = n('fetch_failed');
       out +=
         `対象 ${results.length}件 → 削除 ${deleted} / 消滅 ${gone} / 在室で保留 ${occupied}` +
-        ` / 削除失敗 ${failed} / 取得失敗 ${fetchFailed}\n\n`;
+        ` / 予約中で保留 ${protectedCount} / 削除失敗 ${failed} / 取得失敗 ${fetchFailed}\n\n`;
       for (const r of results) {
         const nm = r.name ? `\`${r.name}\`` : `\`${r.channelId}\``;
         if (r.outcome === 'deleted') {
@@ -801,6 +822,8 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
             '　→ 実際は誰もいないのにこの表示なら、ボイス状態キャッシュに幽霊メンバーが残っています。\n';
         } else if (r.outcome === 'fetch_failed') {
           out += `⚠️ ${nm}: チャンネル取得に一時失敗（行は保持・次回再試行）: ${r.detail ?? '理由不明'}\n`;
+        } else if (r.outcome === 'protected') {
+          out += `🕐 ${nm}: 予約VCのため保留（${r.detail ?? '開始予定時刻まで削除しません'}）\n`;
         } else {
           out += `❌ ${nm}: 削除に失敗（${r.detail ?? '理由不明'}）\n`;
           if (r.perms) {
@@ -884,6 +907,10 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
   const value = interaction.values[0];
 
   switch (interaction.customId) {
+    case SELECT_START:
+      // 'now'（今から）はそのまま保存。それ以外は選択時刻のエポックms文字列。
+      session.startAt = value;
+      break;
     case SELECT_GAME:
       if (value === CUSTOM_GAME_VALUE) {
         // モーダルを表示（このセレクトインタラクションはモーダル表示で消費される）
@@ -1034,6 +1061,14 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   }
 
   const userLimit = parseInt(session.count, 10) || 0; // 0 = 無制限
+
+  // 予約VC: 開始時間が未来なら、その時刻まで空でも削除しない（保護時刻）。
+  // 「今から」/過去/不正値は null（＝即開始＝従来どおりの削除挙動）。
+  const nowMs = Date.now();
+  const protectUntilMs = resolveProtectUntilMs(session.startAt, nowMs);
+  const isReserved = protectUntilMs != null;
+  const startClock = isReserved ? formatJstClock(protectUntilMs, nowMs) : null;
+
   // VC名: GGST系は「［ランク］ゲーム名(目的)」、それ以外は「ゲーム名(目的)」。
   // 人数・対象者は名前に含めない（これらは募集通知に表示する）。
   // ランクを末尾ではなく先頭の［］に出すのは、名前が長いとランクが見切れて
@@ -1115,13 +1150,16 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     }
   }
 
-  // 部屋番号が指定されていれば、VCの「チャンネルステータス」に「id: 888999」形式で表示する。
+  // VCの「チャンネルステータス」に開始予定時刻・部屋番号を表示する（「20:00開始 / id: 888999」形式）。
   // このバージョンの discord.js には setVoiceStatus が無いため、REST を直接呼ぶ
   // （PUT /channels/{id}/voice-status）。権限不足等で失敗しても続行する。
-  if (session.room) {
+  const statusParts: string[] = [];
+  if (isReserved && startClock) statusParts.push(`${startClock}開始`);
+  if (session.room) statusParts.push(`id: ${session.room}`);
+  if (statusParts.length > 0) {
     try {
       await channel.client.rest.put(`/channels/${channel.id}/voice-status`, {
-        body: { status: `id: ${session.room}` },
+        body: { status: statusParts.join(' / ') },
       });
     } catch (e) {
       console.error('[vc] set voice status error:', e);
@@ -1132,6 +1170,7 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   // Discordの仕様上、どのVCにも接続していないユーザーはAPIで移動（引き込み）できない。
   // interaction.member.voice はキャッシュ未反映だと channelId が null になることがあるため、
   // guild.voiceStates.cache からも参照してフォールバックする。
+  // ただし予約VC（開始が未来）は今すぐ引き込む必要がないため自動移動しない。
   let moved = false;
   // 移動に失敗した理由。'permission'=権限不足の可能性 / 'left'=移動直前に退出していた。
   let moveFailure: 'permission' | 'left' | null = null;
@@ -1140,7 +1179,7 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     guild.voiceStates.cache.get(interaction.user.id)?.channelId ??
     null;
   const wasInVoice = Boolean(currentVoiceChannelId);
-  if (currentVoiceChannelId) {
+  if (currentVoiceChannelId && !isReserved) {
     try {
       const member = interaction.inCachedGuild()
         ? interaction.member
@@ -1162,6 +1201,7 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
   // 説明文に「項目名：内容」の横並びで1行ずつ並べる。
   const infoLines = [
     `👤 **作成者：** <@${interaction.user.id}>`,
+    isReserved ? `🕐 **開始予定：** ${startClock}〜（JST）` : `🕐 **開始：** 今から`,
     `🎮 **ゲーム：** ${session.game}`,
   ];
   if (session.purpose) {
@@ -1217,18 +1257,24 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
     creatorId: interaction.user.id,
     announceChannelId: announce?.channelId ?? null,
     announceMessageId: announce?.messageId ?? null,
+    protectUntilMs, // 予約VCは開始予定時刻まで空でも削除しない
   });
 
-  // 誰も入らなかった場合の保険（30分後に空なら削除）。
-  // メンションを見た人が来る時間を確保するため短すぎない値にしている。
-  scheduleEmptyGuard(channel);
+  // 誰も入らなかった場合の保険（空なら削除）。メンションを見た人が来る時間を確保するため
+  // 短すぎない値にしている。予約VCは開始予定時刻を起点に猶予を与える（それまでは保護）。
+  scheduleEmptyGuard(channel, { protectUntilMs });
 
   // 移動結果を作成者に伝える。
   // Discordの仕様上、Botはどのボイスチャンネルにも接続していないユーザーを
   // VCへ「引き込む」ことができない（既にVCに居るユーザーの移動のみ可能）。
   // そのため未接続の場合は自動移動は不可能で、本人にVCへの参加操作をお願いする。
   let moveLine: string;
-  if (moved) {
+  if (isReserved) {
+    // 予約VCは自動移動しない。開始予定時刻までVCは保持される旨を案内する。
+    moveLine =
+      `🕐 **${startClock}〜 開始予定**で作成しました。開始予定の時刻までは、空でも自動削除されません。\n` +
+      '🔊 時間になったら下の「VCへ移動」ボタンから参加してください。';
+  } else if (moved) {
     moveLine = '➡️ 作成したVCに移動しました。';
   } else if (wasInVoice && moveFailure === 'permission') {
     moveLine =
@@ -1266,7 +1312,9 @@ async function createRecruitVC(interaction: ButtonInteraction, key: string): Pro
       `✅ VCを作成しました！ → <#${channel.id}>\n` +
       moveLine +
       announceLine +
-      '\n（**参加者が全員退出すると自動的に削除**されます）',
+      (isReserved
+        ? '\n（**開始予定の時刻までは保持**され、それ以降に参加者が全員退出すると自動的に削除されます）'
+        : '\n（**参加者が全員退出すると自動的に削除**されます）'),
     components: [linkRow],
   });
 }
