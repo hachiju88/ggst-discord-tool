@@ -584,6 +584,9 @@ export async function withdrawTempChannel(
       return 'delete_failed';
     }
   }
+  // 他の削除経路と同様、募集通知に「終了」リアクションを付ける。呼び出し側は
+  // 併せてメッセージ本文も更新するが、その更新が失敗しても終了印が残るようにする。
+  await reactAnnouncementEnded(guild.client, row);
   await deleteTempChannelRow(channelId);
   return 'ok';
 }
@@ -660,9 +663,10 @@ async function clearPostStartStatus(channelId: string): Promise<void> {
  */
 async function finalizeVoiceStatus(channel: VoiceChannel, status: string): Promise<void> {
   try {
-    // 空文字は null を送って明示的にクリアする（APIは status を nullable として受ける）。
+    // status は文字列（空文字でクリア）。初期セットと同じ文字列形で送る（null は
+    // 受け付けられない可能性があるため使わない）。
     await channel.client.rest.put(`/channels/${channel.id}/voice-status`, {
-      body: { status: status || null },
+      body: { status },
     });
   } catch (e) {
     // 差し替えに失敗したら marker（post_start_status）は残す。消してしまうと
