@@ -636,13 +636,13 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
     )
   }
 
-  const msg = await interaction.reply({
+  const response = await interaction.reply({
     embeds: [embed],
     components: [joinRow],
-    fetchReply: true,
+    withResponse: true,
   })
 
-  await TournamentModel.setAnnouncementMessage(tournament.id, interaction.channelId!, msg.id)
+  await TournamentModel.setAnnouncementMessage(tournament.id, interaction.channelId!, response.resource!.message!.id)
 
   // Ephemeral VC setup prompt
   await interaction.followUp({
