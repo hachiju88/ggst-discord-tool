@@ -249,9 +249,8 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
       }
       // puddle.farm が返す char_short の表記をそのまま保存(URL生成・履歴取得時の整合性のため)。
       const canonicalCharShort = charInfo.char_short;
-      // /player/{id} の rating には char_long が含まれず undefined になる。
-      // undefined を DB に bind すると libsql が "Unsupported type of value" で throw
-      // するため、無ければ char_short で代替する(パネルは char_long || char_short 表示)。
+      // /player/{id} のキャラ名は API 上 `character` で、getPlayer が char_long に詰め替える。
+      // 念のため欠落時(undefined を bind すると libsql が throw する)は char_short で代替。
       const canonicalCharLong = charInfo.char_long || canonicalCharShort;
       const result = await RankTrackingService.addTracking(
         guildId, playerId, player.name, canonicalCharShort, canonicalCharLong, interaction.user.id,
@@ -268,7 +267,7 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
         content: `✅ **${player.name}** (${canonicalCharLong}) を追加しました。\n⏳ 履歴を取得中...`,
         components: [],
       });
-      const backfill = await RankTrackingService.backfillPlayer(playerId, canonicalCharShort);
+      const backfill = await RankTrackingService.backfillPlayer(playerId, canonicalCharShort, charInfo.rating);
       await interaction.editReply({
         content: formatBackfillResult(player.name, canonicalCharLong, backfill),
         components: [],
@@ -350,7 +349,9 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
       await interaction.editReply({
         content: `✅ **${r.name}** (${r.char_long}) を追加しました。\n⏳ 履歴を取得中...`,
       });
-      const backfill = await RankTrackingService.backfillPlayer(r.id, r.char_short);
+      const backfill = await RankTrackingService.backfillPlayer(
+        r.id, r.char_short, typeof r.rating === 'number' ? r.rating : undefined,
+      );
       await interaction.editReply({
         content: formatBackfillResult(r.name, r.char_long, backfill),
       });

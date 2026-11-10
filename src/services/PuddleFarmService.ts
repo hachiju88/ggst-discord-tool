@@ -1,4 +1,5 @@
 import JSONbig from 'json-bigint';
+import { normalizeTimestamp } from '../utils/timestamp';
 
 const BASE_URL = 'https://puddle.farm/api';
 const UA = 'ggst-discord-tool';
@@ -79,27 +80,6 @@ export type RatingPoint = {
   timestamp: string;
   rating: number;
 };
-
-// puddle.farm の /ratings は chrono::NaiveDateTime の to_string() をそのまま返すため
-// "2026-11-05 03:12:45" や "2026-11-05 03:12:45.123456" のような
-// 「タイムゾーン無し・スペース区切り」の UTC 時刻になる。
-// これを JS の new Date() に渡すとローカル時刻として解釈され(JST 環境では 9 時間ずれる)、
-// また DB 上で ISO 文字列(…T…Z)と文字列比較した際に期間フィルタが崩れるため、
-// 保存前に必ず ISO 8601 UTC (YYYY-MM-DDTHH:MM:SS.sssZ) へ正規化する。
-export function normalizeTimestamp(raw: string): string | null {
-  if (typeof raw !== 'string') return null;
-  const m = raw.trim().match(
-    /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})?$/,
-  );
-  if (!m) {
-    const d = new Date(raw);
-    return Number.isNaN(d.getTime()) ? null : d.toISOString();
-  }
-  const [, date, time, frac = '', tz] = m;
-  const ms = (frac + '000').slice(0, 3);
-  const d = new Date(`${date}T${time}.${ms}${tz ?? 'Z'}`);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
 
 export const PuddleFarmService = {
   async healthCheck(): Promise<boolean> {

@@ -21,6 +21,10 @@ export type RatingObservation = {
   rating: number;
 };
 
+// 正規化済み(ISO 8601 UTC)の行だけを対象にする条件。マイグレーションで変換できず
+// 残った不正形式の行が文字列ソートで「最新」扱いされたり期間フィルタを素通りしないように。
+const ISO_OBSERVED_AT = "observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*Z'";
+
 const BACKFILL_GAME_LIMIT = 3000;
 // GGST 1セット約3分、1時間最大約20試合 → バッファ込みで30
 const HOURLY_GAME_LIMIT = 30;
@@ -132,7 +136,7 @@ export const RankTrackingService = {
     const result = await db.execute({
       sql: `SELECT * FROM rating_observations
             WHERE puddle_player_id = ? AND char_short = ?
-              AND observed_at >= ?
+              AND observed_at >= ? AND ${ISO_OBSERVED_AT}
             ORDER BY observed_at ASC`,
       args: [puddlePlayerId, charShort, cutoff],
     });
@@ -161,11 +165,14 @@ export const RankTrackingService = {
 
     for (const [playerId, chars] of byPlayer) {
       // 1) 試合履歴ベースのレート(/ratings)。puddle.farm が取り込んだリプレイ分のみ。
+      const recentByChar = new Map<string, number[]>();
       for (const charShort of chars) {
         try {
           const points = await PuddleFarmService.getRatings(playerId, charShort, HOURLY_GAME_LIMIT);
-          if (points !== null) await RankTrackingService.storeObservations(playerId, charShort, points);
-          else console.warn(`[RankTracking] /ratings returned no data for ${playerId}/${charShort}`);
+          if (points !== null) {
+            await RankTrackingService.storeObservations(playerId, charShort, points);
+            recentByChar.set(charShort, points.map(p => p.rating));
+          } else console.warn(`[RankTracking] /ratings returned no data for ${playerId}/${charShort}`);
         } catch (err) {
           console.error(`[RankTracking] Failed to fetch ratings ${playerId}/${charShort}:`, err);
         }
@@ -180,7 +187,9 @@ export const RankTrackingService = {
           for (const charShort of chars) {
             const r = player.ratings.find(x => x.char_short.toUpperCase() === charShort.toUpperCase());
             if (!r || !Number.isFinite(r.rating) || r.rating === 0) continue;
-            await RankTrackingService.storeCurrentRating(playerId, charShort, r.rating);
+            await RankTrackingService.storeCurrentRating(
+              playerId, charShort, r.rating, recentByChar.get(charShort) ?? [],
+            );
           }
         }
       } catch (err) {
@@ -194,14 +203,26 @@ export const RankTrackingService = {
     const db = getDatabase();
     const result = await db.execute({
       sql: `SELECT * FROM rating_observations
-            WHERE puddle_player_id = ? AND char_short = ?
+            WHERE puddle_player_id = ? AND char_short = ? AND ${ISO_OBSERVED_AT}
             ORDER BY observed_at DESC LIMIT 1`,
       args: [puddlePlayerId, charShort],
     });
     return result.rows.length > 0 ? (result.rows[0] as unknown as RatingObservation) : null;
   },
 
-  async storeCurrentRating(puddlePlayerId: string, charShort: string, rating: number): Promise<boolean> {
+  // /player の現在レートを「取得時刻」の観測として保存する。
+  // puddle.farm の player_ratings はリプレイ取り込み時にタイムスタンプ比較なしで
+  // 上書きされるため、古い試合の値が「現在値」として返ることがある。そこで
+  // 直近に取得した /ratings の履歴に同じ値が含まれる場合は既に記録済み(または古い値)
+  // とみなして保存しない。新しい試合後の値の取りこぼしより、誤った下降/上昇点を
+  // 打つ方が有害なため保守的に判定する。
+  async storeCurrentRating(
+    puddlePlayerId: string,
+    charShort: string,
+    rating: number,
+    recentRatings: number[] = [],
+  ): Promise<boolean> {
+    if (recentRatings.includes(rating)) return false;
     const latest = await RankTrackingService.getLatestObservation(puddlePlayerId, charShort);
     if (latest && Number(latest.rating) === rating) return false;
     await RankTrackingService.storeObservations(puddlePlayerId, charShort, [
@@ -210,7 +231,13 @@ export const RankTrackingService = {
     return true;
   },
 
-  async backfillPlayer(puddlePlayerId: string, charShort: string): Promise<{ count: number; error?: string }> {
+  // currentRating: 呼び出し側で /player を取得済みならその値を渡す(重複リクエスト回避)。
+  // undefined の場合はここで /player を取得する。
+  async backfillPlayer(
+    puddlePlayerId: string,
+    charShort: string,
+    currentRating?: number,
+  ): Promise<{ count: number; error?: string }> {
     try {
       const points = await PuddleFarmService.getRatings(puddlePlayerId, charShort, BACKFILL_GAME_LIMIT);
       if (points === null) {
@@ -219,10 +246,15 @@ export const RankTrackingService = {
       await RankTrackingService.storeObservations(puddlePlayerId, charShort, points);
       // 履歴の最新値が現在レートとずれている場合に備えて現在値も補完
       try {
-        const player = await PuddleFarmService.getPlayer(puddlePlayerId);
-        const r = player?.ratings.find(x => x.char_short.toUpperCase() === charShort.toUpperCase());
-        if (r && Number.isFinite(r.rating) && r.rating !== 0) {
-          await RankTrackingService.storeCurrentRating(puddlePlayerId, charShort, r.rating);
+        let rating = currentRating;
+        if (rating === undefined) {
+          const player = await PuddleFarmService.getPlayer(puddlePlayerId);
+          rating = player?.ratings.find(x => x.char_short.toUpperCase() === charShort.toUpperCase())?.rating;
+        }
+        if (rating !== undefined && Number.isFinite(rating) && rating !== 0) {
+          await RankTrackingService.storeCurrentRating(
+            puddlePlayerId, charShort, rating, points.map(p => p.rating),
+          );
         }
       } catch (err) {
         console.warn(`[RankTracking] Current rating fetch failed for ${puddlePlayerId}/${charShort}:`, err);
