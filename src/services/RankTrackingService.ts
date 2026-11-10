@@ -150,15 +150,64 @@ export const RankTrackingService = {
     const result = await db.execute({ sql, args });
     const pairs = result.rows as unknown as { puddle_player_id: string; char_short: string }[];
 
+    // 同一プレイヤーの /player 呼び出しを 1 回にまとめるためグループ化
+    const byPlayer = new Map<string, string[]>();
     for (const { puddle_player_id, char_short } of pairs) {
+      const id = String(puddle_player_id);
+      const list = byPlayer.get(id) ?? [];
+      list.push(char_short);
+      byPlayer.set(id, list);
+    }
+
+    for (const [playerId, chars] of byPlayer) {
+      // 1) 試合履歴ベースのレート(/ratings)。puddle.farm が取り込んだリプレイ分のみ。
+      for (const charShort of chars) {
+        try {
+          const points = await PuddleFarmService.getRatings(playerId, charShort, HOURLY_GAME_LIMIT);
+          if (points !== null) await RankTrackingService.storeObservations(playerId, charShort, points);
+          else console.warn(`[RankTracking] /ratings returned no data for ${playerId}/${charShort}`);
+        } catch (err) {
+          console.error(`[RankTracking] Failed to fetch ratings ${playerId}/${charShort}:`, err);
+        }
+      }
+
+      // 2) 現在レート(/player)。/ratings はリプレイが取り込まれた試合しか含まず、
+      //    最新値が遅れる/欠けることがあるため、puddle.farm 本家グラフと同様に
+      //    現在値を「取得時刻」の観測として補完する(直近の保存値と異なる場合のみ)。
       try {
-        const points = await PuddleFarmService.getRatings(puddle_player_id, char_short, HOURLY_GAME_LIMIT);
-        if (points !== null) await RankTrackingService.storeObservations(puddle_player_id, char_short, points);
+        const player = await PuddleFarmService.getPlayer(playerId);
+        if (player) {
+          for (const charShort of chars) {
+            const r = player.ratings.find(x => x.char_short.toUpperCase() === charShort.toUpperCase());
+            if (!r || !Number.isFinite(r.rating) || r.rating === 0) continue;
+            await RankTrackingService.storeCurrentRating(playerId, charShort, r.rating);
+          }
+        }
       } catch (err) {
-        console.error(`[RankTracking] Failed to fetch ${puddle_player_id}/${char_short}:`, err);
+        console.error(`[RankTracking] Failed to fetch player ${playerId}:`, err);
       }
       await sleep(1000);
     }
+  },
+
+  async getLatestObservation(puddlePlayerId: string, charShort: string): Promise<RatingObservation | null> {
+    const db = getDatabase();
+    const result = await db.execute({
+      sql: `SELECT * FROM rating_observations
+            WHERE puddle_player_id = ? AND char_short = ?
+            ORDER BY observed_at DESC LIMIT 1`,
+      args: [puddlePlayerId, charShort],
+    });
+    return result.rows.length > 0 ? (result.rows[0] as unknown as RatingObservation) : null;
+  },
+
+  async storeCurrentRating(puddlePlayerId: string, charShort: string, rating: number): Promise<boolean> {
+    const latest = await RankTrackingService.getLatestObservation(puddlePlayerId, charShort);
+    if (latest && Number(latest.rating) === rating) return false;
+    await RankTrackingService.storeObservations(puddlePlayerId, charShort, [
+      { timestamp: new Date().toISOString(), rating },
+    ]);
+    return true;
   },
 
   async backfillPlayer(puddlePlayerId: string, charShort: string): Promise<{ count: number; error?: string }> {
@@ -168,6 +217,16 @@ export const RankTrackingService = {
         return { count: 0, error: 'puddle.farm API からデータを取得できませんでした' };
       }
       await RankTrackingService.storeObservations(puddlePlayerId, charShort, points);
+      // 履歴の最新値が現在レートとずれている場合に備えて現在値も補完
+      try {
+        const player = await PuddleFarmService.getPlayer(puddlePlayerId);
+        const r = player?.ratings.find(x => x.char_short.toUpperCase() === charShort.toUpperCase());
+        if (r && Number.isFinite(r.rating) && r.rating !== 0) {
+          await RankTrackingService.storeCurrentRating(puddlePlayerId, charShort, r.rating);
+        }
+      } catch (err) {
+        console.warn(`[RankTracking] Current rating fetch failed for ${puddlePlayerId}/${charShort}:`, err);
+      }
       return { count: points.length };
     } catch (err: any) {
       console.error(`[RankTracking] Backfill failed for ${puddlePlayerId}/${charShort}:`, err);

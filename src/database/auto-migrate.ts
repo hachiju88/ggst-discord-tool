@@ -1,4 +1,5 @@
 import { getDatabase } from './index';
+import { normalizeTimestamp } from '../services/PuddleFarmService';
 
 /**
  * 起動時に自動的に必要なマイグレーションを実行
@@ -393,6 +394,37 @@ export async function autoMigrate() {
         await db.execute({ sql: 'ALTER TABLE rating_observations_new RENAME TO rating_observations' })
         await db.execute({ sql: 'CREATE INDEX IF NOT EXISTS idx_obs_player_char ON rating_observations(puddle_player_id, char_short)' })
         console.log('✅ rating_observations.puddle_player_id migrated to TEXT')
+      }
+    }
+
+    // rating_observations.observed_at を ISO 8601 UTC (…T…Z) に正規化。
+    // 旧実装は puddle.farm の "YYYY-MM-DD HH:MM:SS" をそのまま保存しており、
+    // 期間フィルタ(ISO 文字列との比較)やローカル時刻解釈で表示がずれていた。
+    {
+      const legacy = await db.execute({
+        sql: "SELECT puddle_player_id, char_short, observed_at, rating FROM rating_observations WHERE observed_at NOT LIKE '%Z'",
+      })
+      if (legacy.rows.length > 0) {
+        console.log(`Normalizing ${legacy.rows.length} rating_observations timestamps...`)
+        const stmts: { sql: string; args: any[] }[] = []
+        for (const row of legacy.rows as any[]) {
+          const normalized = normalizeTimestamp(String(row.observed_at))
+          if (normalized) {
+            stmts.push({
+              sql: 'INSERT OR IGNORE INTO rating_observations (puddle_player_id, char_short, observed_at, rating) VALUES (?, ?, ?, ?)',
+              args: [String(row.puddle_player_id), String(row.char_short), normalized, Number(row.rating)],
+            })
+          }
+          stmts.push({
+            sql: 'DELETE FROM rating_observations WHERE puddle_player_id = ? AND char_short = ? AND observed_at = ?',
+            args: [String(row.puddle_player_id), String(row.char_short), String(row.observed_at)],
+          })
+        }
+        const CHUNK = 500
+        for (let i = 0; i < stmts.length; i += CHUNK) {
+          await db.batch(stmts.slice(i, i + CHUNK), 'write')
+        }
+        console.log('✅ rating_observations timestamps normalized')
       }
     }
 
