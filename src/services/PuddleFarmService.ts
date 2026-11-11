@@ -1,4 +1,5 @@
 import JSONbig from 'json-bigint';
+import { normalizeTimestamp } from '../utils/timestamp';
 
 const BASE_URL = 'https://puddle.farm/api';
 const UA = 'ggst-discord-tool';
@@ -53,16 +54,18 @@ export type SearchResult = {
   id: string;
   name: string;
   rating: number;
-  deviation: number;
   char_short: string;
   char_long: string;
 };
 
+// /player/{id} の ratings 要素。API 上のキャラ名フィールドは `character` だが、
+// 他の型と揃えるため getPlayer 内で char_long にも詰め替えている。
 export type PlayerRating = {
   char_short: string;
   char_long: string;
+  character?: string;
   rating: number;
-  deviation: number;
+  match_count?: number;
 };
 
 export type PlayerResponse = {
@@ -70,7 +73,6 @@ export type PlayerResponse = {
   name: string;
   ratings: PlayerRating[];
   platform: string;
-  status: string;
   top_global: number;
 };
 
@@ -104,12 +106,33 @@ export const PuddleFarmService = {
     await sleep(REQUEST_DELAY_MS);
     const result = await apiFetch<PlayerResponse>(`/player/${playerId}`);
     if (!result) return null;
-    return { ...result, id: String(result.id) };
+    const ratings = Array.isArray(result.ratings) ? result.ratings : [];
+    return {
+      ...result,
+      id: String(result.id),
+      ratings: ratings.map(r => ({
+        ...r,
+        char_long: r.char_long || r.character || r.char_short,
+        rating: Number(r.rating),
+      })),
+    };
   },
 
+  // 第3引数は日数ではなく「直近何試合分か」の LIMIT(puddle.farm の SQL で LIMIT $3)。
   async getRatings(playerId: string, charShort: string, days: number): Promise<RatingPoint[] | null> {
     await sleep(REQUEST_DELAY_MS);
-    return apiFetch<RatingPoint[]>(`/ratings/${playerId}/${charShort}/${days}`);
+    const result = await apiFetch<RatingPoint[]>(`/ratings/${playerId}/${charShort}/${days}`);
+    if (!result) return null;
+    if (!Array.isArray(result)) return [];
+    const points: RatingPoint[] = [];
+    for (const p of result) {
+      const timestamp = normalizeTimestamp(p?.timestamp);
+      const rating = Number(p?.rating);
+      if (timestamp && Number.isFinite(rating) && rating !== 0) {
+        points.push({ timestamp, rating });
+      }
+    }
+    return points;
   },
 
   async getCharacters(): Promise<[string, string][]> {

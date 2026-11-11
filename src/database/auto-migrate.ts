@@ -1,4 +1,5 @@
 import { getDatabase } from './index';
+import { normalizeTimestamp } from '../utils/timestamp';
 
 /**
  * 起動時に自動的に必要なマイグレーションを実行
@@ -406,6 +407,63 @@ export async function autoMigrate() {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )` })
       console.log('✅ system_settings table created')
+    }
+
+    // rating_observations.observed_at を ISO 8601 UTC (…T…Z) に正規化(一度だけ実行)。
+    // 旧実装は puddle.farm の "YYYY-MM-DD HH:MM:SS" をそのまま保存しており、
+    // 期間フィルタ(ISO 文字列との比較)やローカル時刻解釈で表示がずれていた。
+    {
+      const MIGRATION_KEY = 'migration.rating_observations_iso_timestamp'
+      const done = await db.execute({
+        sql: 'SELECT 1 FROM system_settings WHERE key = ?',
+        args: [MIGRATION_KEY],
+      })
+      if (done.rows.length === 0) {
+        const PAGE = 500
+        let normalizedCount = 0
+        const skipped: string[] = []
+        // 変換できない行は残すため、それらを除外しつつページ単位で処理する
+        for (;;) {
+          const placeholders = skipped.map(() => '?').join(',')
+          const page = await db.execute({
+            sql: `SELECT puddle_player_id, char_short, observed_at, rating FROM rating_observations
+                  WHERE observed_at NOT LIKE '%Z'
+                  ${skipped.length > 0 ? `AND observed_at NOT IN (${placeholders})` : ''}
+                  LIMIT ?`,
+            args: [...skipped, PAGE],
+          })
+          if (page.rows.length === 0) break
+          const stmts: { sql: string; args: any[] }[] = []
+          for (const row of page.rows as any[]) {
+            const raw = String(row.observed_at)
+            const normalized = normalizeTimestamp(raw)
+            if (!normalized) {
+              if (!skipped.includes(raw)) skipped.push(raw)
+              continue
+            }
+            const key = [String(row.puddle_player_id), String(row.char_short)]
+            stmts.push({
+              sql: 'INSERT OR IGNORE INTO rating_observations (puddle_player_id, char_short, observed_at, rating) VALUES (?, ?, ?, ?)',
+              args: [...key, normalized, Number(row.rating)],
+            })
+            stmts.push({
+              sql: 'DELETE FROM rating_observations WHERE puddle_player_id = ? AND char_short = ? AND observed_at = ?',
+              args: [...key, raw],
+            })
+            normalizedCount++
+          }
+          if (stmts.length > 0) await db.batch(stmts, 'write')
+        }
+        if (skipped.length > 0) {
+          console.warn(`⚠️ rating_observations: ${skipped.length} timestamp format(s) could not be normalized and were left as-is`, skipped.slice(0, 5))
+        }
+        await db.execute({
+          sql: `INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+          args: [MIGRATION_KEY, 'done'],
+        })
+        console.log(`✅ rating_observations timestamps normalized (${normalizedCount} rows)`)
+      }
     }
 
     // 簡単VC募集: 自動作成した一時VCの管理テーブル
