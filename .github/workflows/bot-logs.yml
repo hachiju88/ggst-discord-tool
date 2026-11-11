@@ -3,7 +3,11 @@ name: Fetch bot logs
 # EC2 上の bot コンテナのログを手動で取得する(再デプロイ・再起動はしない)。
 # リポジトリは public のため Actions ログは誰でも閲覧できる点に注意。
 # 既定ではレート追跡関連の行だけに絞り込む。
+# 起動方法: Actions 画面から手動実行、または ops/fetch-logs ブランチへの push
 on:
+  push:
+    branches:
+      - ops/fetch-logs
   workflow_dispatch:
     inputs:
       pattern:
@@ -22,14 +26,15 @@ jobs:
       - name: Fetch logs via SSH
         uses: appleboy/ssh-action@v1.0.3
         env:
-          PATTERN: ${{ github.event.inputs.pattern }}
-          LINES: ${{ github.event.inputs.lines }}
+          PATTERN: ${{ github.event.inputs.pattern || 'PuddleFarm|RankTracking|RankScheduler|rating_observations|puddle\.farm|grank|Error|error' }}
+          LINES: ${{ github.event.inputs.lines || '300' }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           envs: PATTERN,LINES
           script: |
+            [ -n "$PATTERN" ] || PATTERN='PuddleFarm|RankTracking|RankScheduler'
             case "$LINES" in ''|*[!0-9]*) LINES=200 ;; esac
             echo "=== container ==="
             docker ps -a --filter name=ggst-bot --format '{{.Names}} {{.Status}} (created {{.CreatedAt}})'
