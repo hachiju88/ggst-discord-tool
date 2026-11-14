@@ -256,5 +256,6 @@ CREATE INDEX IF NOT EXISTS idx_obs_player_char ON rating_observations(puddle_pla
 CREATE TABLE IF NOT EXISTS rank_post_config (
   guild_id TEXT PRIMARY KEY,
   channel_id TEXT NOT NULL,
+  message_id TEXT,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

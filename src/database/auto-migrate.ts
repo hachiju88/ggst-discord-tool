@@ -335,6 +335,16 @@ export async function autoMigrate() {
       console.log('✅ rank_post_config table created')
     }
 
+    // リンクパネル化に伴い、最後に投稿したパネルのメッセージIDを保持する列を追加
+    // (新規追加時の再投稿で古いパネルを削除するため)
+    {
+      const rpcInfo = await db.execute({ sql: 'PRAGMA table_info(rank_post_config)' })
+      if (!rpcInfo.rows.some((r: any) => r.name === 'message_id')) {
+        await db.execute({ sql: 'ALTER TABLE rank_post_config ADD COLUMN message_id TEXT' })
+        console.log('✅ rank_post_config.message_id column added')
+      }
+    }
+
     // char_long カラムが古い tracked_players に存在しない場合の追加
     if (tableNames.includes('tracked_players')) {
       const tpInfo = await db.execute({ sql: 'PRAGMA table_info(tracked_players)' })

@@ -94,13 +94,27 @@ export const RankTrackingService = {
     });
   },
 
-  async getPostConfig(guildId: string): Promise<{ channel_id: string } | null> {
+  async getPostConfig(guildId: string): Promise<{ channel_id: string; message_id: string | null } | null> {
     const db = getDatabase();
     const result = await db.execute({
-      sql: 'SELECT channel_id FROM rank_post_config WHERE guild_id = ?',
+      sql: 'SELECT channel_id, message_id FROM rank_post_config WHERE guild_id = ?',
       args: [guildId],
     });
-    return result.rows.length > 0 ? (result.rows[0] as unknown as { channel_id: string }) : null;
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0] as any;
+    return { channel_id: String(row.channel_id), message_id: row.message_id ? String(row.message_id) : null };
+  },
+
+  // リンクパネルとして最後に投稿したメッセージを記録(投稿先チャンネルも同時に更新)
+  async setPanelMessage(guildId: string, channelId: string, messageId: string): Promise<void> {
+    const db = getDatabase();
+    await db.execute({
+      sql: `INSERT INTO rank_post_config (guild_id, channel_id, message_id, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id,
+              message_id = excluded.message_id, updated_at = CURRENT_TIMESTAMP`,
+      args: [guildId, channelId, messageId],
+    });
   },
 
   async getAllPostConfigs(): Promise<{ guild_id: string; channel_id: string }[]> {

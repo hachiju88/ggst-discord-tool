@@ -1,3 +1,5 @@
+// 【停止中・現在未使用】puddle.farm の API アクセス停止に伴い、レート追跡は休止中。
+// 復活に備えてコードを残している(現在の /grank は LinkPanelService のリンク集)。
 import {
   EmbedBuilder,
   AttachmentBuilder,

@@ -3,7 +3,9 @@ import express from 'express';
 import { createClient, registerCommands } from './bot';
 import { initDatabase, closeDatabase } from './database';
 import { autoMigrate } from './database/auto-migrate';
-import { startScheduler } from './services/RankScheduler';
+// 【停止中】ランク追跡の毎時取得・日次投稿。puddle.farm が EC2 からの API アクセスを
+// 403 で拒否するようになったため停止。復活時は下記と clientReady 内のコメントを戻す。
+// import { startScheduler } from './services/RankScheduler';
 import { startRoleStatsScheduler } from './services/RoleStatsScheduler';
 import { startTempChannelSweeper, rearmReservedStatusFinalizers } from './services/VoiceRecruitService';
 
@@ -49,12 +51,13 @@ async function main() {
     const client = createClient();
 
     // ランクスケジューラはクライアント準備完了後に開始
-    let stopRankScheduler: (() => void) | null = null;
+    // let stopRankScheduler: (() => void) | null = null;  // 【停止中】ランク追跡
     let stopRoleStatsScheduler: (() => void) | null = null;
     let stopTempChannelSweeper: (() => void) | null = null;
     client.once('clientReady', () => {
-      stopRankScheduler = startScheduler(client);
-      console.log('✅ Rank scheduler started');
+      // 【停止中】ランク追跡スケジューラ(毎時取得・日次投稿)
+      // stopRankScheduler = startScheduler(client);
+      // console.log('✅ Rank scheduler started');
       stopRoleStatsScheduler = startRoleStatsScheduler(client);
       console.log('✅ Role stats scheduler started');
       // 一時VCの掃除を開始。起動直後の初回掃除も定期掃除もすべて two-strike で
@@ -73,7 +76,7 @@ async function main() {
     // Graceful shutdown
     const shutdown = async () => {
       console.log('Shutting down...');
-      stopRankScheduler?.();
+      // stopRankScheduler?.();  // 【停止中】ランク追跡
       stopRoleStatsScheduler?.();
       stopTempChannelSweeper?.();
       server.close();
