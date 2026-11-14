@@ -17,14 +17,20 @@ import type {
   GuildMember,
 } from 'discord.js';
 import { RankTrackingService } from '../services/RankTrackingService';
-import { buildLinkPanel, repostLinkPanel, refreshLinkPanel, linkButtonLabel } from '../services/LinkPanelService';
+import {
+  buildLinkPanel,
+  repostLinkPanel,
+  refreshLinkPanel,
+  replacePanelMessage,
+  runExclusive,
+  linkButtonLabel,
+} from '../services/LinkPanelService';
 import {
   PUDDLE_CHARACTERS,
   characterDisplayName,
   isPuddleCharCode,
   parsePuddlePlayerInput,
 } from '../constants/puddle-characters';
-import { truncate } from '../utils/text';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // /grank は現在「puddle.farm プレイヤーリンク集」として動作する。
@@ -61,23 +67,25 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   }
 
   await interaction.deferReply();
-  const payload = await buildLinkPanel(guildId);
-  const message = await interaction.editReply(payload);
+  try {
+    const payload = await buildLinkPanel(guildId);
+    const message = await interaction.editReply(payload);
 
-  // 管理者が実行した場合(または投稿先が未設定の場合)は、このメッセージを
-  // 「現在のパネル」として記録する。新規追加時はこのチャンネルに再投稿され、
-  // 記録済みの古いパネルは削除される。閲覧目的の一般ユーザーの実行では変えない。
-  const member = interaction.member as GuildMember | null;
-  const isAdmin = !!member?.permissions.has(PermissionFlagsBits.ManageGuild);
-  const config = await RankTrackingService.getPostConfig(guildId);
-  if (isAdmin || !config) {
-    if (config?.message_id && config.message_id !== message.id) {
-      const oldChannel = await interaction.client.channels.fetch(config.channel_id).catch(() => null);
-      if (oldChannel && 'messages' in oldChannel) {
-        await oldChannel.messages.delete(config.message_id).catch(() => { /* 削除済み等は無視 */ });
+    // 管理者が実行した場合(または投稿先が未設定の場合)は、このメッセージを
+    // 「現在のパネル」として記録し、記録済みの古いパネルは削除する。
+    // 新規追加時はこのチャンネルに再投稿される。一般ユーザーの閲覧目的の実行では変えない。
+    const member = interaction.member as GuildMember | null;
+    const isAdmin = !!member?.permissions.has(PermissionFlagsBits.ManageGuild);
+    await runExclusive(guildId, async () => {
+      const config = await RankTrackingService.getPostConfig(guildId);
+      if (isAdmin || !config) {
+        await replacePanelMessage(interaction.client, guildId, interaction.channelId, message.id);
       }
-    }
-    await RankTrackingService.setPanelMessage(guildId, interaction.channelId, message.id);
+    });
+  } catch (err) {
+    console.error('[grank] execute failed:', err);
+    await interaction.editReply({ content: '❌ パネルの表示中にエラーが発生しました。時間をおいて再度お試しください。' })
+      .catch(() => { /* 応答ずみ等は無視 */ });
   }
 }
 
@@ -139,7 +147,7 @@ export async function handleButtonInteract(interaction: ButtonInteraction): Prom
       .addOptions(
         tracked.slice(0, 25).map(tp =>
           new StringSelectMenuOptionBuilder()
-            .setLabel(truncate(linkButtonLabel(tp), 100))
+            .setLabel(linkButtonLabel(tp))
             .setDescription('登録者: 本人または管理者のみ解除可')
             .setValue(String(tp.id)),
         ),
@@ -167,31 +175,42 @@ export async function handleSelectMenu(interaction: StringSelectMenuInteraction)
 
   // grank:remove:select
   if (parts[0] === 'grank' && parts[1] === 'remove' && parts[2] === 'select') {
-    const trackId = parseInt(interaction.values[0], 10);
-    const tp = await RankTrackingService.getTracking(trackId);
-    if (!tp || tp.guild_id !== guildId) {
-      await interaction.update({ content: '❌ 対象が見つかりません。', components: [] });
-      return;
-    }
-    const member = interaction.member as GuildMember | null;
-    const canRemove =
-      interaction.user.id === tp.added_by_discord_id ||
-      member?.permissions.has(PermissionFlagsBits.ManageGuild);
-    if (!canRemove) {
-      await interaction.update({
-        content: '❌ 解除できるのは登録した本人またはサーバー管理者のみです。',
+    // 解除後のパネル更新で DB / Discord を何度も往復するため、3秒の応答期限に
+    // 間に合うよう先に deferUpdate しておく。
+    await interaction.deferUpdate();
+    try {
+      const trackId = parseInt(interaction.values[0], 10);
+      const tp = await RankTrackingService.getTracking(trackId);
+      if (!tp || tp.guild_id !== guildId) {
+        await interaction.editReply({ content: '❌ 対象が見つかりません。', components: [] });
+        return;
+      }
+      const member = interaction.member as GuildMember | null;
+      const canRemove =
+        interaction.user.id === tp.added_by_discord_id ||
+        member?.permissions.has(PermissionFlagsBits.ManageGuild);
+      if (!canRemove) {
+        await interaction.editReply({
+          content: '❌ 解除できるのは登録した本人またはサーバー管理者のみです。',
+          components: [],
+        });
+        return;
+      }
+      // 解除時は再投稿せず、既存パネルをその場で更新する
+      const refreshed = await runExclusive(guildId, async () => {
+        await RankTrackingService.removeTracking(trackId);
+        return refreshLinkPanel(interaction.client, guildId).catch(() => false);
+      });
+      await interaction.editReply({
+        content: `✅ **${linkButtonLabel(tp)}** を解除しました。` +
+          (refreshed ? '\nパネルを更新しました。' : '\n`/grank` でパネルを表示し直してください。'),
         components: [],
       });
-      return;
+    } catch (err) {
+      console.error('[grank] remove failed:', err);
+      await interaction.editReply({ content: '❌ 解除中にエラーが発生しました。時間をおいて再度お試しください。', components: [] })
+        .catch(() => { /* 応答ずみ等は無視 */ });
     }
-    await RankTrackingService.removeTracking(trackId);
-    // 解除時は再投稿せず、既存パネルをその場で更新する
-    const refreshed = await refreshLinkPanel(interaction.client, guildId).catch(() => false);
-    await interaction.update({
-      content: `✅ **${linkButtonLabel(tp)}** を解除しました。` +
-        (refreshed ? '\nパネルを更新しました。' : '\n`/grank` でパネルを表示し直してください。'),
-      components: [],
-    });
     return;
   }
 
@@ -213,14 +232,6 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
 
   let alreadyAdded = false;
   try {
-    const count = await RankTrackingService.getGuildTrackingCount(guildId);
-    if (count >= MAX_TRACKED_PER_GUILD) {
-      await interaction.editReply({
-        content: `❌ 登録上限 (${MAX_TRACKED_PER_GUILD}件) に達しています。先に不要なプレイヤーを解除してください。`,
-      });
-      return;
-    }
-
     const rawUrl = interaction.fields.getTextInputValue('player_url');
     const displayName = interaction.fields.getTextInputValue('display_name').trim();
     const rawChar = (interaction.fields.getTextInputValue('char_short') ?? '').trim().toUpperCase();
@@ -251,17 +262,31 @@ export async function handleModalSubmit(interaction: ModalSubmitInteraction): Pr
     }
 
     const charName = characterDisplayName(charShort);
-    const result = await RankTrackingService.addTracking(
-      guildId, parsed.playerId, displayName, charShort, charName, interaction.user.id,
-    );
-    if (result === 'duplicate') {
+    // 上限チェック → 登録 → 再投稿 をサーバー単位で直列化(同時追加で上限超過・
+    // パネルの取り残しが起きないように)
+    const outcome = await runExclusive(guildId, async () => {
+      const count = await RankTrackingService.getGuildTrackingCount(guildId);
+      if (count >= MAX_TRACKED_PER_GUILD) return { kind: 'full' as const };
+      const result = await RankTrackingService.addTracking(
+        guildId, parsed.playerId, displayName, charShort, charName, interaction.user.id,
+      );
+      if (result === 'duplicate') return { kind: 'duplicate' as const };
+      alreadyAdded = true;
+      // 新規追加時のみパネルを再投稿(古いパネルは削除)
+      const reposted = await repostLinkPanel(interaction.client, guildId, interaction.channelId ?? undefined);
+      return { kind: 'added' as const, reposted };
+    });
+    if (outcome.kind === 'full') {
+      await interaction.editReply({
+        content: `❌ 登録上限 (${MAX_TRACKED_PER_GUILD}件) に達しています。先に不要なプレイヤーを解除してください。`,
+      });
+      return;
+    }
+    if (outcome.kind === 'duplicate') {
       await interaction.editReply({ content: `ℹ️ このプレイヤー(${charName})はすでに登録されています。` });
       return;
     }
-    alreadyAdded = true;
-
-    // 新規追加時のみパネルを再投稿(古いパネルは削除)
-    const reposted = await repostLinkPanel(interaction.client, guildId, interaction.channelId ?? undefined);
+    const reposted = outcome.reposted;
     await interaction.editReply({
       content: `✅ **${displayName} / ${charName}** を追加しました。` +
         (reposted ? '\nパネルを再投稿しました。' : '\n⚠️ パネルを投稿できませんでした。`/grank` で表示してください。'),

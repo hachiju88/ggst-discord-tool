@@ -53,7 +53,11 @@ export function characterDisplayName(charShort: string, fallback?: string): stri
 //     210808125103331848                        (ID のみ)
 export function parsePuddlePlayerInput(input: string): { playerId: string; charShort?: string } | null {
   const s = input.trim();
-  const m = s.match(/puddle\.farm\/player\/(\d{5,25})(?:\/([A-Za-z]{2}))?/);
+  // ホストは puddle.farm 限定、ID・キャラコードの後ろは末尾の / やクエリ(? #)のみ許可
+  // (長すぎる ID や 3文字以上のコードを途中で切って誤登録しないため)
+  const m = s.match(
+    /^(?:https?:\/\/)?(?:www\.)?puddle\.farm\/player\/(\d{5,25})(?:\/([A-Za-z]{2}))?\/?(?:[?#].*)?$/,
+  );
   if (m) return { playerId: m[1], charShort: m[2]?.toUpperCase() };
   if (/^\d{5,25}$/.test(s)) return { playerId: s };
   return null;

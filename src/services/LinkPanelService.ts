@@ -3,9 +3,8 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ChannelType,
 } from 'discord.js';
-import type { Client, TextChannel, NewsChannel } from 'discord.js';
+import type { Client, Channel } from 'discord.js';
 import { RankTrackingService, type TrackedPlayer } from './RankTrackingService';
 import { characterDisplayName } from '../constants/puddle-characters';
 import { truncate, escapeMarkdown } from '../utils/text';
@@ -83,35 +82,64 @@ export async function buildLinkPanel(guildId: string): Promise<LinkPanelPayload>
   return { embeds: [embed], components: [...linkRows, controlRow] };
 }
 
-async function fetchPostableChannel(client: Client, channelId: string): Promise<TextChannel | NewsChannel | null> {
+// パネルを投稿・編集できるサーバー内のテキスト系チャンネル(通常/アナウンス/スレッド/
+// ボイスチャンネルのテキストチャット等)を取得する。
+type PanelChannel = Extract<Channel, { send: unknown; messages: unknown }>;
+
+async function fetchPanelChannel(client: Client, channelId: string): Promise<PanelChannel | null> {
   try {
     const ch = await client.channels.fetch(channelId);
-    if (ch && (ch.type === ChannelType.GuildText || ch.type === ChannelType.GuildAnnouncement)) {
-      return ch as TextChannel | NewsChannel;
-    }
+    if (ch && ch.isTextBased() && !ch.isDMBased()) return ch as PanelChannel;
   } catch {
     // 権限なし・削除済みなど
   }
   return null;
 }
 
-// 前回のパネルを削除して、最新のパネルを投稿し直す(新規追加時に使用)。
+// 同一サーバーでのパネル差し替え・登録処理を直列化する(同時追加で古いパネルが
+// 取り残されたり、登録上限を超えたりする競合を防ぐ)。単一プロセス前提のメモリ内ロック。
+const guildQueues = new Map<string, Promise<unknown>>();
+
+export function runExclusive<T>(guildId: string, task: () => Promise<T>): Promise<T> {
+  const prev = guildQueues.get(guildId) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(task);
+  const tail = next.catch(() => undefined);
+  guildQueues.set(guildId, tail);
+  void tail.then(() => {
+    if (guildQueues.get(guildId) === tail) guildQueues.delete(guildId);
+  });
+  return next;
+}
+
+// 「現在のパネル」を newMessage に差し替える: 先に新しいパネルを記録してから
+// 古いパネルを削除する(削除だけ成功してパネルが消える事態を避けるため)。
+export async function replacePanelMessage(
+  client: Client,
+  guildId: string,
+  channelId: string,
+  messageId: string,
+): Promise<void> {
+  const old = await RankTrackingService.getPostConfig(guildId);
+  await RankTrackingService.setPanelMessage(guildId, channelId, messageId);
+  if (old?.message_id && old.message_id !== messageId) {
+    const oldChannel = await fetchPanelChannel(client, old.channel_id);
+    await oldChannel?.messages.delete(old.message_id).catch(() => { /* 削除済み等は無視 */ });
+  }
+}
+
+// 最新のパネルを投稿し直し、前回のパネルを削除する(新規追加時に使用)。
 // 投稿先は登録済みの投稿先チャンネル、未設定/投稿不可なら fallbackChannelId。
+// 呼び出し側で runExclusive の中から呼ぶこと。
 export async function repostLinkPanel(client: Client, guildId: string, fallbackChannelId?: string): Promise<boolean> {
   const config = await RankTrackingService.getPostConfig(guildId);
 
-  let channel = config ? await fetchPostableChannel(client, config.channel_id) : null;
-  if (!channel && fallbackChannelId) channel = await fetchPostableChannel(client, fallbackChannelId);
+  let channel = config ? await fetchPanelChannel(client, config.channel_id) : null;
+  if (!channel && fallbackChannelId) channel = await fetchPanelChannel(client, fallbackChannelId);
   if (!channel) return false;
-
-  if (config?.message_id) {
-    const oldChannel = config.channel_id === channel.id ? channel : await fetchPostableChannel(client, config.channel_id);
-    await oldChannel?.messages.delete(config.message_id).catch(() => { /* 削除済み等は無視 */ });
-  }
 
   const payload = await buildLinkPanel(guildId);
   const message = await channel.send(payload);
-  await RankTrackingService.setPanelMessage(guildId, channel.id, message.id);
+  await replacePanelMessage(client, guildId, channel.id, message.id);
   return true;
 }
 
@@ -119,7 +147,7 @@ export async function repostLinkPanel(client: Client, guildId: string, fallbackC
 export async function refreshLinkPanel(client: Client, guildId: string): Promise<boolean> {
   const config = await RankTrackingService.getPostConfig(guildId);
   if (!config?.message_id) return false;
-  const channel = await fetchPostableChannel(client, config.channel_id);
+  const channel = await fetchPanelChannel(client, config.channel_id);
   if (!channel) return false;
   try {
     const message = await channel.messages.fetch(config.message_id);
