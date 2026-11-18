@@ -9,7 +9,20 @@ npm run dev      # http://localhost:4321 で確認
 npm run build    # dist/ に出力
 ```
 
-## 記事の書き方
+## サイト上から記事を書く
+
+サイドバーの「＋ 記事を書く」、各一覧の「＋ 記事を書く」、記事ページの「編集」からフォームを開けます。ログインした人なら誰でも作成・編集・削除できます。
+
+- 保存すると GitHub の `main` に記事ファイル（`.md`）としてコミットされ、Cloudflare Pages が自動で作り直します（**反映まで1〜2分**）。
+- 動画はURLを貼るか、ファイル（mp4 / webm / mov、**10MBまで**）をアップロード。アップロードした動画は R2 に保存され、記事から外したり記事を削除すると一緒に消えます。
+- コンボ・起き攻め・セットプレイ・キャラ対策・Q&A では、既存の練習方法を選ぶか、練習方法の記事をその場で同時に作れます。
+- URL（カテゴリ・立ち位置・URL名）を変えると、コメント・いいね・お気に入りは新しいURLへ引き継がれます。練習方法の記事はURLを変えられません。
+- 同じ記事を2人が同時に編集した場合、後から保存した方に「読み込み直してください」と出ます。
+- 誰がいつ変更したかは D1 の `article_log` テーブルに残ります（GitHub のコミットにはメールアドレスを入れません）。
+- 本文に `<script>` や `<iframe>` などのHTMLは書けません。
+- フォームで編集できるのは `.md` の記事です（一覧ページなどの `.mdx` は対象外）。
+
+## 記事の書き方（ファイルで直接）
 
 `src/content/docs/<カテゴリ>/` に `.md`（コンボ表示を使うなら `.mdx`）を置きます。
 
@@ -93,16 +106,31 @@ import Combo from '../../../../components/Combo.astro';
 
 すべてCloudflareのダッシュボード上で設定します（`wrangler.toml` は置かない）。
 
-1. **D1**：ストレージとデータベース → D1 → `bridget-wiki` を作成 → コンソールで `functions/schema.sql` を実行（コメント・いいね・お気に入りのテーブル）
-2. **Pages**：Workers & Pages → 作成 → Pages → Gitに接続 → このリポジトリ
+1. **D1**：ストレージとデータベース → D1 → `bridget-wiki` を作成 → コンソールで `functions/schema.sql` の中身を全部実行
+2. **R2**：R2 オブジェクトストレージ → バケットを作成 → `bridget-wiki-media`
+3. **GitHub のトークン**：GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token
+   - Repository access: このリポジトリだけ
+   - Permissions: **Contents = Read and write**（ほかは不要）
+4. **Pages**：Workers & Pages → 作成 → Pages → Gitに接続 → このリポジトリ
    - フレームワーク: Astro / ビルドコマンド: `npm run build` / 出力: `dist` / ルートディレクトリ: `wiki`
    - 環境変数: `NODE_VERSION` = `22`
-3. **バインディング**：Pagesプロジェクト → 設定 → バインディング → D1 を変数名 `DB` で追加 → 再デプロイ
-4. **Access**：Zero Trust → Access → アプリケーション → セルフホスト
+5. **Pagesの設定 → 変数とシークレット**
+   - `GITHUB_REPO` = `hachiju88/ggst-discord-tool`（テキスト）
+   - `GITHUB_BRANCH` = `main`（テキスト）
+   - `GITHUB_TOKEN` = 3 で作ったトークン（**シークレット**）
+6. **Pagesの設定 → バインディング**
+   - D1 データベース：変数名 `DB` → `bridget-wiki`
+   - R2 バケット：変数名 `MEDIA` → `bridget-wiki-media`
+   - 追加したら「デプロイ」→ 最新の「…」→「デプロイを再試行」
+7. **Access**：Zero Trust → Access → アプリケーション → セルフホスト
    - ドメイン: `<プロジェクト名>.pages.dev` と `*.<プロジェクト名>.pages.dev`
    - ポリシー: 許可 / 見せたい人のメールアドレス / ログイン方法: ワンタイムPIN
 
-ログインした人のメールアドレスで、コメントの投稿者・いいね・お気に入りを区別します（画面には出ません）。自分のコメントだけ削除できます。
+ログインした人のメールアドレスで、コメントの投稿者・いいね・お気に入り・記事の変更者を区別します（画面には出ません）。
+
+### 無料枠の目安
+- R2（動画）：10GB まで無料。超えても 1GB あたり月 $0.015。配信の転送量は無料
+- Pages のビルド：月 500 回まで無料（記事を1回保存するごとに1回）
 
 ### 検索避け
 - 全ページに `<meta name="robots" content="noindex">`

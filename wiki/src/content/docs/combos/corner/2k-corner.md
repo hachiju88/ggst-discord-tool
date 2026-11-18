@@ -14,8 +14,6 @@ damage: 168
 difficulty: 2
 tags: [起き攻め直結]
 ---
-import Combo from '../../../../components/Combo.astro';
-
 :::note[サンプル]
 ルートはダミーです。
 :::

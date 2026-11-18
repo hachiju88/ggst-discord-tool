@@ -18,8 +18,6 @@ damage: 215
 difficulty: 3
 tags: [高火力, ヒット確認]
 ---
-import Combo from '../../../../components/Combo.astro';
-
 :::note[サンプル]
 ルートはダミーです。
 :::

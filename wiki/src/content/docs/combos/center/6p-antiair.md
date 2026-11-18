@@ -12,8 +12,6 @@ damage: 120
 difficulty: 2
 tags: [対空]
 ---
-import Combo from '../../../../components/Combo.astro';
-
 :::caution[サンプル]
 old扱いの見え方を確認するためのダミー記事です。
 :::

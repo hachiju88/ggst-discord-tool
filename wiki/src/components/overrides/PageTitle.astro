@@ -27,7 +27,12 @@ const isSplash = data.template === 'splash';
   cat && !isIndex && (
     <div class="title-meta">
       <Meta data={data} />
-      <Reactions page={route.id} />
+      <div class="title-actions">
+        <Reactions page={route.id} />
+        {route.entry.filePath?.endsWith('.md') && (
+          <a class="edit-link" href={`/edit/?id=${encodeURIComponent(route.id)}`}>編集</a>
+        )}
+      </div>
     </div>
   )
 }

@@ -52,6 +52,7 @@ export default defineConfig({
             { label: 'トップ', link: '/' },
             { label: '全記事から探す', link: '/articles/' },
             { label: '★ お気に入り', link: '/articles/?fav=1' },
+            { label: '＋ 記事を書く', link: '/edit/' },
           ],
         },
         simple('basics', '基本戦略'),

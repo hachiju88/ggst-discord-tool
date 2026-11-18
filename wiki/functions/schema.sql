@@ -16,3 +16,12 @@ CREATE TABLE IF NOT EXISTS reactions (
   PRIMARY KEY (page, user, kind)
 );
 CREATE INDEX IF NOT EXISTS idx_reactions_kind ON reactions(kind, page);
+
+-- フォームからの記事の作成・編集・削除の記録（誰がいつ変更したか）
+CREATE TABLE IF NOT EXISTS article_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  page TEXT NOT NULL,
+  action TEXT NOT NULL,
+  user TEXT NOT NULL,
+  at TEXT NOT NULL
+);

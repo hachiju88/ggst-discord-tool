@@ -135,7 +135,10 @@ const firstCombo = (d: (typeof docs)[number]) => {
     </div>
   </form>
 
-  <p class="count" aria-live="polite"><span data-count>{docs.length}</span> 件</p>
+  <div class="list-head">
+    <p class="count" aria-live="polite"><span data-count>{docs.length}</span> 件</p>
+    <a class="write-link" href={category ? `/edit/?category=${category}` : '/edit/'}>＋ 記事を書く</a>
+  </div>
 
   <ul class="cards">
     {

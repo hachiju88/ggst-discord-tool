@@ -16,8 +16,6 @@ damage: 248
 difficulty: 4
 tags: [高火力, テンション使用]
 ---
-import Combo from '../../../../components/Combo.astro';
-
 :::note[サンプル]
 ルートはダミーです。
 :::
