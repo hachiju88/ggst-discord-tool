@@ -113,7 +113,7 @@ const catLabel = (id: string) => CATEGORIES.find((c) => c.id === id.split('/')[0
         <li
           class:list={['card', { 'is-old': isOld(d.data) }]}
           data-old={isOld(d.data) ? '1' : '0'}
-          data-valid={d.data.since ? validVersions(d.data).join(' ') : '*'}
+          data-valid={validVersions(d.data)?.join(' ') ?? '*'}
           data-category={d.id.split('/')[0]}
           data-position={d.data.position ?? ''}
           data-starter={d.data.starter ?? ''}

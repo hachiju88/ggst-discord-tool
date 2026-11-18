@@ -1,8 +1,7 @@
 ---
 title: 中央 運び連携
 description: 中央から端へ押し込むセット（旧バージョン・サンプル記事）
-since: "2.00"
-until: "2.01"
+versions: ["2.00", "2.01"]
 position: center
 starter: 6K
 tags: [運び]

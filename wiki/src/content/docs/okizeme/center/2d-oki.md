@@ -1,7 +1,7 @@
 ---
 title: 中央 2D後の起き攻め
 description: 中央ダウンからの基本の択（サンプル記事）
-since: "2.00"
+versions: ["2.00", "2.01", "2.02"]
 position: center
 starter: 2D
 tags: [択]

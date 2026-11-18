@@ -24,28 +24,24 @@ export const POSITIONED: CategoryId[] = ['combos', 'okizeme', 'setplay'];
 
 export const POSITION_LABEL = { center: '画面中央', corner: '画面端' } as const;
 
-type VersionData = { since?: string; until?: string };
+type VersionData = { versions?: readonly string[] };
 
 /**
- * 記事が使えるバージョンの一覧。
- *   since: 使えるようになった（確認できた）最初のバージョン。管理開始前から使えないものは "old"
- *   until: 最後に使えたバージョン（このバージョンまでOK、次から不可）
+ * 記事が使えるバージョン一覧（frontmatter の versions をそのまま使う）。
+ * versions を書いていない記事はバージョンに関係しないもの（undefined を返す）。
  */
-export function validVersions(data: VersionData): string[] {
-  if (!data.since || data.since === 'old') return [];
-  const from = VERSIONS.indexOf(data.since as any);
-  const to = data.until ? VERSIONS.indexOf(data.until as any) : VERSIONS.length - 1;
-  return VERSIONS.slice(from, to + 1);
+export function validVersions(data: VersionData): readonly string[] | undefined {
+  return data.versions;
 }
 
-/** 現行バージョンで使えない記事 */
+/** 現行バージョンで使えない記事（versions に現行が入っていない） */
 export function isOld(data: VersionData) {
-  return !!data.since && !validVersions(data).includes(CURRENT_VERSION);
+  return !!data.versions && !data.versions.includes(CURRENT_VERSION);
 }
 
-/** 「Ver.2.00〜」「Ver.2.00〜2.01」のような表記 */
-export function versionRange(data: VersionData) {
-  if (!data.since || data.since === 'old') return '';
-  if (!data.until) return `Ver.${data.since}〜`;
-  return data.since === data.until ? `Ver.${data.since}のみ` : `Ver.${data.since}〜${data.until}`;
+/** 「Ver.2.00 / 2.02」のような表記（VERSIONS の順に並べる） */
+export function versionLabel(data: VersionData) {
+  if (!data.versions) return '';
+  const vs = VERSIONS.filter((v) => data.versions!.includes(v));
+  return vs.length ? `Ver.${vs.join(' / ')}` : '';
 }

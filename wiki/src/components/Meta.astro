@@ -1,6 +1,6 @@
 ---
 /** 記事のメタ情報（バージョン・立ち位置・始動技・CH・タグ）をチップで表示 */
-import { POSITION_LABEL, isOld, versionRange } from '../site.config';
+import { POSITION_LABEL, isOld, versionLabel } from '../site.config';
 
 interface Props {
   data: Record<string, any>;
@@ -12,11 +12,11 @@ const old = isOld(data);
 
 <ul class:list={['meta', { compact }]}>
   {
-    data.since &&
+    data.versions &&
       (old ? (
-        <li class="chip old">OLD{data.until ? ` · ${versionRange(data)}` : ''}</li>
+        <li class="chip old">OLD{versionLabel(data) ? ` · ${versionLabel(data)}` : ''}</li>
       ) : (
-        <li class="chip ver">{versionRange(data)}</li>
+        <li class="chip ver">{versionLabel(data)}</li>
       ))
   }
   {data.position && <li class="chip pos">{POSITION_LABEL[data.position as 'center' | 'corner']}</li>}

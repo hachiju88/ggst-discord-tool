@@ -1,7 +1,7 @@
 ---
 const PAGE_TITLE_ID = '_top';
 import Meta from '../Meta.astro';
-import { CATEGORIES, POSITION_LABEL, CURRENT_VERSION, isOld, versionRange } from '../../site.config';
+import { CATEGORIES, POSITION_LABEL, CURRENT_VERSION, isOld, versionLabel } from '../../site.config';
 
 const route = Astro.locals.starlightRoute;
 const data = route.entry.data as Record<string, any>;
@@ -27,7 +27,7 @@ const isSplash = data.template === 'splash';
   old && (
     <aside class="old-warning" role="note">
       <strong>この記事は現行バージョン（Ver.{CURRENT_VERSION}）では使えない内容です。</strong>
-      <span>{data.until ? `${versionRange(data)}で使えた内容です。` : ''}過去の資料として残しています。</span>
+      <span>{versionLabel(data) ? `${versionLabel(data)} で使えた内容です。` : ''}過去の資料として残しています。</span>
     </aside>
   )
 }

@@ -11,10 +11,8 @@ export const collections = {
     loader: docsLoader(),
     schema: docsSchema({
       extend: z.object({
-        /** 使えるようになった（確認できた）最初のバージョン。管理開始前から使えないものは "old" */
-        since: z.union([version, z.literal('old')]).optional(),
-        /** 最後に使えたバージョン（次のバージョンで使えなくなった） */
-        until: version.optional(),
+        /** 使えるバージョン（複数可）。現行が入っていなければ old 扱い。[] なら管理開始時点で使えない */
+        versions: z.array(version).optional(),
         /** 立ち位置（コンボ・起き攻め・セットプレイ） */
         position: z.enum(['center', 'corner']).optional(),
         /** 始動技（例: "2K", "c.S", "6P"） */
@@ -30,10 +28,7 @@ export const collections = {
         tags: z.array(z.string()).default([]),
         /** コメント欄を出さない（一覧ページなど） */
         comments: z.boolean().default(true),
-      }).refine(
-        (d) => !d.until || (d.since && d.since !== 'old' && VERSIONS.indexOf(d.until) >= VERSIONS.indexOf(d.since)),
-        { message: 'until は since 以降のバージョンにしてください', path: ['until'] },
-      ),
+      }),
     }),
   }),
 };
