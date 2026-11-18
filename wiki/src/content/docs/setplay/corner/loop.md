@@ -2,6 +2,9 @@
 title: 端 ヨーヨー固めループ
 description: ガードさせて有利を取り続ける連携（サンプル記事）
 versions: ["2.02"]
+combos:
+  - route: 2K > c.S > ヨーヨー回収 > 再設置 > 2K
+    note: c.S の後が割り込みポイント
 position: corner
 starter: 2K
 tags: [固め, ヨーヨー]

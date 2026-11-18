@@ -2,6 +2,7 @@
 title: ソル対策
 description: 起き攻めの圧にどう付き合うか（サンプル記事）
 versions: ["2.02"]
+training: [okizeme-drill]
 opponent: ソル
 tags: [主人公枠]
 ---

@@ -9,12 +9,14 @@ interface Props {
   damage?: number;
   tension?: number;
   note?: string;
+  /** 一覧カード用の小さい表示 */
+  compact?: boolean;
 }
-const { route, damage, tension, note } = Astro.props;
+const { route, damage, tension, note, compact = false } = Astro.props;
 const steps = route.split('>').map((s) => s.trim()).filter(Boolean);
 ---
 
-<figure class="combo not-content">
+<figure class:list={['combo not-content', { compact }]}>
   <ol class="combo-route">
     {
       steps.map((s) => {
@@ -29,7 +31,7 @@ const steps = route.split('>').map((s) => s.trim()).filter(Boolean);
     }
   </ol>
   {
-    (damage || tension !== undefined || note) && (
+    !compact && (damage || tension !== undefined || note) && (
       <figcaption>
         {damage && <span class="stat"><b>{damage}</b> dmg</span>}
         {tension !== undefined && <span class="stat">テンション <b>{tension}%</b></span>}

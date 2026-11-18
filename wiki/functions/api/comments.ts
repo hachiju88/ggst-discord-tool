@@ -7,14 +7,13 @@
  * 投稿者の識別には Cloudflare Access がつけるメールアドレスヘッダーを使う。
  * メールアドレスは保存するが、画面には出さない。
  */
+import { json, userOf as accessUser } from '../../server/auth';
+
 interface Env {
   DB: D1Database;
 }
 
-const json = (data: unknown, status = 200) =>
-  new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
-
-const userOf = (req: Request) => req.headers.get('Cf-Access-Authenticated-User-Email') ?? 'anonymous';
+const userOf = (req: Request) => accessUser(req) ?? 'anonymous';
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const page = new URL(request.url).searchParams.get('page');

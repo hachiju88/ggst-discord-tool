@@ -24,6 +24,24 @@ export const collections = {
         difficulty: z.number().min(1).max(5).optional(),
         /** キャラ対策の相手キャラ */
         opponent: z.string().optional(),
+        /** 動画（YouTube / X / mp4 のURL。複数可） */
+        videos: z.array(z.union([z.string(), z.object({ url: z.string(), title: z.string().optional() })])).default([]),
+        /** コンボパーツ（"2K > 2D > 236K" の形。複数可） */
+        combos: z
+          .array(
+            z.union([
+              z.string(),
+              z.object({
+                route: z.string(),
+                damage: z.number().optional(),
+                tension: z.number().optional(),
+                note: z.string().optional(),
+              }),
+            ]),
+          )
+          .default([]),
+        /** 紐づける練習方法の記事（"training/xxx" または "xxx"）。コンボ・起き攻め・セットプレイ・キャラ対策・Q&A のみ */
+        training: z.array(z.string()).default([]),
         /** 自由タグ */
         tags: z.array(z.string()).default([]),
         /** コメント欄を出さない（一覧ページなど） */

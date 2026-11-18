@@ -7,3 +7,12 @@ CREATE TABLE IF NOT EXISTS comments (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_comments_page ON comments(page, created_at);
+
+CREATE TABLE IF NOT EXISTS reactions (
+  page TEXT NOT NULL,
+  user TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('like', 'fav')),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (page, user, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_reactions_kind ON reactions(kind, page);

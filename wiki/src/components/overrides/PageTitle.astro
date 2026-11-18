@@ -1,6 +1,7 @@
 ---
 const PAGE_TITLE_ID = '_top';
 import Meta from '../Meta.astro';
+import Reactions from '../Reactions.astro';
 import { CATEGORIES, POSITION_LABEL, CURRENT_VERSION, isOld, versionLabel } from '../../site.config';
 
 const route = Astro.locals.starlightRoute;
@@ -22,7 +23,14 @@ const isSplash = data.template === 'splash';
   )
 }
 <h1 id={PAGE_TITLE_ID} class="page-title">{data.title}</h1>
-{!isIndex && <Meta data={data} />}
+{
+  cat && !isIndex && (
+    <div class="title-meta">
+      <Meta data={data} />
+      <Reactions page={route.id} />
+    </div>
+  )
+}
 {
   old && (
     <aside class="old-warning" role="note">

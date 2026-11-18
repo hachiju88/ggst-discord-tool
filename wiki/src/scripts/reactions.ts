@@ -1,0 +1,81 @@
+/**
+ * いいね・お気に入りの状態をページ全体で共有する。
+ * API (/api/reactions) が無い環境ではブラウザ内保存のプレビューモードで動く。
+ */
+type Kind = 'like' | 'fav';
+type State = { likes: Record<string, number>; mine: Record<Kind, Set<string>>; preview: boolean; ready: boolean };
+
+const API = '/api/reactions';
+const LOCAL = 'bridget-wiki:reactions';
+export const state: State = { likes: {}, mine: { like: new Set(), fav: new Set() }, preview: false, ready: false };
+
+const saveLocal = () => {
+  try {
+    localStorage.setItem(LOCAL, JSON.stringify({ like: [...state.mine.like], fav: [...state.mine.fav] }));
+  } catch {}
+};
+
+async function load() {
+  try {
+    const res = await fetch(API);
+    if (!res.ok || !res.headers.get('content-type')?.includes('json')) throw new Error();
+    const d = await res.json();
+    state.likes = d.likes;
+    state.mine = { like: new Set(d.mine.like), fav: new Set(d.mine.fav) };
+  } catch {
+    state.preview = true;
+    let d = { like: [] as string[], fav: [] as string[] };
+    try {
+      d = { ...d, ...JSON.parse(localStorage.getItem(LOCAL) ?? '{}') };
+    } catch {}
+    state.mine = { like: new Set(d.like), fav: new Set(d.fav) };
+    state.likes = Object.fromEntries(d.like.map((p) => [p, 1]));
+  }
+  state.ready = true;
+  render();
+}
+
+function render() {
+  for (const b of document.querySelectorAll<HTMLElement>('[data-react]')) {
+    const on = state.mine[b.dataset.kind as Kind].has(b.dataset.page!);
+    b.setAttribute('aria-pressed', String(on));
+  }
+  for (const c of document.querySelectorAll<HTMLElement>('[data-like-count]')) {
+    const n = state.likes[c.dataset.page!] ?? 0;
+    c.textContent = String(n);
+  }
+  document.dispatchEvent(new CustomEvent('reactions:change'));
+}
+
+async function toggle(page: string, kind: Kind) {
+  const set = state.mine[kind];
+  const on = !set.has(page);
+  const prev = state.likes[page] ?? 0;
+  on ? set.add(page) : set.delete(page);
+  if (kind === 'like') state.likes[page] = Math.max(0, prev + (on ? 1 : -1));
+  render();
+  if (state.preview) return saveLocal();
+  try {
+    const res = await fetch(API, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ page, kind, on }),
+    });
+    if (!res.ok) throw new Error();
+    const d = await res.json();
+    state.likes[page] = d.likes;
+  } catch {
+    on ? set.delete(page) : set.add(page);
+    state.likes[page] = prev;
+  }
+  render();
+}
+
+document.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-react]');
+  if (!b) return;
+  e.preventDefault();
+  toggle(b.dataset.page!, b.dataset.kind as Kind);
+});
+
+load();

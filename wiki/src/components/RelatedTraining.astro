@@ -1,0 +1,32 @@
+---
+/**
+ * 練習方法との紐づけ表示。
+ *  - 通常の記事: 「この記事の練習」
+ *  - 練習方法の記事: 「この練習で身につく記事」（逆引き）
+ */
+import { trainingFor, linkedFrom } from '../lib/links';
+import { CATEGORIES } from '../site.config';
+
+const route = Astro.locals.starlightRoute;
+const isTraining = route.id.startsWith('training/');
+const items = isTraining ? await linkedFrom(route.id) : await trainingFor({ id: route.id, data: route.entry.data as any });
+const catEn = (id: string) => CATEGORIES.find((c) => c.id === id.split('/')[0])?.en ?? '';
+---
+
+{
+  items.length > 0 && (
+    <aside class="related not-content">
+      <p class="related-head">{isTraining ? 'この練習で身につく記事' : 'この記事の練習方法'}</p>
+      <ul>
+        {items.map((d) => (
+          <li>
+            <a href={`/${d.id}/`}>
+              <span class="related-cat">{catEn(d.id)}</span>
+              <span>{d.data.title}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  )
+}

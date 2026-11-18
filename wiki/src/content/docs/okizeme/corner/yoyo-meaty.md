@@ -2,6 +2,12 @@
 title: 端 ヨーヨー重ね
 description: ヨーヨーを詐欺重ねにして択をかける（サンプル記事）
 versions: ["2.02"]
+videos:
+  - /samples/sample2.mp4
+combos:
+  - route: 236S (締め) > 前歩き > ヨーヨー設置 > 2K
+    note: ヨーヨーが重なるタイミングで2K
+training: [okizeme-drill]
 position: corner
 starter: 236S
 counterHit: false

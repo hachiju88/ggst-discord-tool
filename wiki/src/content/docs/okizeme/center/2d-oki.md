@@ -2,6 +2,9 @@
 title: 中央 2D後の起き攻め
 description: 中央ダウンからの基本の択（サンプル記事）
 versions: ["2.02"]
+combos:
+  - route: 2D > 66 > 2K
+  - route: 2D > 66 > 投げ
 position: center
 starter: 2D
 tags: [択]

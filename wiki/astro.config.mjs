@@ -51,6 +51,7 @@ export default defineConfig({
           items: [
             { label: 'トップ', link: '/' },
             { label: '全記事から探す', link: '/articles/' },
+            { label: '★ お気に入り', link: '/articles/?fav=1' },
           ],
         },
         simple('basics', '基本戦略'),

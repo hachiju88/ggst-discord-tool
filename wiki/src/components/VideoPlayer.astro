@@ -1,0 +1,50 @@
+---
+/**
+ * 動画1本分のプレイヤー。最初はサムネイル＋再生ボタンだけ出し、押したら読み込む（軽量化）。
+ * mode="card" は一覧カード用（小さめ・音なしループ）。
+ */
+import { parseVideo, youtubeThumb, type VideoInput } from '../lib/video';
+
+interface Props {
+  video: VideoInput;
+  mode?: 'page' | 'card';
+  more?: number;
+}
+const { video, mode = 'page', more = 0 } = Astro.props;
+const v = parseVideo(video);
+const label = { youtube: 'YouTube', x: 'X', file: 'VIDEO', link: 'LINK' }[v.type];
+---
+
+{
+  v.type === 'link' ? (
+    <a class:list={['player', 'player-link', `player-${mode}`]} href={v.url} target="_blank" rel="noopener">
+      <span class="player-badge">{label}</span>
+      <span class="player-title">{v.title ?? v.url}</span>
+    </a>
+  ) : (
+    <figure class:list={['player', `player-${mode}`, v.type]}>
+      <button
+        type="button"
+        class="player-facade"
+        data-player
+        data-type={v.type}
+        data-src={v.type === 'youtube' ? v.id : v.url}
+        data-start={v.type === 'youtube' ? v.start : undefined}
+        data-mode={mode}
+        aria-label={`${v.title ?? '動画'}を再生`}
+      >
+        {v.type === 'youtube' && <img src={youtubeThumb(v.id)} alt="" loading="lazy" onerror="this.remove()" />}
+        {v.type === 'file' && <video src={`${v.url}#t=0.1`} preload="metadata" muted playsinline tabindex="-1" />}
+        {v.type === 'x' && <span class="x-mark" aria-hidden="true">𝕏</span>}
+        <span class="player-play" aria-hidden="true" />
+        <span class="player-badge">{label}</span>
+        {more > 0 && <span class="player-more">+{more}</span>}
+      </button>
+      {v.title && mode === 'page' && <figcaption>{v.title}</figcaption>}
+    </figure>
+  )
+}
+
+<script>
+  import '../scripts/player';
+</script>

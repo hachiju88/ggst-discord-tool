@@ -22,6 +22,9 @@ export type CategoryId = (typeof CATEGORIES)[number]['id'];
 /** 立ち位置で分けるカテゴリ */
 export const POSITIONED: CategoryId[] = ['combos', 'okizeme', 'setplay'];
 
+/** 練習方法の記事と紐づけられるカテゴリ */
+export const TRAINING_LINKABLE: CategoryId[] = ['combos', 'okizeme', 'setplay', 'matchups', 'faq'];
+
 export const POSITION_LABEL = { center: '画面中央', corner: '画面端' } as const;
 
 type VersionData = { versions?: readonly string[] };

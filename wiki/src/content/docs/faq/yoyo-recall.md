@@ -2,6 +2,7 @@
 title: ヨーヨーはいつ回収すればいい？
 description: よくある質問（サンプル記事）
 versions: ["2.02"]
+training: [training-mode]
 tags: [初心者向け, ヨーヨー]
 ---
 

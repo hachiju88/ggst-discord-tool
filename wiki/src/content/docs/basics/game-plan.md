@@ -2,6 +2,8 @@
 title: ブリジットの勝ち筋
 description: ヨーヨーで画面を支配して、端に運んで押し切る（サンプル記事）
 versions: ["2.02"]
+videos:
+  - /samples/sample1.mp4
 tags: [初心者向け, ヨーヨー]
 ---
 

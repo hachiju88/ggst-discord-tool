@@ -1,11 +1,27 @@
 ---
 import Default from '@astrojs/starlight/components/MarkdownContent.astro';
 import Comments from '../Comments.astro';
+import VideoPlayer from '../VideoPlayer.astro';
+import Combo from '../Combo.astro';
+import RelatedTraining from '../RelatedTraining.astro';
 
 const route = Astro.locals.starlightRoute;
 const data = route.entry.data as Record<string, any>;
 const showComments = data.comments !== false && data.template !== 'splash';
+const videos = data.videos ?? [];
+const combos = (data.combos ?? []).map((c: any) => (typeof c === 'string' ? { route: c } : c));
 ---
 
+{
+  videos.length > 0 && (
+    <div class:list={['videos not-content', { multi: videos.length > 1 }]}>
+      {videos.map((v: any) => (
+        <VideoPlayer video={v} />
+      ))}
+    </div>
+  )
+}
+{combos.map((c: any) => <Combo {...c} />)}
 <Default><slot /></Default>
+<RelatedTraining />
 {showComments && <Comments pageId={route.id} />}
