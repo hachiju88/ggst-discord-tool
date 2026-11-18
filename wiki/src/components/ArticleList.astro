@@ -1,0 +1,183 @@
+---
+/**
+ * 記事一覧＋絞り込み。category を省略すると全記事。
+ * 絞り込み: バージョン / 立ち位置 / 始動技 / カウンターヒット / タグ
+ */
+import { getCollection } from 'astro:content';
+import Meta from './Meta.astro';
+import { CATEGORIES, POSITIONED, isOld, type CategoryId } from '../site.config';
+
+interface Props {
+  category?: CategoryId;
+}
+const { category } = Astro.props;
+const catIds = CATEGORIES.map((c) => c.id) as string[];
+
+const docs = (await getCollection('docs'))
+  .filter((d) => {
+    const top = d.id.split('/')[0];
+    if (!catIds.includes(top) || d.id === top) return false; // 一覧ページ自身は除外
+    return category ? top === category : true;
+  })
+  .sort((a, b) => a.id.localeCompare(b.id, 'ja'));
+
+const showPosition = !category || POSITIONED.includes(category);
+const starters = [...new Set(docs.map((d) => d.data.starter).filter(Boolean))] as string[];
+const tags = [...new Set(docs.flatMap((d) => d.data.tags))];
+const versions = [...new Set(docs.map((d) => d.data.version).filter((v) => v && v !== 'old'))].sort() as string[];
+const hasCH = docs.some((d) => d.data.counterHit !== undefined);
+const catLabel = (id: string) => CATEGORIES.find((c) => c.id === id.split('/')[0])!;
+---
+
+<div class="article-list not-content" data-article-list>
+  <form class="filters" onsubmit="return false">
+    <label>
+      <span>バージョン</span>
+      <select name="version">
+        <option value="current">現行で使える</option>
+        {versions.map((v) => <option value={`v:${v}`}>Ver.{v} で確認</option>)}
+        <option value="old">oldのみ</option>
+        <option value="all">すべて</option>
+      </select>
+    </label>
+    {
+      !category && (
+        <label>
+          <span>カテゴリ</span>
+          <select name="category">
+            <option value="">すべて</option>
+            {CATEGORIES.map((c) => (
+              <option value={c.id}>{c.label}</option>
+            ))}
+          </select>
+        </label>
+      )
+    }
+    {
+      showPosition && (
+        <label>
+          <span>立ち位置</span>
+          <select name="position">
+            <option value="">すべて</option>
+            <option value="center">画面中央</option>
+            <option value="corner">画面端</option>
+          </select>
+        </label>
+      )
+    }
+    {
+      starters.length > 0 && (
+        <label>
+          <span>始動技</span>
+          <select name="starter">
+            <option value="">すべて</option>
+            {starters.map((s) => (
+              <option value={s}>{s}</option>
+            ))}
+          </select>
+        </label>
+      )
+    }
+    {
+      hasCH && (
+        <label>
+          <span>カウンター</span>
+          <select name="ch">
+            <option value="">すべて</option>
+            <option value="yes">CHあり</option>
+            <option value="no">CHなし</option>
+          </select>
+        </label>
+      )
+    }
+    {
+      tags.length > 0 && (
+        <fieldset class="tag-filter">
+          <legend>タグ</legend>
+          {tags.map((t) => (
+            <label class="tag-toggle">
+              <input type="checkbox" name="tag" value={t} />
+              <span>#{t}</span>
+            </label>
+          ))}
+        </fieldset>
+      )
+    }
+  </form>
+
+  <p class="count" aria-live="polite"><span data-count>{docs.length}</span> 件</p>
+
+  <ul class="cards">
+    {
+      docs.map((d) => (
+        <li
+          class:list={['card', { 'is-old': isOld(d.data) }]}
+          data-old={isOld(d.data) ? '1' : '0'}
+          data-version={d.data.version ?? ''}
+          data-category={d.id.split('/')[0]}
+          data-position={d.data.position ?? ''}
+          data-starter={d.data.starter ?? ''}
+          data-ch={d.data.counterHit === undefined ? '' : d.data.counterHit ? 'yes' : 'no'}
+          data-tags={d.data.tags.join('|')}
+        >
+          <a href={`/${d.id}/`}>
+            {!category && <span class="card-cat">{catLabel(d.id).en}</span>}
+            <span class="card-title">{d.data.title}</span>
+            {d.data.description && <span class="card-desc">{d.data.description}</span>}
+            <Meta data={d.data} compact />
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+  <p class="empty" hidden>条件に合う記事がありません。</p>
+</div>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('[data-article-list]')) {
+    const form = root.querySelector('form')!;
+    const cards = [...root.querySelectorAll<HTMLElement>('.card')];
+    const count = root.querySelector('[data-count]')!;
+    const empty = root.querySelector<HTMLElement>('.empty')!;
+    const KEY = 'bridget-wiki:version-filter';
+
+    const verSel = form.elements.namedItem('version') as HTMLSelectElement;
+    try {
+      const saved = localStorage.getItem(KEY);
+      if (saved && [...verSel.options].some((o) => o.value === saved)) verSel.value = saved;
+    } catch {}
+
+    const apply = () => {
+      const fd = new FormData(form);
+      const ver = String(fd.get('version') ?? 'current');
+      const cat = String(fd.get('category') ?? '');
+      const pos = String(fd.get('position') ?? '');
+      const starter = String(fd.get('starter') ?? '');
+      const ch = String(fd.get('ch') ?? '');
+      const tags = fd.getAll('tag').map(String);
+      try { localStorage.setItem(KEY, ver); } catch {}
+
+      let n = 0;
+      for (const c of cards) {
+        const d = c.dataset;
+        const old = d.old === '1';
+        const ok =
+          (ver === 'all' ||
+            (ver === 'current' && !old) ||
+            (ver === 'old' && old) ||
+            (ver.startsWith('v:') && d.version === ver.slice(2))) &&
+          (!cat || d.category === cat) &&
+          (!pos || d.position === pos) &&
+          (!starter || d.starter === starter) &&
+          (!ch || d.ch === ch) &&
+          tags.every((t) => d.tags!.split('|').includes(t));
+        c.hidden = !ok;
+        if (ok) n++;
+      }
+      count.textContent = String(n);
+      empty.hidden = n > 0;
+    };
+    form.addEventListener('change', apply);
+    apply();
+  }
+</script>

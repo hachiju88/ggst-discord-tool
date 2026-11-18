@@ -1,0 +1,34 @@
+---
+const PAGE_TITLE_ID = '_top';
+import Meta from '../Meta.astro';
+import { CATEGORIES, POSITION_LABEL, CURRENT_VERSION, isOld } from '../../site.config';
+
+const route = Astro.locals.starlightRoute;
+const data = route.entry.data as Record<string, any>;
+const cat = CATEGORIES.find((c) => route.id.startsWith(c.id + '/') || route.id === c.id);
+const isIndex = cat && route.id === cat.id;
+const old = isOld(data);
+const isSplash = data.template === 'splash';
+---
+
+{!isSplash && (<>
+
+{
+  cat && (
+    <p class="eyebrow">
+      <a href={`/${cat.id}/`}>{cat.en}</a>
+      {data.position && !isIndex && <span> / {POSITION_LABEL[data.position as 'center' | 'corner']}</span>}
+    </p>
+  )
+}
+<h1 id={PAGE_TITLE_ID} class="page-title">{data.title}</h1>
+{!isIndex && <Meta data={data} />}
+{
+  old && (
+    <aside class="old-warning" role="note">
+      <strong>この記事は現行バージョン（Ver.{CURRENT_VERSION}）では使えない内容です。</strong>
+      <span>過去の資料として残しています。</span>
+    </aside>
+  )
+}
+</>)}
