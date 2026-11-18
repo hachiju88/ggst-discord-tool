@@ -219,7 +219,8 @@ body {
   background: var(--sl-color-gray-6);
   border: 1px solid var(--sl-color-gray-5);
 }
-.filters > label { display: grid; gap: 0.25rem; min-width: 8.5rem; flex: 1 1 8.5rem; }
+.filters > label { display: grid; gap: 0.25rem; min-width: 0; flex: 1 1 8.5rem; }
+.filters > label:first-child { flex-basis: 13rem; }
 .filters label > span, .filters legend {
   font-family: var(--display);
   font-size: 0.7rem;
@@ -228,6 +229,8 @@ body {
   color: var(--sl-color-gray-3);
 }
 .filters select {
+  width: 100%;
+  min-width: 0;
   padding: 0.45rem 0.6rem;
   font: inherit;
   font-size: var(--sl-text-sm);

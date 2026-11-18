@@ -2,16 +2,19 @@ import { defineCollection } from 'astro:content';
 import { z } from 'astro/zod';
 import { docsLoader } from '@astrojs/starlight/loaders';
 import { docsSchema } from '@astrojs/starlight/schema';
+import { VERSIONS } from './site.config';
+
+const version = z.enum(VERSIONS);
 
 export const collections = {
   docs: defineCollection({
     loader: docsLoader(),
     schema: docsSchema({
       extend: z.object({
-        /** 動作を確認したバージョン（例: "2.00"）。現行で使えないものは "old" */
-        version: z.string().optional(),
-        /** このバージョンから使えなくなった（設定すると old 扱い） */
-        brokenIn: z.string().optional(),
+        /** 使えるようになった（確認できた）最初のバージョン。管理開始前から使えないものは "old" */
+        since: z.union([version, z.literal('old')]).optional(),
+        /** 最後に使えたバージョン（次のバージョンで使えなくなった） */
+        until: version.optional(),
         /** 立ち位置（コンボ・起き攻め・セットプレイ） */
         position: z.enum(['center', 'corner']).optional(),
         /** 始動技（例: "2K", "c.S", "6P"） */
@@ -27,7 +30,10 @@ export const collections = {
         tags: z.array(z.string()).default([]),
         /** コメント欄を出さない（一覧ページなど） */
         comments: z.boolean().default(true),
-      }),
+      }).refine(
+        (d) => !d.until || (d.since && d.since !== 'old' && VERSIONS.indexOf(d.until) >= VERSIONS.indexOf(d.since)),
+        { message: 'until は since 以降のバージョンにしてください', path: ['until'] },
+      ),
     }),
   }),
 };

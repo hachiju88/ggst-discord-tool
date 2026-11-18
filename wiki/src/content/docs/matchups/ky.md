@@ -1,7 +1,7 @@
 ---
 title: カイ対策
 description: 飛び道具の撃ち合いで負けないために（サンプル記事）
-version: "2.00"
+since: "2.00"
 opponent: カイ
 tags: [飛び道具]
 ---

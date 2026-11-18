@@ -1,7 +1,7 @@
 ---
 title: 端 ヨーヨー重ね
 description: ヨーヨーを詐欺重ねにして択をかける（サンプル記事）
-version: "2.00"
+since: "2.00"
 position: corner
 starter: 236S
 counterHit: false
