@@ -1,9 +1,9 @@
 /**
  * 管理対象のバージョン一覧（古い順）。
  * 新しいパッチが出たら末尾に追加するだけで、最後のものが「現行」になります。
- * ※ 2.01 / 2.02 はプロトタイプ用のダミーです。実際のパッチ履歴に置き換えてください。
+ * Ver.2.02 から管理開始。
  */
-export const VERSIONS = ['2.00', '2.01', '2.02'] as const;
+export const VERSIONS = ['2.02'] as const;
 export const CURRENT_VERSION = VERSIONS[VERSIONS.length - 1];
 
 export const CATEGORIES = [

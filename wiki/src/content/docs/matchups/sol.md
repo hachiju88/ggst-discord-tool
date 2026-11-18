@@ -1,7 +1,7 @@
 ---
 title: ソル対策
 description: 起き攻めの圧にどう付き合うか（サンプル記事）
-versions: ["2.00", "2.01", "2.02"]
+versions: ["2.02"]
 opponent: ソル
 tags: [主人公枠]
 ---

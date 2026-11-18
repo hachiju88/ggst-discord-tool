@@ -1,7 +1,7 @@
 ---
 title: 端 ヨーヨー固めループ
 description: ガードさせて有利を取り続ける連携（サンプル記事）
-versions: ["2.00", "2.01", "2.02"]
+versions: ["2.02"]
 position: corner
 starter: 2K
 tags: [固め, ヨーヨー]
