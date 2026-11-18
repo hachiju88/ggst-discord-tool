@@ -1,8 +1,0 @@
-name = "bridget-wiki"
-pages_build_output_dir = "./dist"
-compatibility_date = "2026-11-01"
-
-[[d1_databases]]
-binding = "DB"
-database_name = "bridget-wiki"
-database_id = "REPLACE_WITH_YOUR_D1_ID"

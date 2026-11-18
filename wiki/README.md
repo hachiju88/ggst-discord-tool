@@ -62,25 +62,16 @@ import Combo from '../../../../components/Combo.astro';
 
 ## 公開（Cloudflare Pages）
 
-### 1. Pages プロジェクトを作る
-Cloudflare ダッシュボード → Workers & Pages → 作成 → Pages → Git に接続 → このリポジトリを選択。
+すべてCloudflareのダッシュボード上で設定します（`wrangler.toml` は置かない）。
 
-- ビルドコマンド: `npm run build`
-- 出力ディレクトリ: `dist`
-- ルートディレクトリ: `wiki`
-
-### 2. コメント用データベース（D1）
-```bash
-npx wrangler d1 create bridget-wiki          # 出てきた database_id を wrangler.toml に記入
-npx wrangler d1 execute bridget-wiki --remote --file=functions/schema.sql
-```
-Pages プロジェクトの 設定 → バインディング で D1 を変数名 `DB` で追加します。
-
-### 3. パスワード（Cloudflare Access）
-Zero Trust → Access → アプリケーション → 追加 → セルフホスト。
-- ドメイン: `<プロジェクト名>.pages.dev`
-- ポリシー: 許可 → 「Emails」に見せたい人のメールアドレス（または「Everyone」＋ワンタイムPIN）
-- 認証方法: ワンタイムPIN（メールに届くコードでログイン）
+1. **D1**：ストレージとデータベース → D1 → `bridget-wiki` を作成 → コンソールで `functions/schema.sql` を実行
+2. **Pages**：Workers & Pages → 作成 → Pages → Gitに接続 → このリポジトリ
+   - フレームワーク: Astro / ビルドコマンド: `npm run build` / 出力: `dist` / ルートディレクトリ: `wiki`
+   - 環境変数: `NODE_VERSION` = `22`
+3. **バインディング**：Pagesプロジェクト → 設定 → バインディング → D1 を変数名 `DB` で追加 → 再デプロイ
+4. **Access**：Zero Trust → Access → アプリケーション → セルフホスト
+   - ドメイン: `<プロジェクト名>.pages.dev` と `*.<プロジェクト名>.pages.dev`
+   - ポリシー: 許可 / 見せたい人のメールアドレス / ログイン方法: ワンタイムPIN
 
 ログインした人のメールアドレスでコメントの投稿者を識別します（画面には出ません）。自分のコメントだけ削除できます。
 
