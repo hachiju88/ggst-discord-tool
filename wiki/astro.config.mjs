@@ -37,7 +37,7 @@ export default defineConfig({
           tag: 'link',
           attrs: {
             rel: 'stylesheet',
-            href: 'https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap',
+            href: 'https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=VT323&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap',
           },
         },
       ],

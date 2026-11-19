@@ -1,63 +1,96 @@
 ---
 import { getCollection } from 'astro:content';
 import { CATEGORIES, CURRENT_VERSION, isOld } from '../site.config';
+import { lastUpdatedOf } from '../lib/dates';
 
+const catIds = CATEGORIES.map((c) => c.id) as string[];
 const docs = await getCollection('docs');
-const countOf = (id: string) =>
-  docs.filter((d) => d.id.startsWith(id + '/') && !isOld(d.data)).length;
+const articles = docs.filter((d) => {
+  const top = d.id.split('/')[0];
+  return catIds.includes(top) && d.id !== top;
+});
+const countOf = (id: string) => articles.filter((d) => d.id.startsWith(id + '/') && !isOld(d.data)).length;
+const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+
+const latest = articles
+  .map((d) => ({ d, at: lastUpdatedOf(d.filePath) }))
+  .sort((a, b) => (b.at?.getTime() ?? 0) - (a.at?.getTime() ?? 0) || a.d.id.localeCompare(b.d.id))
+  .slice(0, 6);
+const fmt = (at?: Date) => {
+  if (!at) return '--/--';
+  const jst = new Date(at.getTime() + 9 * 3600e3);
+  return `${pad(jst.getUTCMonth() + 1)}/${pad(jst.getUTCDate())}`;
+};
+const catOf = (id: string) => CATEGORIES.find((c) => c.id === id.split('/')[0])!;
+const combos = articles.filter((d) => d.id.startsWith('combos/')).length;
 ---
 
 <section class="hero-x not-content">
   <div class="hero-bg" aria-hidden="true"></div>
+  <div class="hero-hud" aria-hidden="true">
+    <span class="live">LIVE LAB</span>
+    <span>ARTICLES <b>{pad(articles.length, 3)}</b> · COMBOS <b>{pad(combos, 3)}</b> · VER <b>{CURRENT_VERSION}</b></span>
+  </div>
   <div class="hero-text">
-    <img class="ggst-logo" src="/img/ggst-logo.webp" width="1000" height="203" alt="GUILTY GEAR -STRIVE-" />
-    <p class="kicker">CHARACTER WIKI</p>
-    <h1 id="_top">BRIDGET<br />LAB</h1>
-    <p class="lead">
+    <img class="ggst-logo rv" style="--d:0.05s" src="/img/ggst-logo.webp" width="1000" height="203" alt="GUILTY GEAR -STRIVE-" />
+    <p class="kicker rv" style="--d:0.15s">CHARACTER WIKI</p>
+    <h1 id="_top" class="rv" style="--d:0.25s">BRIDGET<br />LAB</h1>
+    <p class="lead rv" style="--d:0.4s">
       コミュニティで共有されてきたブリジットの知識を、カテゴリ・立ち位置・始動技ごとに整理した攻略wikiです。
     </p>
-    <span class="ver">現行 Ver.{CURRENT_VERSION} 対応</span>
+    <div class="hero-actions rv" style="--d:0.5s">
+      <a class="btn primary" href="/articles/">記事を探す</a>
+      <a class="btn" href="/edit/">＋ 記事を書く</a>
+    </div>
   </div>
-  <img
-    class="hero-art"
-    src="/img/hero-bridget.webp"
-    width="1188"
-    height="743"
-    alt=""
-    fetchpriority="high"
-  />
+  <div class="hero-art-wrap">
+    <img class="hero-art" src="/img/hero-bridget.webp" width="1188" height="743" alt="" fetchpriority="high" />
+  </div>
 </section>
 
-<p class="section-label not-content">CATEGORIES</p>
-<ul class="cat-grid not-content">
-  {
-    CATEGORIES.map((c, i) => (
-      <li>
-        <a href={`/${c.id}/`}>
-          <span class="num">{String(i + 1).padStart(2, '0')}</span>
-          <span class="en">{c.en}</span>
-          <span class="ja">{c.label}</span>
-          <span class="desc">{c.desc}</span>
-          <span class="n">{countOf(c.id)} 記事</span>
-        </a>
-      </li>
-    ))
-  }
-</ul>
+<div class="home-grid not-content">
+  <section class="home-cats">
+    <p class="section-label">CATEGORIES <span>— カテゴリ</span></p>
+    <ul class="cat-grid">
+      {
+        CATEGORIES.map((c, i) => (
+          <li class="place" style={`--d:${(i * 0.05).toFixed(2)}s`}>
+            <a href={`/${c.id}/`}>
+              <span class="num">{pad(i + 1)}</span>
+              <span class="en">{c.en}</span>
+              <span class="ja">{c.label}</span>
+              <span class="desc">{c.desc}</span>
+              <span class="n">{pad(countOf(c.id), 3)} ARTICLES</span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
 
-<p class="section-label not-content">CHARACTER</p>
-<div class="chara-cards not-content">
-  <figure class="chara-card strive">
-    <img src="/img/bridget-strive.webp" width="949" height="1481" alt="GUILTY GEAR -STRIVE- のブリジット" loading="lazy" />
-    <figcaption><span class="en">GUILTY GEAR -STRIVE-</span><span class="ja">ブリジット</span></figcaption>
-  </figure>
-  <figure class="chara-card xx">
-    <img src="/img/bridget-xx.webp" width="900" height="1063" alt="GUILTY GEAR XX ACCENT CORE のブリジット" loading="lazy" />
-    <figcaption><span class="en">GUILTY GEAR XX ACCENT CORE</span><span class="ja">ブリジット</span></figcaption>
-  </figure>
+  <section class="home-log place" style="--d:0.2s">
+    <p class="section-label">RX LOG <span>— 新着・更新</span></p>
+    <ol class="rx-log">
+      {
+        latest.map(({ d, at }) => (
+          <li>
+            <a href={`/${d.id}/`}>
+              <span class="rx">RX {fmt(at)}</span>
+              <span class="t">
+                <span class="c">{catOf(d.id).en}</span>
+                {d.data.title}
+              </span>
+              <span class="go">読む →</span>
+            </a>
+          </li>
+        ))
+      }
+    </ol>
+    <a class="rx-all" href="/articles/">すべての記事 →</a>
+  </section>
 </div>
 
-<a class="write-cta not-content" href="/edit/">
+<a class="write-cta not-content place" href="/edit/">
   <img src="/img/bridget-chibi.webp" width="600" height="511" alt="" loading="lazy" />
   <span class="body">
     <span class="en">SHARE YOUR KNOWLEDGE</span>
@@ -65,3 +98,18 @@ const countOf = (id: string) =>
     <span class="go">＋ 記事を書く</span>
   </span>
 </a>
+
+<script>
+  // スクロールで見えたら .is-in を付ける（JSが動かない場合は最初から表示）
+  const els = document.querySelectorAll<HTMLElement>('.place');
+  if ('IntersectionObserver' in window) {
+    document.documentElement.classList.add('js-place');
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); }
+      },
+      { rootMargin: '0px 0px -8% 0px' },
+    );
+    els.forEach((el) => io.observe(el));
+  }
+</script>
