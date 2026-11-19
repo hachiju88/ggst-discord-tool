@@ -8,13 +8,24 @@ const countOf = (id: string) =>
 ---
 
 <section class="hero-x not-content">
-  <div class="yoyo" aria-hidden="true"></div>
-  <p class="kicker">GUILTY GEAR -STRIVE- / CHARACTER WIKI</p>
-  <h1 id="_top">BRIDGET<br />LAB</h1>
-  <p class="lead">
-    コミュニティで共有されてきたブリジットの知識を、カテゴリ・立ち位置・始動技ごとに整理した攻略wikiです。
-  </p>
-  <span class="ver">現行 Ver.{CURRENT_VERSION} 対応</span>
+  <div class="hero-bg" aria-hidden="true"></div>
+  <div class="hero-text">
+    <img class="ggst-logo" src="/img/ggst-logo.webp" width="1000" height="203" alt="GUILTY GEAR -STRIVE-" />
+    <p class="kicker">CHARACTER WIKI</p>
+    <h1 id="_top">BRIDGET<br />LAB</h1>
+    <p class="lead">
+      コミュニティで共有されてきたブリジットの知識を、カテゴリ・立ち位置・始動技ごとに整理した攻略wikiです。
+    </p>
+    <span class="ver">現行 Ver.{CURRENT_VERSION} 対応</span>
+  </div>
+  <img
+    class="hero-art"
+    src="/img/hero-bridget.webp"
+    width="1188"
+    height="743"
+    alt=""
+    fetchpriority="high"
+  />
 </section>
 
 <p class="section-label not-content">CATEGORIES</p>
@@ -33,3 +44,24 @@ const countOf = (id: string) =>
     ))
   }
 </ul>
+
+<p class="section-label not-content">CHARACTER</p>
+<div class="chara-cards not-content">
+  <figure class="chara-card strive">
+    <img src="/img/bridget-strive.webp" width="949" height="1481" alt="GUILTY GEAR -STRIVE- のブリジット" loading="lazy" />
+    <figcaption><span class="en">GUILTY GEAR -STRIVE-</span><span class="ja">ブリジット</span></figcaption>
+  </figure>
+  <figure class="chara-card xx">
+    <img src="/img/bridget-xx.webp" width="900" height="1063" alt="GUILTY GEAR XX ACCENT CORE のブリジット" loading="lazy" />
+    <figcaption><span class="en">GUILTY GEAR XX ACCENT CORE</span><span class="ja">ブリジット</span></figcaption>
+  </figure>
+</div>
+
+<a class="write-cta not-content" href="/edit/">
+  <img src="/img/bridget-chibi.webp" width="600" height="511" alt="" loading="lazy" />
+  <span class="body">
+    <span class="en">SHARE YOUR KNOWLEDGE</span>
+    <span class="ja">見つけたコンボや連携を、記事にして残そう</span>
+    <span class="go">＋ 記事を書く</span>
+  </span>
+</a>

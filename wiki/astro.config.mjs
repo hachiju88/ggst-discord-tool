@@ -41,6 +41,7 @@ export default defineConfig({
           },
         },
       ],
+      favicon: '/favicon.png',
       customCss: ['./src/styles/theme.css'],
       routeMiddleware: './src/route-middleware.ts',
       components: {
