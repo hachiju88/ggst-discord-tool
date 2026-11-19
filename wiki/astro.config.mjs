@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import remarkEscapeHtml from './src/lib/remark-escape-html.mjs';
 
 const positioned = (dir, label) => ({
   label,
@@ -19,6 +20,8 @@ const simple = (dir, label) => ({
 });
 
 export default defineConfig({
+  // 本文中の生HTMLは文字として表示（XSS対策）
+  markdown: { remarkPlugins: [remarkEscapeHtml] },
   integrations: [
     starlight({
       title: 'BRIDGET LAB',

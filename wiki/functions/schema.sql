@@ -25,3 +25,17 @@ CREATE TABLE IF NOT EXISTS article_log (
   user TEXT NOT NULL,
   at TEXT NOT NULL
 );
+
+-- アップロードした動画と、それを使っている記事
+CREATE TABLE IF NOT EXISTS media (
+  key TEXT PRIMARY KEY,
+  user TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS media_refs (
+  key TEXT NOT NULL,
+  page TEXT NOT NULL,
+  PRIMARY KEY (key, page)
+);
+CREATE INDEX IF NOT EXISTS idx_media_refs_page ON media_refs(page);

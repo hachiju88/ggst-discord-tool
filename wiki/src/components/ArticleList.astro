@@ -234,10 +234,12 @@ const firstCombo = (d: (typeof docs)[number]) => {
       );
       if (sorted.some((c, i) => list.children[i] !== c)) list.append(...sorted);
 
-      count.textContent = String(n);
+      const loading = favOnly && !state.ready;
+      count.textContent = loading ? '-' : String(n);
       empty.hidden = n > 0;
-      empty.textContent =
-        favOnly && n === 0 && !state.mine.fav.size
+      empty.textContent = loading
+        ? 'お気に入りを読み込み中…'
+        : favOnly && n === 0 && !state.mine.fav.size
           ? 'まだお気に入りがありません。記事の ★ を押すと追加できます。'
           : '条件に合う記事がありません。';
     };

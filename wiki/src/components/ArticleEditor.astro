@@ -204,8 +204,7 @@ const config = {
     title: string;
     description?: string;
     data: Record<string, any>;
-    body: string;
-    editable: boolean;
+    body?: string;
   };
   type EditorData = { articles: Article[]; tags: string[]; starters: string[]; opponents: string[] };
 
@@ -225,8 +224,11 @@ const config = {
   const errorEl = $('[data-error]');
 
   const params = new URLSearchParams(location.search);
-  const editId = params.get('id');
+  let editId = params.get('id');
   let sha: string | null = null;
+  let allArticles: Article[] = [];
+  /** このページでアップロードし、まだ保存していない動画（× で外したら消す） */
+  const unsavedUploads = new Set<string>();
   let dirty = false;
   let canSave = true;
 
@@ -343,6 +345,7 @@ const config = {
       if (xhr.status === 201 && d.url) {
         urlInput.value = d.url;
         urlInput.disabled = false;
+        unsavedUploads.add(d.url);
         li.querySelector('.v-note')!.textContent = `アップロードした動画（${file.name} / ${fmtBytes(d.size)}）`;
         dirty = true;
         refreshUsage();
@@ -414,6 +417,11 @@ const config = {
     const li = t.closest<HTMLLIElement>('.ed-row');
     if (!li) return;
     if (t.matches('[data-remove]')) {
+      const url = li.querySelector<HTMLInputElement>('.v-url')?.value;
+      if (url && unsavedUploads.has(url)) {
+        unsavedUploads.delete(url);
+        fetch(`/api/upload?url=${encodeURIComponent(url)}`, { method: 'DELETE' }).then(refreshUsage, () => {});
+      }
       li.remove();
       dirty = true;
     } else if (t.matches('[data-move]')) {
@@ -426,16 +434,31 @@ const config = {
 
   // ---------- 練習方法 ----------
   const trainingList = $('[data-training-list]');
-  function renderTraining(all: Article[], selected: string[]) {
-    const items = all.filter((a) => a.id.startsWith('training/'));
+  function renderTraining(selected: string[]) {
+    const items = allArticles
+      .filter((a) => a.id.startsWith('training/'))
+      .map((a) => ({ slug: a.id.slice('training/'.length), title: a.title }));
+    // サイトに未反映（作ったばかり等）の練習方法も、紐づけが外れないよう一覧に残す
+    for (const slug of selected) {
+      if (!items.some((i) => i.slug === slug)) items.push({ slug, title: `${slug}（サイトに反映待ち）` });
+    }
     trainingList.innerHTML = items.length
       ? items
-          .map((a) => {
-            const slug = a.id.slice('training/'.length);
-            return `<label class="ed-check" data-title="${escapeHtml(a.title)}"><input type="checkbox" name="training" value="${escapeHtml(slug)}" ${selected.includes(slug) ? 'checked' : ''} /><span>${escapeHtml(a.title)}</span></label>`;
-          })
+          .map(
+            (i) =>
+              `<label class="ed-check" data-title="${escapeHtml(i.title)}"><input type="checkbox" name="training" value="${escapeHtml(i.slug)}" ${selected.includes(i.slug) ? 'checked' : ''} /><span>${escapeHtml(i.title)}</span></label>`,
+          )
           .join('')
       : '<p class="ed-hint">練習方法の記事はまだありません。</p>';
+  }
+
+  /** 編集モードの見た目にする */
+  function enterEditMode(id: string) {
+    editId = id;
+    document.querySelector('h1')!.textContent = '記事を編集';
+    document.title = document.title.replace('記事を書く', '記事を編集');
+    $('[data-delete]').hidden = false;
+    if (location.search !== `?id=${encodeURIComponent(id)}`) history.replaceState(null, '', `/edit/?id=${encodeURIComponent(id)}`);
   }
   $<HTMLInputElement>('[data-training-filter]').addEventListener('input', (e) => {
     const q = (e.target as HTMLInputElement).value.trim();
@@ -494,7 +517,7 @@ const config = {
   }
 
   // ---------- 読み込み・書き出し ----------
-  function fill(a: { id?: string; title: string; description?: string; data: Record<string, any>; body: string }) {
+  function fill(a: { id?: string; title: string; description?: string; data: Record<string, any>; body?: string }) {
     const parts = (a.id ?? '').split('/');
     field<HTMLSelectElement>('category').value = parts[0] ?? '';
     if (parts.length === 3) {
@@ -614,16 +637,26 @@ const config = {
     btn.disabled = true;
     btn.textContent = '保存中…';
     try {
+      const wasEdit = !!editId;
       const r = editId
         ? await api('PUT', `/api/articles?id=${encodeURIComponent(editId)}`, { ...payload, sha })
         : await api('POST', '/api/articles', payload);
-      done(editId ? '更新しました' : '作成しました', r.id);
-      if (editId && r.id !== editId) history.replaceState(null, '', `/edit/?id=${encodeURIComponent(r.id)}`);
-      if (editId) {
-        // 続けて編集できるよう最新の sha を取り直す
-        const latest = await api('GET', `/api/articles?id=${encodeURIComponent(r.id)}`).catch(() => null);
-        if (latest) sha = latest.sha;
+      // 続けて編集・保存できるよう、保存後の状態に合わせる
+      sha = r.sha;
+      unsavedUploads.clear();
+      if (payload.newTraining && r.training) {
+        allArticles.push({ id: `training/${r.training}`, title: payload.newTraining.title, data: {} });
+        $<HTMLInputElement>('[data-new-training-toggle]').checked = false;
+        $('[data-new-training]').hidden = true;
+        for (const n of ['nt_title', 'nt_slug', 'nt_description', 'nt_body']) field(n).value = '';
       }
+      renderTraining(payload.newTraining && r.training ? [...payload.article.training, r.training] : payload.article.training);
+      if (r.id.startsWith('training/')) {
+        field<HTMLSelectElement>('category').disabled = true;
+        field('slug').readOnly = true;
+      }
+      enterEditMode(r.id);
+      done(wasEdit ? '更新しました' : '作成しました', r.id);
     } catch (ex) {
       errorEl.textContent = (ex as Error).message;
     } finally {
@@ -668,6 +701,7 @@ const config = {
     try {
       data = await (await fetch('/editor-data.json')).json();
     } catch {}
+    allArticles = data.articles;
     const opts = (id: string, xs: string[]) =>
       ($(`#${id}`).innerHTML = xs.map((x) => `<option value="${escapeHtml(x)}"></option>`).join(''));
     opts('ed-starters', data.starters);
@@ -675,30 +709,28 @@ const config = {
     opts('ed-tag-list', data.tags);
 
     if (editId) {
-      document.querySelector('h1')!.textContent = '記事を編集';
-      document.title = document.title.replace('記事を書く', '記事を編集');
-      $('[data-delete]').hidden = false;
+      enterEditMode(editId);
       try {
         const a = await api('GET', `/api/articles?id=${encodeURIComponent(editId)}`);
         sha = a.sha;
         fill({ id: a.id, title: a.data.title, description: a.data.description, data: a.data, body: a.body });
-        renderTraining(data.articles, a.data.training ?? []);
+        renderTraining(a.data.training ?? []);
       } catch (ex) {
         const local = data.articles.find((x) => x.id === editId);
         if (local) {
           // プレビュー環境：ビルド時のデータで表示だけする
-          fill(local);
-          renderTraining(data.articles, local.data.training ?? []);
+          fill({ ...local, body: '' });
+          renderTraining(local.data.training ?? []);
           setStatus(`${(ex as Error).message}`, 'warn');
         } else {
           setStatus((ex as Error).message, 'warn');
           canSave = false;
         }
       }
-      if (editId.startsWith('training/')) {
+      if (editId!.startsWith('training/')) {
         field<HTMLSelectElement>('category').disabled = true;
         field('slug').readOnly = true;
-        const n = data.articles.filter((x) => (x.data.training ?? []).includes(editId.slice('training/'.length))).length;
+        const n = data.articles.filter((x) => (x.data.training ?? []).includes(editId!.slice('training/'.length))).length;
         if (n) setStatus(`この練習方法は ${n} 件の記事から紐づけられています。削除すると紐づけが外れます。`);
       }
     } else {
@@ -709,7 +741,7 @@ const config = {
       for (const cb of form.querySelectorAll<HTMLInputElement>('input[name=versions]')) cb.checked = cb.value === cfg.current;
       const d = new Date();
       field('slug').value = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${Math.random().toString(36).slice(2, 6)}`;
-      renderTraining(data.articles, []);
+      renderTraining([]);
       updateVisibility();
     }
     dirty = false;

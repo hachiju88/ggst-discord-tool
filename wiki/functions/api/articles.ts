@@ -7,7 +7,8 @@
  * 保存すると GitHub にコミットされ、Cloudflare Pages が自動で再ビルドする（1〜2分で反映）。
  */
 import { json, userOf } from '../../server/auth';
-import { commit, getFile, ConflictError, type Change, type GitHubEnv } from '../../server/github';
+import { setRefs, releaseUnreferenced } from '../../server/media';
+import { commit, getFile, blobSha, ConflictError, type Change, type GitHubEnv } from '../../server/github';
 import {
   validate, toFile, parseFile, articleId, pathOf, isValidId, trainingInput, mediaKeys, InputError, type ArticleInput,
 } from '../../server/article';
@@ -75,11 +76,13 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     const id = articleId(a);
     const nt = newTrainingChange(req.newTraining, a);
     await checkTraining(env, a, nt?.slug);
-    const changes: Change[] = [...(nt ? [nt.change] : []), { path: pathOf(id), content: toFile(a), expectSha: null }];
+    const content = toFile(a);
+    const changes: Change[] = [...(nt ? [nt.change] : []), { path: pathOf(id), content, expectSha: null }];
     await commit(env, changes, `wiki: 記事を作成「${a.title}」${nt ? '＋練習方法' : ''}`);
+    await setRefs(env, id, mediaKeys(a));
     await log(env, id, 'create', user);
     if (nt) await log(env, `training/${nt.slug}`, 'create', user);
-    return json({ ok: true, id }, 201);
+    return json({ ok: true, id, sha: await blobSha(content), training: nt?.slug }, 201);
   } catch (e) {
     return fail(e);
   }
@@ -118,14 +121,14 @@ export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
         env.DB.prepare('DELETE FROM reactions WHERE page = ?').bind(oldId),
       ]);
     }
-    // 記事から外したアップロード動画は削除して容量を空ける
+    // 記事から外したアップロード動画は、ほかの記事でも使われていなければ削除して容量を空ける
     const keep = new Set(mediaKeys(a));
-    const removed = mediaKeys(old.data).filter((k) => !keep.has(k));
-    if (removed.length && env.MEDIA) await env.MEDIA.delete(removed);
+    await setRefs(env, id, [...keep], oldId);
+    await releaseUnreferenced(env, mediaKeys(old.data).filter((k) => !keep.has(k)));
 
     await log(env, id, id === oldId ? 'update' : `move:${oldId}`, user);
     if (nt) await log(env, `training/${nt.slug}`, 'create', user);
-    return json({ ok: true, id });
+    return json({ ok: true, id, sha: await blobSha(content), training: nt?.slug });
   } catch (e) {
     return fail(e);
   }
@@ -147,8 +150,8 @@ export const onRequestDelete: PagesFunction<Env> = async ({ request, env }) => {
       env.DB.prepare('DELETE FROM comments WHERE page = ?').bind(id),
       env.DB.prepare('DELETE FROM reactions WHERE page = ?').bind(id),
     ]);
-    const keys = mediaKeys(parseFile(cur.text).data);
-    if (keys.length && env.MEDIA) await env.MEDIA.delete(keys);
+    await setRefs(env, id, []);
+    await releaseUnreferenced(env, mediaKeys(parseFile(cur.text).data));
     await log(env, id, 'delete', user);
     return json({ ok: true });
   } catch (e) {

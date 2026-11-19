@@ -68,13 +68,6 @@ export function isValidId(id: string) {
   return parts.length === 2 && SLUG.test(parts[1]);
 }
 
-/** 本文に危険なHTML（スクリプト等）が入っていないか。Markdown内のHTMLはそのままサイトに出るため */
-export function assertSafeMarkdown(text: string) {
-  if (/<\s*(script|iframe|object|embed|style|link|meta|form|base)\b/i.test(text) || /\son\w+\s*=/i.test(text) || /javascript:/i.test(text)) {
-    throw new InputError('本文に使えないHTML（script・iframe など）が含まれています');
-  }
-}
-
 export function validate(raw: any): ArticleInput {
   if (!raw || typeof raw !== 'object') throw new InputError('データが空です');
   const category = raw.category;
@@ -117,7 +110,6 @@ export function validate(raw: any): ArticleInput {
 
   const body = typeof raw.body === 'string' ? raw.body.replace(/\r\n/g, '\n') : '';
   if (body.length > 50000) throw new InputError('本文は50000文字までです');
-  assertSafeMarkdown(body);
 
   return {
     category,

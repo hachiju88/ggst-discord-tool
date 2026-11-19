@@ -25,8 +25,6 @@ export async function GET() {
       training: d.data.training,
       tags: d.data.tags,
     },
-    body: d.body ?? '',
-    editable: d.filePath?.endsWith('.md') ?? false,
   }));
   const uniq = (xs: (string | undefined)[]) => [...new Set(xs.filter(Boolean))].sort() as string[];
   return new Response(

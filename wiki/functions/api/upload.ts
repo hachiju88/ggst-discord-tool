@@ -2,10 +2,14 @@
  * Cloudflare Pages Functions: 動画アップロード（R2 に保存）
  *   POST /api/upload   本体=動画ファイル, ヘッダー x-filename  → { url, size }
  *   GET  /api/upload   → 使用量 { bytes, count, limit }
+ *   DELETE /api/upload?url=/media/...  → 自分がアップロードした未使用の動画を削除
+ * 保存されないまま 24 時間たったアップロードは、次のアップロード時にまとめて削除する。
  */
 import { json, userOf } from '../../server/auth';
+import { recordUpload, sweepOrphans, discardOwnUpload } from '../../server/media';
 
 interface Env {
+  DB: D1Database;
   MEDIA: R2Bucket;
 }
 
@@ -13,8 +17,9 @@ export const MAX_BYTES = 10 * 1024 * 1024; // 1ファイル 10MB まで
 const FREE_BYTES = 10 * 1024 ** 3; // R2 無料枠 10GB
 const TYPES: Record<string, string> = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
 
-export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  if (!userOf(request)) return json({ error: 'ログインが必要です' }, 401);
+export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUntil }) => {
+  const user = userOf(request);
+  if (!user) return json({ error: 'ログインが必要です' }, 401);
   if (!env.MEDIA) return json({ error: '動画の保存先（R2）が設定されていません' }, 500);
   const type = (request.headers.get('content-type') ?? '').split(';')[0].trim();
   const ext = TYPES[type];
@@ -33,6 +38,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     httpMetadata: { contentType: type },
     customMetadata: { name, uploadedAt: now.toISOString() },
   });
+  await recordUpload(env, key, user, buf.byteLength);
+  waitUntil(sweepOrphans(env).catch((e) => console.error('sweep failed', e)));
   return json({ url: `/media/${key}`, size: buf.byteLength }, 201);
 };
 
@@ -50,4 +57,13 @@ export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
   return json({ bytes, count, limit: FREE_BYTES, maxFile: MAX_BYTES, configured: true });
+};
+
+export const onRequestDelete: PagesFunction<Env> = async ({ request, env }) => {
+  const user = userOf(request);
+  if (!user) return json({ error: 'ログインが必要です' }, 401);
+  const url = new URL(request.url).searchParams.get('url') ?? '';
+  if (!url.startsWith('/media/videos/')) return json({ error: '不正な指定です' }, 400);
+  const removed = await discardOwnUpload(env, url.slice('/media/'.length), user);
+  return json({ ok: true, removed });
 };

@@ -33,11 +33,11 @@ async function gh<T>(env: GitHubEnv, path: string, init: RequestInit = {}): Prom
 const decodeBase64 = (b64: string) =>
   new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\n/g, '')), (c) => c.charCodeAt(0)));
 
-/** ファイルを取得（無ければ null）。sha は同時編集の検出に使う */
-export async function getFile(env: GitHubEnv, path: string): Promise<{ text: string; sha: string } | null> {
+/** ファイルを取得（無ければ null）。sha は同時編集の検出に使う。ref 省略時はブランチの最新 */
+export async function getFile(env: GitHubEnv, path: string, ref?: string): Promise<{ text: string; sha: string } | null> {
   const r = await gh<{ content: string; sha: string }>(
     env,
-    `/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(branch(env))}`,
+    `/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(ref ?? branch(env))}`,
   );
   if (r.status === 404) return null;
   if (r.status !== 200) throw new Error(`GitHub からの読み込みに失敗しました (${r.status})`);
@@ -48,21 +48,36 @@ export type Change =
   | { path: string; content: string; expectSha?: string | null } // expectSha: null=新規のみ / 文字列=その版からの更新のみ
   | { path: string; delete: true; expectSha?: string };
 
-/** 変更を 1 コミットで反映する。先に他の人が更新していたら ConflictError */
-export async function commit(env: GitHubEnv, changes: Change[], message: string): Promise<string> {
-  for (const c of changes) {
-    if (c.expectSha === undefined) continue;
-    const cur = await getFile(env, c.path);
-    if (c.expectSha === null && cur) throw new ConflictError('同じURL名の記事がすでにあります');
-    if (c.expectSha && (!cur || cur.sha !== c.expectSha)) {
-      throw new ConflictError('ほかの人が先にこの記事を更新しました。ページを読み込み直してください');
-    }
-  }
+/** Git の blob sha（GitHub の contents API が返す sha と同じ）。保存直後の sha をクライアントに返すのに使う */
+export async function blobSha(text: string): Promise<string> {
+  const body = new TextEncoder().encode(text);
+  const head = new TextEncoder().encode(`blob ${body.byteLength}\0`);
+  const buf = new Uint8Array(head.byteLength + body.byteLength);
+  buf.set(head);
+  buf.set(body, head.byteLength);
+  const digest = await crypto.subtle.digest('SHA-1', buf);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
+/**
+ * 変更を 1 コミットで反映する。先に他の人が更新していたら ConflictError。
+ * 競合チェックは「このコミットの親になる HEAD」に対して毎回行うので、
+ * チェック後に別の保存が割り込んでも気づかず上書きすることはない。
+ */
+export async function commit(env: GitHubEnv, changes: Change[], message: string): Promise<string> {
   for (let attempt = 0; attempt < 3; attempt++) {
     const ref = await gh<{ object: { sha: string } }>(env, `/git/ref/heads/${branch(env)}`);
     if (ref.status !== 200) throw new Error(`ブランチを取得できません (${ref.status})`);
     const head = ref.data.object.sha;
+
+    for (const c of changes) {
+      if (c.expectSha === undefined) continue;
+      const cur = await getFile(env, c.path, head);
+      if (c.expectSha === null && cur) throw new ConflictError('同じURL名の記事がすでにあります');
+      if (c.expectSha && (!cur || cur.sha !== c.expectSha)) {
+        throw new ConflictError('ほかの人が先にこの記事を更新しました。ページを読み込み直してください');
+      }
+    }
     const base = await gh<{ tree: { sha: string } }>(env, `/git/commits/${head}`);
     const tree = await gh<{ sha: string }>(env, '/git/trees', {
       method: 'POST',
