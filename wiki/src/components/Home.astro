@@ -1,35 +1,117 @@
 ---
 import { getCollection } from 'astro:content';
 import { CATEGORIES, CURRENT_VERSION, isOld } from '../site.config';
+import { lastUpdatedOf } from '../lib/dates';
 
+const catIds = CATEGORIES.map((c) => c.id) as string[];
 const docs = await getCollection('docs');
-const countOf = (id: string) =>
-  docs.filter((d) => d.id.startsWith(id + '/') && !isOld(d.data)).length;
+// 現行バージョンで使える記事だけを数える・並べる（old はカテゴリの記事数と同じく除外）
+const articles = docs.filter((d) => {
+  const top = d.id.split('/')[0];
+  return catIds.includes(top) && d.id !== top && !isOld(d.data);
+});
+const countOf = (id: string) => articles.filter((d) => d.id.startsWith(id + '/')).length;
+const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+
+const latest = articles
+  .map((d) => ({ d, at: lastUpdatedOf(d.filePath) }))
+  .sort((a, b) => (b.at?.getTime() ?? 0) - (a.at?.getTime() ?? 0) || a.d.id.localeCompare(b.d.id))
+  .slice(0, 6);
+const fmt = (at?: Date) => {
+  if (!at) return '';
+  const jst = new Date(at.getTime() + 9 * 3600e3);
+  return `${pad(jst.getUTCMonth() + 1)}/${pad(jst.getUTCDate())}`;
+};
+const catOf = (id: string) => CATEGORIES.find((c) => c.id === id.split('/')[0])!;
+const combos = articles.filter((d) => d.id.startsWith('combos/')).length;
 ---
 
 <section class="hero-x not-content">
-  <div class="yoyo" aria-hidden="true"></div>
-  <p class="kicker">GUILTY GEAR -STRIVE- / CHARACTER WIKI</p>
-  <h1 id="_top">BRIDGET<br />LAB</h1>
-  <p class="lead">
-    コミュニティで共有されてきたブリジットの知識を、カテゴリ・立ち位置・始動技ごとに整理した攻略wikiです。
-  </p>
-  <span class="ver">現行 Ver.{CURRENT_VERSION} 対応</span>
+  <div class="hero-bg" aria-hidden="true"></div>
+  <div class="hero-hud">
+    <span class="live" aria-hidden="true">LIVE LAB</span>
+    <span aria-hidden="true">ARTICLES <b>{pad(articles.length, 3)}</b> · COMBOS <b>{pad(combos, 3)}</b> · VER <b>{CURRENT_VERSION}</b></span>
+    <span class="sr-only">現行 Ver.{CURRENT_VERSION} 対応。記事 {articles.length} 件、うちコンボ {combos} 件。</span>
+  </div>
+  <div class="hero-text">
+    <img class="ggst-logo rv" style="--d:0.05s" src="/img/ggst-logo.webp" width="1000" height="203" alt="GUILTY GEAR -STRIVE-" />
+    <p class="kicker rv" style="--d:0.15s">CHARACTER WIKI</p>
+    <h1 id="_top" class="rv" style="--d:0.25s">BRIDGET<br />LAB</h1>
+    <p class="lead rv" style="--d:0.4s">
+      コミュニティで共有されてきたブリジットの知識を、カテゴリ・立ち位置・始動技ごとに整理した攻略wikiです。
+    </p>
+    <div class="hero-actions rv" style="--d:0.5s">
+      <a class="btn primary" href="/articles/">記事を探す</a>
+      <a class="btn" href="/edit/">＋ 記事を書く</a>
+    </div>
+  </div>
+  <div class="hero-art-wrap">
+    <img class="hero-art" src="/img/hero-bridget.webp" width="1188" height="743" alt="" fetchpriority="high" />
+  </div>
 </section>
 
-<p class="section-label not-content">CATEGORIES</p>
-<ul class="cat-grid not-content">
-  {
-    CATEGORIES.map((c, i) => (
-      <li>
-        <a href={`/${c.id}/`}>
-          <span class="num">{String(i + 1).padStart(2, '0')}</span>
-          <span class="en">{c.en}</span>
-          <span class="ja">{c.label}</span>
-          <span class="desc">{c.desc}</span>
-          <span class="n">{countOf(c.id)} 記事</span>
-        </a>
-      </li>
-    ))
+<div class="home-grid not-content">
+  <section class="home-cats">
+    <p class="section-label">CATEGORIES <span>— カテゴリ</span></p>
+    <ul class="cat-grid">
+      {
+        CATEGORIES.map((c, i) => (
+          <li class="place" style={`--d:${(i * 0.05).toFixed(2)}s`}>
+            <a href={`/${c.id}/`}>
+              <span class="num">{pad(i + 1)}</span>
+              <span class="en">{c.en}</span>
+              <span class="ja">{c.label}</span>
+              <span class="desc">{c.desc}</span>
+              <span class="n">{pad(countOf(c.id), 3)} ARTICLES</span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
+
+  <section class="home-log place" style="--d:0.2s">
+    <p class="section-label">RX LOG <span>— 新着・更新</span></p>
+    <ol class="rx-log">
+      {
+        latest.map(({ d, at }) => (
+          <li>
+            <a href={`/${d.id}/`}>
+              <span class="rx">{at ? `RX ${fmt(at)}` : 'RX'}</span>
+              <span class="t">
+                <span class="c">{catOf(d.id).en}</span>
+                {d.data.title}
+              </span>
+              <span class="go">読む →</span>
+            </a>
+          </li>
+        ))
+      }
+    </ol>
+    <a class="rx-all" href="/articles/">すべての記事 →</a>
+  </section>
+</div>
+
+<a class="write-cta not-content place" href="/edit/">
+  <img src="/img/bridget-chibi.webp" width="600" height="511" alt="" loading="lazy" />
+  <span class="body">
+    <span class="en">SHARE YOUR KNOWLEDGE</span>
+    <span class="ja">見つけたコンボや連携を、記事にして残そう</span>
+    <span class="go">＋ 記事を書く</span>
+  </span>
+</a>
+
+<script>
+  // スクロールで見えたら .is-in を付ける（JSが動かない場合は最初から表示）
+  const els = document.querySelectorAll<HTMLElement>('.place');
+  // js-place クラスは <head> のインラインスクリプトで先に付けている
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); }
+      },
+      { rootMargin: '0px 0px -8% 0px' },
+    );
+    els.forEach((el) => io.observe(el));
   }
-</ul>
+</script>

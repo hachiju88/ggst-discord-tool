@@ -31,16 +31,22 @@ export default defineConfig({
       // 検索エンジンに載せない
       head: [
         { tag: 'meta', attrs: { name: 'robots', content: 'noindex, nofollow, noarchive' } },
+        // スクロールで出す要素を最初の描画前に隠しておく（後から隠すとちらつくため）
+        {
+          tag: 'script',
+          content: "if ('IntersectionObserver' in window) document.documentElement.classList.add('js-place');",
+        },
         { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' } },
         { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' } },
         {
           tag: 'link',
           attrs: {
             rel: 'stylesheet',
-            href: 'https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap',
+            href: 'https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=VT323&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap',
           },
         },
       ],
+      favicon: '/favicon.png',
       customCss: ['./src/styles/theme.css'],
       routeMiddleware: './src/route-middleware.ts',
       components: {

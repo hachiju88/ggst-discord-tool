@@ -243,7 +243,13 @@ const firstCombo = (d: (typeof docs)[number]) => {
           ? 'まだお気に入りがありません。記事の ★ を押すと追加できます。'
           : '条件に合う記事がありません。';
     };
-    form.addEventListener('change', apply);
+    // カードの登場アニメーションは最初の表示だけ（絞り込み・並び替えのたびに再生しない）
+    const settle = () => list.classList.add('is-settled');
+    setTimeout(settle, 1000);
+    form.addEventListener('change', () => {
+      settle();
+      apply();
+    });
     // お気に入りを外したときは一覧から消さず、次に条件を変えたときに反映する
     let first = true;
     document.addEventListener('reactions:change', () => {
