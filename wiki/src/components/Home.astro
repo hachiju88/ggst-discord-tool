@@ -72,6 +72,7 @@ const combos = articles.filter((d) => d.id.startsWith('combos/')).length;
 
   <section class="home-log place" style="--d:0.2s">
     <p class="section-label">RX LOG <span>— 新着・更新</span></p>
+    {latest.length === 0 && <p class="rx-empty">まだ記事がありません。最初の1本を書いてみよう。</p>}
     <ol class="rx-log">
       {
         latest.map(({ d, at }) => (

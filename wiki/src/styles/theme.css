@@ -518,6 +518,7 @@ body {
 .rx-log .c { margin-right: 0.5em; font-family: var(--display); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.12em; color: var(--pink); }
 .rx-log .go { font-size: 0.75rem; color: var(--sl-color-gray-3); transition: color 0.2s, transform 0.25s var(--ease-out); }
 .rx-log a:hover .go { color: var(--sky); transform: translateX(3px); }
+.rx-empty { margin: 0.4rem 0 0; padding: 0.8rem 0.2rem; font-size: var(--sl-text-sm); color: var(--sl-color-gray-3); border-bottom: 1px dashed var(--sl-color-gray-5); }
 .rx-all { display: inline-block; margin-top: 0.8rem; font-size: var(--sl-text-sm); color: var(--sky); text-decoration: none; }
 .rx-all:hover { text-decoration: underline; }
 
