@@ -6,6 +6,11 @@ versions:
 position: corner
 starter: 遠S
 difficulty: 3
+videos:
+  - url: /media/videos/202611/d694142e-571d-42af-bb3b-b07cb26abafe.mp4
+    title: 遠S始動（画面端）
+  - url: /media/videos/202611/70a271e9-126c-4d9a-9e7e-b0266fa193ef.mp4
+    title: 5HS始動（画面端）
 tags:
   - 画面端
   - 壁割り
