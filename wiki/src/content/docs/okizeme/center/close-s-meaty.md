@@ -6,6 +6,9 @@ versions:
 position: center
 starter: 遠S
 difficulty: 2
+videos:
+  - url: /media/videos/202611/a809b665-66aa-4010-ad38-ed9f5e0f68d0.mp4
+    title: 近S起き攻めからの択
 combos:
   - route: 遠S > 派生S > キックスタート > 発射 > 近S（重ね）
 tags:
