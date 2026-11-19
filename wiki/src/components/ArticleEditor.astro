@@ -196,7 +196,7 @@ const config = {
 <script>
   import { marked } from 'marked';
   import { MOVES, type Move } from '../lib/moves';
-  import { attachCombobox } from '../scripts/combobox';
+  import { attachCombobox, resolveNotation, isImeEnter, trackComposition } from '../scripts/combobox';
 
   type Video = { url: string; title?: string };
   type ComboRow = { route: string; damage?: number; tension?: number; note?: string };
@@ -207,7 +207,7 @@ const config = {
     data: Record<string, any>;
     body?: string;
   };
-  type EditorData = { articles: Article[]; tags: string[]; starters: string[]; opponents: string[] };
+  type EditorData = { articles: Article[]; tags: string[]; opponents: string[] };
 
   const MAX_BYTES = 10 * 1024 * 1024;
   const root = document.querySelector<HTMLElement>('[data-editor]')!;
@@ -432,6 +432,17 @@ const config = {
     comboList.append(li);
     return li;
   }
+  /** 検索欄に入力したまま確定していない技を、その行の最後に追加する（保存時に取りこぼさないため） */
+  function commitPendingSteps() {
+    for (const li of comboList.children) {
+      const add = li.querySelector<HTMLInputElement>('.c-add')!;
+      const v = add.value.trim();
+      if (!v) continue;
+      const route = li.querySelector<HTMLInputElement>('.c-route')!;
+      setSteps(li, [...splitRoute(route.value), resolveNotation(v, moveOptions)]);
+      add.value = '';
+    }
+  }
   const readCombos = (): ComboRow[] =>
     [...comboList.children]
       .map((li) => {
@@ -467,9 +478,11 @@ const config = {
       const steps = splitRoute(li.querySelector<HTMLInputElement>('.c-route')!.value);
       if (!steps.length) {
         setSteps(li, [next]);
-      } else if (steps[0] === prevStarter) {
-        // 前の始動技から始まっている行だけ置き換える（手で変えた行はそのまま）
-        setSteps(li, [next, ...steps.slice(1)]);
+      } else {
+        // 前の始動技から始まっている行だけ置き換える（手で変えた行はそのまま）。
+        // "近S (CH)" のような注記つきでも、注記は残して技だけ置き換える
+        const m = steps[0].match(/^(.*?)(\s*[(\[（［].*)?$/)!;
+        if (m[1].trim() === prevStarter) setSteps(li, [next + (m[2] ?? ''), ...steps.slice(1)]);
       }
     }
     prevStarter = next;
@@ -557,8 +570,9 @@ const config = {
     tagInput.value = '';
     renderTags();
   };
+  const tagIme = trackComposition(tagInput);
   tagInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.isComposing) {
+    if (e.key === 'Enter' && !isImeEnter(e, tagIme.composing)) {
       e.preventDefault();
       commitTag();
     }
@@ -615,6 +629,7 @@ const config = {
   }
 
   function collect() {
+    commitPendingSteps();
     const c = category();
     const techdata = ['combos', 'okizeme', 'setplay'].includes(c);
     const ch = form.querySelector<HTMLInputElement>('input[name=counterHit]:checked')?.value;
@@ -764,7 +779,7 @@ const config = {
 
   // ---------- 初期化 ----------
   (async () => {
-    let data: EditorData = { articles: [], tags: [], starters: [], opponents: [] };
+    let data: EditorData = { articles: [], tags: [], opponents: [] };
     try {
       data = await (await fetch('/editor-data.json')).json();
     } catch {}

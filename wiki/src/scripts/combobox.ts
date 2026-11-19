@@ -24,6 +24,29 @@ function match(m: Move, q: string) {
   return hay.some((h) => h.includes(q)) ? 2 : 0;
 }
 
+/** 候補のうち、入力と同じ表記のもの（表記ゆれを正式な表記にそろえるのに使う） */
+export function resolveNotation(value: string, options: Move[]): string {
+  const v = value.trim();
+  return options.find((m) => normalize(m.notation) === normalize(v))?.notation ?? v;
+}
+
+/**
+ * 日本語入力の変換確定の Enter かどうか。
+ * Safari は確定の Enter を isComposing=false・keyCode 229 で送ってくるので両方見る。
+ */
+export function isImeEnter(e: KeyboardEvent, composing: boolean) {
+  return e.isComposing || composing || e.keyCode === 229;
+}
+
+/** compositionstart〜end の間 true になる状態を input に付ける */
+export function trackComposition(input: HTMLInputElement) {
+  const state = { composing: false };
+  input.addEventListener('compositionstart', () => (state.composing = true));
+  // Safari は compositionend の直後に確定の keydown が来るため、少し遅らせて解除する
+  input.addEventListener('compositionend', () => setTimeout(() => (state.composing = false), 0));
+  return state;
+}
+
 let uid = 0;
 
 export function attachCombobox(
@@ -48,16 +71,20 @@ export function attachCombobox(
 
   let items: Move[] = [];
   let active = -1;
+  const ime = trackComposition(input);
 
   const render = () => {
     const q = normalize(input.value);
-    items = options()
+    const scored = options()
       .map((m, i) => ({ m, s: match(m, q), i }))
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s || a.i - b.i)
-      .slice(0, 40)
-      .map((x) => x.m);
-    active = q && items.length ? 0 : -1;
+      .slice(0, 40);
+    items = scored.map((x) => x.m);
+    // 先頭の候補を選んでおくのは「表記が前方一致」か「2文字以上で技名・読みに一致」のときだけ。
+    // 「S」のような1文字の入力で、名前に含むだけの候補が勝手に選ばれないようにする（その場合は「そのまま追加」）
+    const top = scored[0]?.s ?? 0;
+    const strong = q !== '' && (top >= 3 || (top >= 2 && q.length >= 2));
     list.replaceChildren(
       ...items.map((m, i) => {
         const li = document.createElement('li');
@@ -82,12 +109,18 @@ export function attachCombobox(
       li.textContent = `「${input.value.trim()}」をそのまま追加`;
       list.append(li);
     }
+    active = strong ? 0 : q ? list.children.length - 1 : -1;
     highlight();
     open(list.children.length > 0);
   };
   const open = (on: boolean) => {
     list.hidden = !on;
     input.setAttribute('aria-expanded', String(on));
+    if (!on) {
+      // 閉じたら選択状態を捨てる（閉じた後の Enter で前の候補が再度選ばれないように）
+      active = -1;
+      input.removeAttribute('aria-activedescendant');
+    }
   };
   const highlight = () => {
     [...list.children].forEach((li, i) => li.setAttribute('aria-selected', String(i === active)));
@@ -101,8 +134,7 @@ export function attachCombobox(
     value = value.trim();
     if (!value) return;
     // 表記ゆれ（"2k" など）は候補の正式な表記にそろえる
-    const exact = options().find((m) => normalize(m.notation) === normalize(value));
-    if (exact) value = exact.notation;
+    value = resolveNotation(value, options());
     // 決定した値を先に入力欄へ反映してから通知する（通知先が入力欄を読むため）
     input.value = clearOnPick ? '' : value;
     onPick(value);
@@ -119,8 +151,7 @@ export function attachCombobox(
   if (!clearOnPick) {
     // 候補から選ばずに入力して欄を離れたときも、表記ゆれを正式な表記にそろえる
     input.addEventListener('change', () => {
-      const exact = options().find((m) => normalize(m.notation) === normalize(input.value));
-      if (exact) input.value = exact.notation;
+      if (input.value.trim()) input.value = resolveNotation(input.value, options());
     });
   }
   input.addEventListener('focus', render);
@@ -136,13 +167,14 @@ export function attachCombobox(
       e.preventDefault();
       active = n ? (active - 1 + n) % n : -1;
       highlight();
-    } else if (e.key === 'Enter' && !e.isComposing) {
+    } else if (e.key === 'Enter') {
+      if (isImeEnter(e, ime.composing)) return;
       e.preventDefault();
-      if (active >= 0) pickAt(active);
-      else pick(input.value);
+      if (!list.hidden && active >= 0) pickAt(active);
+      else if (input.value.trim()) pick(input.value);
     } else if (e.key === 'Escape') {
       open(false);
-    } else if (e.key === 'Backspace' && !input.value && clearOnPick) {
+    } else if (e.key === 'Backspace' && !input.value && clearOnPick && !ime.composing) {
       input.dispatchEvent(new CustomEvent('combobox:backspace'));
     }
   });
@@ -152,5 +184,11 @@ export function attachCombobox(
     if (!li) return;
     e.preventDefault();
     pickAt([...list.children].indexOf(li));
+  });
+  // 一覧は <label> の中に置かれることがある。候補のクリックがラベルのクリックとして
+  // 入力欄にフォーカスを戻し、一覧が開き直すのを防ぐ
+  list.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
   });
 }

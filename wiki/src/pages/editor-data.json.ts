@@ -31,7 +31,6 @@ export async function GET() {
     JSON.stringify({
       articles,
       tags: uniq(docs.flatMap((d) => d.data.tags)),
-      starters: uniq(docs.map((d) => d.data.starter)),
       opponents: uniq(docs.map((d) => d.data.opponent)),
     }),
     { headers: { 'content-type': 'application/json; charset=utf-8' } },
