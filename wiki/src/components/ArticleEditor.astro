@@ -75,9 +75,8 @@ const config = {
       <h2>技・ヒット情報</h2>
       <div class="ed-grid">
         <label class="ed-field">
-          <span>始動技</span>
-          <input name="starter" maxlength="20" list="ed-starters" placeholder="例：2K" />
-          <datalist id="ed-starters"></datalist>
+          <span>始動技 <small>選ぶとコンボパーツの1つ目にも入ります</small></span>
+          <input name="starter" maxlength="20" placeholder="技名や「2K」で検索" />
         </label>
         <fieldset class="ed-field">
           <legend>カウンターヒット</legend>
@@ -124,7 +123,7 @@ const config = {
     </section>
 
     <section class="ed-section">
-      <h2>コンボパーツ <small>「&gt;」でつなぐ。例：2K &gt; 2D &gt; 236K</small></h2>
+      <h2>コンボパーツ <small>技を検索して選ぶと順番に追加されます。候補にない書き方は入力して Enter</small></h2>
       <ol class="ed-rows" data-combos></ol>
       <div class="ed-row-actions">
         <button type="button" class="ed-btn" data-add-combo>＋ コンボパーツを追加</button>
@@ -196,6 +195,8 @@ const config = {
 
 <script>
   import { marked } from 'marked';
+  import { MOVES, type Move } from '../lib/moves';
+  import { attachCombobox, resolveNotation, isImeEnter, trackComposition } from '../scripts/combobox';
 
   type Video = { url: string; title?: string };
   type ComboRow = { route: string; damage?: number; tension?: number; note?: string };
@@ -206,7 +207,7 @@ const config = {
     data: Record<string, any>;
     body?: string;
   };
-  type EditorData = { articles: Article[]; tags: string[]; starters: string[]; opponents: string[] };
+  type EditorData = { articles: Article[]; tags: string[]; opponents: string[] };
 
   const MAX_BYTES = 10 * 1024 * 1024;
   const root = document.querySelector<HTMLElement>('[data-editor]')!;
@@ -364,22 +365,46 @@ const config = {
 
   // ---------- コンボパーツ ----------
   const comboList = $<HTMLOListElement>('[data-combos]');
-  function comboPreview(route: string) {
-    const steps = route.split('>').map((s) => s.trim()).filter(Boolean);
-    return steps.map((s) => `<kbd>${escapeHtml(s)}</kbd>`).join('<i>→</i>');
+  /** 技の候補（技データ＋既存記事で使われている書き方） */
+  let moveOptions: Move[] = MOVES;
+  const splitRoute = (route: string) => route.split('>').map((s) => s.trim()).filter(Boolean);
+  const joinRoute = (steps: string[]) => steps.join(' > ');
+
+  /** コンボ行の手順を書き換えて表示を更新する */
+  function setSteps(li: Element, steps: string[]) {
+    const route = li.querySelector<HTMLInputElement>('.c-route')!;
+    route.value = joinRoute(steps);
+    renderSteps(li);
+    dirty = true;
   }
+  function renderSteps(li: Element) {
+    const steps = splitRoute(li.querySelector<HTMLInputElement>('.c-route')!.value);
+    li.querySelector('.c-steps')!.innerHTML = steps
+      .map(
+        (s, i) =>
+          `${i ? '<i aria-hidden="true">→</i>' : ''}<span class="c-step"><kbd>${escapeHtml(s)}</kbd><button type="button" data-step-remove="${i}" aria-label="${escapeHtml(s)}を外す">×</button></span>`,
+      )
+      .join('');
+  }
+
   function addComboRow(c: ComboRow = { route: '' }) {
     const li = document.createElement('li');
     li.className = 'ed-row';
     li.innerHTML = `
       <div class="ed-row-main">
-        <input class="c-route" placeholder="2K > 2D > 236K (追加) > 214S" maxlength="300" />
+        <div class="c-builder">
+          <div class="c-steps"></div>
+          <div class="c-add-wrap"><input class="c-add" placeholder="＋ 技を検索（例：2K、スター、623）" maxlength="40" /></div>
+        </div>
+        <details class="c-raw">
+          <summary>テキストで直接編集</summary>
+          <input class="c-route" placeholder="2K > 2D > 236K (追加) > 214S" maxlength="300" />
+        </details>
         <div class="ed-inline">
           <input class="c-damage" type="number" min="0" max="9999" placeholder="ダメージ" inputmode="numeric" />
           <input class="c-tension" type="number" min="0" max="100" placeholder="テンション%" inputmode="numeric" />
           <input class="c-note" placeholder="補足（任意）" maxlength="200" />
         </div>
-        <div class="c-preview"></div>
       </div>
       <div class="ed-row-tools">
         <button type="button" data-move="-1" title="上へ">↑</button>
@@ -391,11 +416,32 @@ const config = {
     q<HTMLInputElement>('.c-damage').value = c.damage?.toString() ?? '';
     q<HTMLInputElement>('.c-tension').value = c.tension?.toString() ?? '';
     q<HTMLInputElement>('.c-note').value = c.note ?? '';
-    const pv = () => (q('.c-preview').innerHTML = comboPreview(q<HTMLInputElement>('.c-route').value));
-    q('.c-route').addEventListener('input', pv);
-    pv();
+    q('.c-route').addEventListener('input', () => renderSteps(li));
+    renderSteps(li);
+    const add = q<HTMLInputElement>('.c-add');
+    attachCombobox(add, () => moveOptions, (v) => setSteps(li, [...splitRoute(q<HTMLInputElement>('.c-route').value), v]));
+    // 空欄で Backspace → 最後の技を外す
+    add.addEventListener('combobox:backspace', () => setSteps(li, splitRoute(q<HTMLInputElement>('.c-route').value).slice(0, -1)));
+    li.querySelector('.c-steps')!.addEventListener('click', (e) => {
+      const i = (e.target as HTMLElement).dataset.stepRemove;
+      if (i === undefined) return;
+      const steps = splitRoute(q<HTMLInputElement>('.c-route').value);
+      steps.splice(Number(i), 1);
+      setSteps(li, steps);
+    });
     comboList.append(li);
     return li;
+  }
+  /** 検索欄に入力したまま確定していない技を、その行の最後に追加する（保存時に取りこぼさないため） */
+  function commitPendingSteps() {
+    for (const li of comboList.children) {
+      const add = li.querySelector<HTMLInputElement>('.c-add')!;
+      const v = add.value.trim();
+      if (!v) continue;
+      const route = li.querySelector<HTMLInputElement>('.c-route')!;
+      setSteps(li, [...splitRoute(route.value), resolveNotation(v, moveOptions)]);
+      add.value = '';
+    }
   }
   const readCombos = (): ComboRow[] =>
     [...comboList.children]
@@ -409,7 +455,40 @@ const config = {
         };
       })
       .filter((c) => c.route);
-  $('[data-add-combo]').addEventListener('click', () => addComboRow().querySelector('input')!.focus());
+  $('[data-add-combo]').addEventListener('click', () => {
+    const starter = field('starter').value.trim();
+    const li = addComboRow({ route: starterVisible() && starter ? starter : '' });
+    li.querySelector<HTMLInputElement>('.c-add')!.focus();
+  });
+
+  // ---------- 始動技 → コンボパーツの1つ目に自動で入れる ----------
+  const starterVisible = () => ['combos', 'okizeme', 'setplay'].includes(category());
+  let prevStarter = '';
+  function syncStarter() {
+    const next = field('starter').value.trim();
+    if (next === prevStarter) return;
+    // 始動技を空にしたときはコンボパーツには手を付けない
+    if (!next) {
+      prevStarter = next;
+      return;
+    }
+    const rows = [...comboList.children];
+    if (!rows.length) addComboRow({ route: next });
+    for (const li of rows) {
+      const steps = splitRoute(li.querySelector<HTMLInputElement>('.c-route')!.value);
+      if (!steps.length) {
+        setSteps(li, [next]);
+      } else {
+        // 前の始動技から始まっている行だけ置き換える（手で変えた行はそのまま）。
+        // "近S (CH)" のような注記つきでも、注記は残して技だけ置き換える
+        const m = steps[0].match(/^(.*?)(\s*[(\[（［].*)?$/)!;
+        if (m[1].trim() === prevStarter) setSteps(li, [next + (m[2] ?? ''), ...steps.slice(1)]);
+      }
+    }
+    prevStarter = next;
+  }
+  attachCombobox(field('starter'), () => moveOptions, () => syncStarter(), { clearOnPick: false });
+  field('starter').addEventListener('change', syncStarter);
 
   // 並べ替え・削除（動画・コンボ共通）
   root.addEventListener('click', (e) => {
@@ -491,8 +570,9 @@ const config = {
     tagInput.value = '';
     renderTags();
   };
+  const tagIme = trackComposition(tagInput);
   tagInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.isComposing) {
+    if (e.key === 'Enter' && !isImeEnter(e, tagIme.composing)) {
       e.preventDefault();
       commitTag();
     }
@@ -532,6 +612,7 @@ const config = {
     field('noVersion').checked = !vs;
     for (const cb of form.querySelectorAll<HTMLInputElement>('input[name=versions]')) cb.checked = !!vs?.includes(cb.value);
     field('starter').value = d.starter ?? '';
+    prevStarter = d.starter ?? '';
     const ch = d.counterHit === undefined ? '' : d.counterHit ? 'yes' : 'no';
     form.querySelector<HTMLInputElement>(`input[name=counterHit][value="${ch}"]`)!.checked = true;
     field('damage').value = d.damage?.toString() ?? '';
@@ -548,6 +629,7 @@ const config = {
   }
 
   function collect() {
+    commitPendingSteps();
     const c = category();
     const techdata = ['combos', 'okizeme', 'setplay'].includes(c);
     const ch = form.querySelector<HTMLInputElement>('input[name=counterHit]:checked')?.value;
@@ -697,14 +779,20 @@ const config = {
 
   // ---------- 初期化 ----------
   (async () => {
-    let data: EditorData = { articles: [], tags: [], starters: [], opponents: [] };
+    let data: EditorData = { articles: [], tags: [], opponents: [] };
     try {
       data = await (await fetch('/editor-data.json')).json();
     } catch {}
     allArticles = data.articles;
     const opts = (id: string, xs: string[]) =>
       ($(`#${id}`).innerHTML = xs.map((x) => `<option value="${escapeHtml(x)}"></option>`).join(''));
-    opts('ed-starters', data.starters);
+    const known = new Set(MOVES.map((m) => m.notation));
+    const used = new Set<string>();
+    for (const a of data.articles) {
+      for (const c of a.data.combos ?? []) for (const s of splitRoute(typeof c === 'string' ? c : c.route)) used.add(s);
+      if (a.data.starter) used.add(a.data.starter);
+    }
+    moveOptions = [...MOVES, ...[...used].filter((s) => !known.has(s)).map((s) => ({ notation: s, name: s, group: 'ほかの記事で使用' }))];
     opts('ed-opponents', data.opponents);
     opts('ed-tag-list', data.tags);
 

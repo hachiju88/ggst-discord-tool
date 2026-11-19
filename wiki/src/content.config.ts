@@ -15,7 +15,7 @@ export const collections = {
         versions: z.array(version).optional(),
         /** 立ち位置（コンボ・起き攻め・セットプレイ） */
         position: z.enum(['center', 'corner']).optional(),
-        /** 始動技（例: "2K", "c.S", "6P"） */
+        /** 始動技（例: "2K", "近S", "6P"） */
         starter: z.string().optional(),
         /** カウンターヒット前提か */
         counterHit: z.boolean().optional(),

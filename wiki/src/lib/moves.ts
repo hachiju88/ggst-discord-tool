@@ -1,0 +1,61 @@
+/**
+ * コンボパーツ・始動技の入力候補（ブリジットの技＋共通の操作）。
+ * bot の技データ（src/database/seed-character-moves.ts / seed-common-moves.ts）をもとにしている。
+ * 表記を変えたい・技を足したいときはここを編集する。
+ */
+export type Move = { notation: string; name: string; group: string; kana?: string };
+
+const normal = (notation: string, name: string): Move => ({ notation, name, group: '通常技' });
+
+export const MOVES: Move[] = [
+  normal('5P', '立ちP'),
+  normal('5K', '立ちK'),
+  normal('近S', '近距離S'),
+  normal('遠S', '遠距離S'),
+  normal('5H', '立ちH'),
+  normal('2P', 'しゃがみP'),
+  normal('2K', 'しゃがみK'),
+  normal('2S', 'しゃがみS'),
+  normal('2H', 'しゃがみH'),
+  normal('6P', '前P'),
+  normal('6K', '前K'),
+  { notation: '2D', name: '足払い', group: '特殊技' },
+  { notation: '5D', name: 'ダスト', group: '特殊技' },
+  { notation: '溜め5D', name: '溜めダスト', group: '特殊技' },
+  { notation: 'j.P', name: '空中P', group: '空中技' },
+  { notation: 'j.K', name: '空中K', group: '空中技' },
+  { notation: 'j.S', name: '空中S', group: '空中技' },
+  { notation: 'j.H', name: '空中H', group: '空中技' },
+  { notation: 'j.D', name: '空中D', group: '空中技' },
+  { notation: '236S', name: 'ストップ＆ダッシュ', group: '必殺技', kana: 'すとっぷあんどだっしゅ' },
+  { notation: '214K', name: 'ローリング移動', group: '必殺技', kana: 'ろーりんぐいどう' },
+  { notation: '623S', name: 'スターシップ', group: '必殺技', kana: 'すたーしっぷ' },
+  { notation: '236K', name: 'キックスタートマイハート', group: '必殺技', kana: 'きっくすたーとまいはーと' },
+  { notation: 'j.214K', name: 'ロジャーダイブ', group: '必殺技', kana: 'ろじゃーだいぶ' },
+  { notation: '632146K', name: 'ロック ザ ベイビー', group: '必殺技', kana: 'ろっくざべいびー' },
+  { notation: '632146H', name: 'ループ ザ ループ', group: '覚醒必殺技', kana: 'るーぷざるーぷ' },
+  { notation: '236236S', name: '帰ってきたキルマシーン', group: '覚醒必殺技', kana: 'かえってきたきるましーん' },
+  { notation: '6D', name: '前投げ', group: '投げ' },
+  { notation: '4D', name: '後ろ投げ', group: '投げ' },
+  { notation: '空中投げ', name: '空中投げ', group: '投げ' },
+  { notation: '赤RC', name: '赤ロマンキャンセル', group: 'RC', kana: 'あかろまきゃん' },
+  { notation: 'ダッシュ赤RC', name: 'ダッシュ赤ロマンキャンセル', group: 'RC', kana: 'だっしゅあかろまきゃん' },
+  { notation: '黄RC', name: '黄ロマンキャンセル', group: 'RC', kana: 'きろまきゃん' },
+  { notation: '紫RC', name: '紫ロマンキャンセル', group: 'RC', kana: 'むらさきろまきゃん' },
+  { notation: 'ダッシュ紫RC', name: 'ダッシュ紫ロマンキャンセル', group: 'RC', kana: 'だっしゅむらさきろまきゃん' },
+  { notation: 'WA', name: 'ワイルドアサルト', group: 'システム', kana: 'わいるどあさると' },
+  { notation: '溜めWA', name: '溜めワイルドアサルト', group: 'システム', kana: 'ためわいるどあさると' },
+  { notation: '66', name: 'ダッシュ', group: '移動' },
+  { notation: '4歩き', name: '後ろ歩き', group: '移動' },
+  { notation: '6歩き', name: '前歩き', group: '移動' },
+  { notation: 'バクステ', name: 'バックステップ', group: '移動' },
+  { notation: 'jc', name: 'ジャンプキャンセル', group: '移動' },
+  { notation: 'hj', name: 'ハイジャンプ', group: '移動' },
+  { notation: '2段ジャンプ', name: '2段ジャンプ', group: '移動' },
+  { notation: 'IAD', name: '低空ダッシュ', group: '移動' },
+  { notation: 'ディレイ', name: '遅らせて出す', group: '補足' },
+  { notation: '(CH)', name: 'カウンターヒット時', group: '補足' },
+  { notation: '(追加)', name: '追加入力', group: '補足' },
+  { notation: '(1)', name: '1段目', group: '補足' },
+  { notation: '(2)', name: '2段目', group: '補足' },
+];
