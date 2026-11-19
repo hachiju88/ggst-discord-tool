@@ -6,6 +6,9 @@ versions:
 position: center
 starter: 遠S
 difficulty: 3
+videos:
+  - url: /media/videos/202611/e370f421-614d-402d-a972-6c76ce961bf3.mp4
+    title: 詐欺飛び択（キックスタート停止 > 最速空ダJS）
 combos:
   - route: 遠S > 派生S > キックスタート > 停止 > 最速空中ダッシュ > JS
     note: ガードを入れながらやると詐欺
