@@ -5,7 +5,7 @@
  *   DELETE /api/upload?url=/media/...  → 自分がアップロードした未使用の動画を削除
  * 保存されないまま 24 時間たったアップロードは、次のアップロード時にまとめて削除する。
  */
-import { json, userOf, type AccessEnv } from '../../server/auth';
+import { json, writer, type AccessEnv } from '../../server/auth';
 import { recordUpload, sweepOrphans, discardOwnUpload } from '../../server/media';
 
 interface Env extends AccessEnv {
@@ -18,8 +18,9 @@ const FREE_BYTES = 10 * 1024 ** 3; // R2 無料枠 10GB
 const TYPES: Record<string, string> = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUntil }) => {
-  const user = await userOf(request, env);
-  if (!user) return json({ error: 'ログインが必要です' }, 401);
+  const w = await writer(request, env);
+  if ('error' in w) return w.error;
+  const user = w.user;
   if (!env.MEDIA) return json({ error: '動画の保存先（R2）が設定されていません' }, 500);
   const type = (request.headers.get('content-type') ?? '').split(';')[0].trim();
   const ext = TYPES[type];
@@ -60,8 +61,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
 };
 
 export const onRequestDelete: PagesFunction<Env> = async ({ request, env }) => {
-  const user = await userOf(request, env);
-  if (!user) return json({ error: 'ログインが必要です' }, 401);
+  const w = await writer(request, env);
+  if ('error' in w) return w.error;
+  const user = w.user;
   const url = new URL(request.url).searchParams.get('url') ?? '';
   if (!url.startsWith('/media/videos/')) return json({ error: '不正な指定です' }, 400);
   const removed = await discardOwnUpload(env, url.slice('/media/'.length), user);

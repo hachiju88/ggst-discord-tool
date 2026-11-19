@@ -116,7 +116,14 @@ const { pageId } = Astro.props;
       if (preview) {
         safe.set(localKey(page), JSON.stringify(readLocal().filter((c) => c.id !== id)));
       } else {
-        await fetch(`${API}?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const res = await fetch(`${API}?id=${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => null);
+        if (res?.status === 401) {
+          showForm(false);
+          alert('ログインが切れています。ログインしてから削除してください。');
+        } else if (!res?.ok) {
+          const d = await res?.json().catch(() => ({}));
+          alert(d?.error ?? 'コメントを削除できませんでした');
+        }
       }
       load();
     };

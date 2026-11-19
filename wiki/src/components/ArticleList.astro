@@ -183,6 +183,7 @@ const firstCombo = (d: (typeof docs)[number]) => {
 
 <script>
   import { state } from '../scripts/reactions';
+  import { loginUrl } from '../scripts/login';
 
   for (const root of document.querySelectorAll<HTMLElement>('[data-article-list]')) {
     const form = root.querySelector('form')!;
@@ -237,6 +238,14 @@ const firstCombo = (d: (typeof docs)[number]) => {
       const loading = favOnly && !state.ready;
       count.textContent = loading ? '-' : String(n);
       empty.hidden = n > 0;
+      if (favOnly && !loading && !state.preview && !state.loggedIn) {
+        // お気に入りはログインした人だけのもの
+        const a = document.createElement('a');
+        a.href = loginUrl();
+        a.textContent = 'ログイン';
+        empty.replaceChildren('お気に入りを使うには', a, 'してください。');
+        return;
+      }
       empty.textContent = loading
         ? 'お気に入りを読み込み中…'
         : favOnly && n === 0 && !state.mine.fav.size

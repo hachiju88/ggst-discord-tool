@@ -6,7 +6,7 @@
  *   DELETE /api/articles?id=<記事ID>&sha=<sha>                  → 削除
  * 保存すると GitHub にコミットされ、Cloudflare Pages が自動で再ビルドする（1〜2分で反映）。
  */
-import { json, userOf, type AccessEnv } from '../../server/auth';
+import { json, userOf, sameOrigin, type AccessEnv } from '../../server/auth';
 import { setRefs, releaseUnreferenced } from '../../server/media';
 import { commit, getFile, blobSha, ConflictError, type Change, type GitHubEnv } from '../../server/github';
 import {
@@ -19,7 +19,7 @@ interface Env extends GitHubEnv, AccessEnv {
 }
 
 const fail = (e: unknown) => {
-  if (e instanceof AuthError) return json({ error: e.message }, 401);
+  if (e instanceof AuthError) return json({ error: e.message }, e.status);
   if (e instanceof InputError) return json({ error: e.message }, 400);
   if (e instanceof ConflictError) return json({ error: e.message }, 409);
   console.error(e);
@@ -50,10 +50,16 @@ function newTrainingChange(raw: any, a: ArticleInput): { change: Change; slug: s
   return { change: { path: pathOf(`training/${t.slug}`), content: toFile(t), expectSha: null }, slug: t.slug };
 }
 
-class AuthError extends Error {}
+class AuthError extends Error {
+  constructor(message: string, readonly status: 401 | 403) {
+    super(message);
+  }
+}
+/** 書き込みの入口：同じサイトからの送信（CSRF 対策）で、ログインしていること */
 const requireUser = async (req: Request, env: Env) => {
+  if (!sameOrigin(req, { json: true })) throw new AuthError('不正なリクエストです', 403);
   const u = await userOf(req, env);
-  if (!u) throw new AuthError('ログインが必要です');
+  if (!u) throw new AuthError('ログインが必要です', 401);
   return u;
 };
 

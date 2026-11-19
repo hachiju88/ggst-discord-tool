@@ -136,7 +136,9 @@ import Combo from '../../../../components/Combo.astro';
    - ポリシー: 許可 / 書き込みを許す人のメールアドレス（だれでも良ければ「すべての人」）/ ログイン方法: ワンタイムPIN
    - 作ったアプリケーションの「概要」にある **AUD タグ**を、5 の `ACCESS_AUD` に入れて再デプロイ
 
-ログインすると `CF_Authorization` クッキーが付き、API（`server/auth.ts`）がその署名を検証してメールアドレスを取り出します。
+ログインの流れ：`/login`（Access で保護）に来ると、Access が付けた JWT を検証して、サイト全体で使う自前クッキー `__Host-bl_auth`（HttpOnly / SameSite=Lax）に入れ、元のページへ戻します。
+API（`server/auth.ts`）はこの JWT の署名を毎回検証してメールアドレスを取り出します。書き込みAPIは、自分のサイトから送られたもの（Origin の一致）で、JSON の API は `Content-Type: application/json` のものしか受け付けません（CSRF 対策）。
+サイドバーの「ログイン」「ログアウト」から出入りできます（`/logout` は自前クッキーを消して Access のログアウトへ送ります）。
 このメールアドレスで、コメントの投稿者・いいね・お気に入り・記事の変更者を区別します（画面には出ません）。
 `ACCESS_TEAM_DOMAIN` と `ACCESS_AUD` が無いと、全員が未ログイン扱いになり書き込みはすべて断られます。
 `Cf-Access-Authenticated-User-Email` ヘッダーは、Access を通らないパスでは偽装できるので使っていません。

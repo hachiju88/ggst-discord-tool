@@ -8,7 +8,7 @@
  * 押すにはログインが必要（未ログインは 401）。
  * お気に入りは本人にしか返さない。
  */
-import { json, userOf, type AccessEnv } from '../../server/auth';
+import { json, userOf, writer, type AccessEnv } from '../../server/auth';
 
 interface Env extends AccessEnv {
   DB: D1Database;
@@ -35,8 +35,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 };
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  const me = await userOf(request, env);
-  if (!me) return json({ error: 'ログインが必要です' }, 401);
+  const w = await writer(request, env, { json: true });
+  if ('error' in w) return w.error;
+  const me = w.user;
   const { page, kind, on } = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   if (typeof page !== 'string' || !page || page.length > 200) return json({ error: '不正なページです' }, 400);
   if (!KINDS.includes(kind as any)) return json({ error: '不正な種類です' }, 400);

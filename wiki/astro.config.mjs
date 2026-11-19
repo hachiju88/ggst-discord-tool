@@ -62,6 +62,8 @@ export default defineConfig({
             { label: '全記事から探す', link: '/articles/' },
             { label: '★ お気に入り', link: '/articles/?fav=1' },
             { label: '＋ 記事を書く', link: '/edit/' },
+            { label: 'ログイン', link: '/login' },
+            { label: 'ログアウト', link: '/logout' },
           ],
         },
         simple('basics', '基本戦略'),

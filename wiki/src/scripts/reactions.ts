@@ -57,7 +57,6 @@ function askLogin(kind: Kind) {
 }
 
 async function toggle(page: string, kind: Kind) {
-  if (!state.ready) return;
   if (!state.preview && !state.loggedIn) return askLogin(kind);
   const set = state.mine[kind];
   const on = !set.has(page);
@@ -91,7 +90,8 @@ document.addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-react]');
   if (!b) return;
   e.preventDefault();
-  toggle(b.dataset.page!, b.dataset.kind as Kind);
+  // 読み込み前に押されたら、読み込みが終わってから反映する
+  loaded.then(() => toggle(b.dataset.page!, b.dataset.kind as Kind));
 });
 
-load();
+const loaded = load();

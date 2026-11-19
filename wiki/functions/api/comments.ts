@@ -7,7 +7,7 @@
  * 読むのはログイン不要。投稿・削除はログインが必要（未ログインは 401）。
  * 投稿者の識別にはログインしたメールアドレスを使う。保存するが、画面には出さない。
  */
-import { json, userOf, type AccessEnv } from '../../server/auth';
+import { json, userOf, writer, type AccessEnv } from '../../server/auth';
 
 interface Env extends AccessEnv {
   DB: D1Database;
@@ -29,8 +29,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 };
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  const me = await userOf(request, env);
-  if (!me) return json({ error: 'コメントするにはログインが必要です' }, 401);
+  const w = await writer(request, env, { json: true, loginMessage: 'コメントするにはログインが必要です' });
+  if ('error' in w) return w.error;
+  const me = w.user;
   const { page, name, body } = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   if (typeof page !== 'string' || !page || page.length > 200) return json({ error: '不正なページです' }, 400);
   if (typeof body !== 'string' || !body.trim()) return json({ error: '本文を入力してください' }, 400);
@@ -44,8 +45,9 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
 export const onRequestDelete: PagesFunction<Env> = async ({ request, env }) => {
   const id = new URL(request.url).searchParams.get('id');
-  const me = await userOf(request, env);
-  if (!me) return json({ error: 'ログインが必要です' }, 401);
+  const w = await writer(request, env);
+  if ('error' in w) return w.error;
+  const me = w.user;
   if (!id) return json({ error: 'id is required' }, 400);
   await env.DB.prepare('DELETE FROM comments WHERE id = ? AND author = ?').bind(id, me).run();
   return json({ ok: true });
