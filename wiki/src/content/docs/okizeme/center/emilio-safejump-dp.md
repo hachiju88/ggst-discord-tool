@@ -5,6 +5,9 @@ versions:
   - "2.02"
 position: center
 difficulty: 3
+videos:
+  - url: /media/videos/202611/48770693-6da0-4062-8a1e-4419943f3ea4.mp4
+    title: エミリオ式詐欺重ね
 tags:
   - 詐欺飛び
   - 昇竜
