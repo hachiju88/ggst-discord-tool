@@ -1,0 +1,30 @@
+---
+title: 端 ヨーヨー重ね
+description: ヨーヨーを詐欺重ねにして択をかける（サンプル記事）
+versions: ["2.02"]
+videos:
+  - /samples/sample2.mp4
+combos:
+  - route: 236S (締め) > 前歩き > ヨーヨー設置 > 2K
+    note: ヨーヨーが重なるタイミングで2K
+training: [okizeme-drill]
+position: corner
+starter: 236S
+counterHit: false
+tags: [詐欺重ね, ヨーヨー]
+---
+
+:::note[サンプル]
+見た目確認用のダミーです。
+:::
+
+## レシピ
+
+コンボを **236S** で締める → 前歩き少し → ヨーヨー設置 → 重なる
+
+## 相手の対処
+
+| 相手の行動 | こちらの結果 |
+| --- | --- |
+| 無敵技 | ガードできる |
+| バクステ | 引っかかる |

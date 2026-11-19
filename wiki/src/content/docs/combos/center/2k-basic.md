@@ -1,0 +1,31 @@
+---
+title: 2K始動 基本コンボ
+description: 下段からの安定コンボ。まずはこれ（サンプル記事）
+versions: ["2.02"]
+videos:
+  - url: /samples/sample1.mp4
+    title: 2K始動 基本コンボ（サンプル動画）
+combos:
+  - route: 2K > 2D > 236K (追加) > 214S
+    damage: 142
+    tension: 10
+    note: ダウン後に約2キャラ分運べる
+  - route: 2K > 2D > 236K (追加) > 236S
+    damage: 150
+    note: 派生。起き攻め重視
+training: [training-mode]
+position: center
+starter: 2K
+counterHit: false
+damage: 142
+difficulty: 1
+tags: [初心者向け, 運び]
+---
+:::note[サンプル]
+ルートはダミーです。実際のレシピに差し替えます。
+:::
+
+## ポイント
+
+- 2Dはヒット確認できる猶予がある
+- 先端ヒットだと最後が届かないので、そのときは **2K > 2D** で止める

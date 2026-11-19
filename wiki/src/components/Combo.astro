@@ -1,0 +1,42 @@
+---
+/**
+ * コンボレシピ表示。
+ * <Combo route="c.S > 2H > 236S > ..." damage={180} note="..." />
+ * 「>」でつなぐ。「(CH)」「[遅らせ]」のような注記もそのまま書ける。
+ */
+interface Props {
+  route: string;
+  damage?: number;
+  tension?: number;
+  note?: string;
+  /** 一覧カード用の小さい表示 */
+  compact?: boolean;
+}
+const { route, damage, tension, note, compact = false } = Astro.props;
+const steps = route.split('>').map((s) => s.trim()).filter(Boolean);
+---
+
+<figure class:list={['combo not-content', { compact }]}>
+  <ol class="combo-route">
+    {
+      steps.map((s) => {
+        const m = s.match(/^(.*?)(\s*[\(\[].*[\)\]])?$/)!;
+        return (
+          <li>
+            <kbd>{m[1]}</kbd>
+            {m[2] && <small>{m[2].trim()}</small>}
+          </li>
+        );
+      })
+    }
+  </ol>
+  {
+    !compact && (damage || tension !== undefined || note) && (
+      <figcaption>
+        {damage && <span class="stat"><b>{damage}</b> dmg</span>}
+        {tension !== undefined && <span class="stat">テンション <b>{tension}%</b></span>}
+        {note && <span class="note">{note}</span>}
+      </figcaption>
+    )
+  }
+</figure>

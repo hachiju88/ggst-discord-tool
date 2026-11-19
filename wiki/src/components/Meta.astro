@@ -1,0 +1,38 @@
+---
+/** 記事のメタ情報（バージョン・立ち位置・始動技・CH・タグ）をチップで表示 */
+import { POSITION_LABEL, isOld, versionLabel } from '../site.config';
+
+interface Props {
+  data: Record<string, any>;
+  compact?: boolean;
+}
+const { data, compact = false } = Astro.props;
+const old = isOld(data);
+---
+
+<ul class:list={['meta', { compact }]}>
+  {
+    data.versions &&
+      (old ? (
+        <li class="chip old">OLD{versionLabel(data) ? ` · ${versionLabel(data)}` : ''}</li>
+      ) : (
+        <li class="chip ver">{versionLabel(data)}</li>
+      ))
+  }
+  {data.position && <li class="chip pos">{POSITION_LABEL[data.position as 'center' | 'corner']}</li>}
+  {data.starter && <li class="chip starter">始動 {data.starter}</li>}
+  {data.counterHit !== undefined && (
+    <li class:list={['chip', data.counterHit ? 'ch' : 'noch']}>{data.counterHit ? 'COUNTER' : 'ノーマルヒット'}</li>
+  )}
+  {data.opponent && <li class="chip opp">vs {data.opponent}</li>}
+  {data.damage && <li class="chip stat">{data.damage} dmg</li>}
+  {
+    data.difficulty && (
+      <li class="chip stat" title={`難易度 ${data.difficulty}/5`}>
+        {'◆'.repeat(data.difficulty)}
+        <span class="dim">{'◆'.repeat(5 - data.difficulty)}</span>
+      </li>
+    )
+  }
+  {!compact && data.tags?.map((t: string) => <li class="chip tag">#{t}</li>)}
+</ul>

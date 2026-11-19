@@ -1,0 +1,750 @@
+---
+/**
+ * 記事の作成・編集フォーム。
+ *   /edit/                     … 新規作成
+ *   /edit/?category=combos     … カテゴリを選んだ状態で新規作成
+ *   /edit/?id=combos/center/x  … 既存記事の編集
+ * 保存すると /api/articles 経由で GitHub にコミットされ、1〜2分でサイトに反映される。
+ */
+import { CATEGORIES, POSITIONED, TRAINING_LINKABLE, VERSIONS, CURRENT_VERSION } from '../site.config';
+
+const config = {
+  categories: CATEGORIES.map((c) => ({ id: c.id, label: c.label })),
+  positioned: POSITIONED,
+  trainingLinkable: TRAINING_LINKABLE,
+  versions: VERSIONS,
+  current: CURRENT_VERSION,
+};
+---
+
+<div class="editor not-content" data-editor data-config={JSON.stringify(config)}>
+  <p class="editor-status" data-status hidden></p>
+
+  <form data-form novalidate>
+    <section class="ed-section">
+      <h2>基本情報</h2>
+      <div class="ed-grid">
+        <label class="ed-field">
+          <span>カテゴリ <b>必須</b></span>
+          <select name="category" required>
+            <option value="">選んでください</option>
+            {CATEGORIES.map((c) => <option value={c.id}>{c.label}</option>)}
+          </select>
+        </label>
+        <fieldset class="ed-field" data-show="positioned">
+          <legend>立ち位置 <b>必須</b></legend>
+          <div class="ed-seg">
+            <label><input type="radio" name="position" value="center" /><span>画面中央</span></label>
+            <label><input type="radio" name="position" value="corner" /><span>画面端</span></label>
+          </div>
+        </fieldset>
+      </div>
+      <label class="ed-field">
+        <span>タイトル <b>必須</b></span>
+        <input name="title" maxlength="100" required placeholder="例：2K始動 基本コンボ" />
+      </label>
+      <label class="ed-field">
+        <span>説明（一覧に出る1行）</span>
+        <input name="description" maxlength="200" placeholder="例：下段からの安定コンボ。まずはこれ" />
+      </label>
+      <label class="ed-field">
+        <span>URL名 <b>必須</b> <small>半角英小文字・数字・ハイフン</small></span>
+        <input name="slug" maxlength="60" pattern="[a-z0-9][a-z0-9\-]*" required placeholder="例：2k-basic" />
+        <small class="ed-hint" data-url-preview></small>
+      </label>
+      <fieldset class="ed-field">
+        <legend>使えるバージョン <small>現行が入っていないと old 扱い</small></legend>
+        <div class="ed-checks">
+          {
+            [...VERSIONS].reverse().map((v) => (
+              <label class="ed-check">
+                <input type="checkbox" name="versions" value={v} />
+                <span>Ver.{v}{v === CURRENT_VERSION ? '（現行）' : ''}</span>
+              </label>
+            ))
+          }
+          <label class="ed-check">
+            <input type="checkbox" name="noVersion" />
+            <span>バージョンに関係しない</span>
+          </label>
+        </div>
+      </fieldset>
+    </section>
+
+    <section class="ed-section" data-show="techdata">
+      <h2>技・ヒット情報</h2>
+      <div class="ed-grid">
+        <label class="ed-field">
+          <span>始動技</span>
+          <input name="starter" maxlength="20" list="ed-starters" placeholder="例：2K" />
+          <datalist id="ed-starters"></datalist>
+        </label>
+        <fieldset class="ed-field">
+          <legend>カウンターヒット</legend>
+          <div class="ed-seg">
+            <label><input type="radio" name="counterHit" value="" checked /><span>指定なし</span></label>
+            <label><input type="radio" name="counterHit" value="yes" /><span>CHあり</span></label>
+            <label><input type="radio" name="counterHit" value="no" /><span>CHなし</span></label>
+          </div>
+        </fieldset>
+        <label class="ed-field">
+          <span>ダメージ</span>
+          <input name="damage" type="number" min="0" max="9999" inputmode="numeric" />
+        </label>
+        <fieldset class="ed-field">
+          <legend>難易度</legend>
+          <div class="ed-seg diff">
+            <label><input type="radio" name="difficulty" value="" checked /><span>-</span></label>
+            {[1, 2, 3, 4, 5].map((n) => <label><input type="radio" name="difficulty" value={n} /><span>{'◆'.repeat(n)}</span></label>)}
+          </div>
+        </fieldset>
+      </div>
+    </section>
+
+    <section class="ed-section" data-show="matchups">
+      <h2>キャラ対策</h2>
+      <label class="ed-field">
+        <span>相手キャラ</span>
+        <input name="opponent" maxlength="30" list="ed-opponents" placeholder="例：ソル" />
+        <datalist id="ed-opponents"></datalist>
+      </label>
+    </section>
+
+    <section class="ed-section">
+      <h2>動画 <small>YouTube・X・mp4 のURL、またはファイルをアップロード（10MBまで）</small></h2>
+      <ol class="ed-rows" data-videos></ol>
+      <div class="ed-row-actions">
+        <button type="button" class="ed-btn" data-add-video>＋ URLを追加</button>
+        <label class="ed-btn">
+          ＋ 動画をアップロード
+          <input type="file" accept="video/mp4,video/webm,video/quicktime" data-upload hidden />
+        </label>
+        <span class="ed-usage" data-usage></span>
+      </div>
+    </section>
+
+    <section class="ed-section">
+      <h2>コンボパーツ <small>「&gt;」でつなぐ。例：2K &gt; 2D &gt; 236K</small></h2>
+      <ol class="ed-rows" data-combos></ol>
+      <div class="ed-row-actions">
+        <button type="button" class="ed-btn" data-add-combo>＋ コンボパーツを追加</button>
+      </div>
+    </section>
+
+    <section class="ed-section" data-show="training">
+      <h2>練習方法との紐づけ</h2>
+      <input class="ed-filter" type="search" placeholder="練習方法を検索" data-training-filter />
+      <div class="ed-checks column" data-training-list></div>
+      <label class="ed-check new-training-toggle">
+        <input type="checkbox" data-new-training-toggle />
+        <span>＋ 練習方法の記事を新しく作って紐づける</span>
+      </label>
+      <div class="ed-subform" data-new-training hidden>
+        <label class="ed-field">
+          <span>練習方法のタイトル <b>必須</b></span>
+          <input name="nt_title" maxlength="100" placeholder="例：CH確認の練習" />
+        </label>
+        <label class="ed-field">
+          <span>URL名 <b>必須</b></span>
+          <input name="nt_slug" maxlength="60" placeholder="例：ch-confirm" />
+        </label>
+        <label class="ed-field">
+          <span>説明</span>
+          <input name="nt_description" maxlength="200" />
+        </label>
+        <label class="ed-field">
+          <span>練習内容（Markdown）</span>
+          <textarea name="nt_body" rows="6" placeholder="## トレモ設定&#10;- ダミー：…"></textarea>
+        </label>
+      </div>
+    </section>
+
+    <section class="ed-section">
+      <h2>タグ</h2>
+      <div class="ed-tags" data-tags></div>
+      <input class="ed-tag-input" data-tag-input maxlength="30" placeholder="タグを入力して Enter" list="ed-tag-list" />
+      <datalist id="ed-tag-list"></datalist>
+    </section>
+
+    <section class="ed-section">
+      <h2>本文 <small>Markdown が使えます（## 見出し、- 箇条書き、**太字**、表など）</small></h2>
+      <div class="ed-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected="true" data-tab="write">書く</button>
+        <button type="button" role="tab" aria-selected="false" data-tab="preview">プレビュー</button>
+      </div>
+      <textarea name="body" rows="16" data-body placeholder="## ポイント&#10;- …"></textarea>
+      <div class="ed-preview sl-markdown-content" data-preview hidden></div>
+    </section>
+
+    <div class="ed-footer">
+      <button type="button" class="ed-delete" data-delete hidden>この記事を削除</button>
+      <span class="ed-error" data-error role="alert"></span>
+      <button type="submit" class="ed-save" data-save>保存する</button>
+    </div>
+  </form>
+
+  <dialog class="ed-dialog" data-done>
+    <p class="ed-dialog-title" data-done-title>保存しました</p>
+    <p>サイトへの反映には <b>1〜2分</b> かかります。反映後に記事を開いてください。</p>
+    <div class="ed-dialog-actions">
+      <a class="ed-btn" data-done-link href="/">記事を開く</a>
+      <a class="ed-btn" href="/edit/">続けて記事を書く</a>
+      <button type="button" class="ed-btn" data-done-close>閉じる</button>
+    </div>
+  </dialog>
+</div>
+
+<script>
+  import { marked } from 'marked';
+
+  type Video = { url: string; title?: string };
+  type ComboRow = { route: string; damage?: number; tension?: number; note?: string };
+  type Article = {
+    id: string;
+    title: string;
+    description?: string;
+    data: Record<string, any>;
+    body?: string;
+  };
+  type EditorData = { articles: Article[]; tags: string[]; starters: string[]; opponents: string[] };
+
+  const MAX_BYTES = 10 * 1024 * 1024;
+  const root = document.querySelector<HTMLElement>('[data-editor]')!;
+  const cfg = JSON.parse(root.dataset.config!) as {
+    categories: { id: string; label: string }[];
+    positioned: string[];
+    trainingLinkable: string[];
+    versions: string[];
+    current: string;
+  };
+  const form = root.querySelector<HTMLFormElement>('[data-form]')!;
+  const $ = <T extends HTMLElement = HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
+  const field = <T extends Element = HTMLInputElement>(name: string) => form.elements.namedItem(name) as unknown as T;
+  const statusEl = $('[data-status]');
+  const errorEl = $('[data-error]');
+
+  const params = new URLSearchParams(location.search);
+  let editId = params.get('id');
+  let sha: string | null = null;
+  let allArticles: Article[] = [];
+  /** このページでアップロードし、まだ保存していない動画（× で外したら消す） */
+  const unsavedUploads = new Set<string>();
+  let dirty = false;
+  let canSave = true;
+
+  const setStatus = (msg: string, kind: 'info' | 'warn' = 'info') => {
+    statusEl.textContent = msg;
+    statusEl.dataset.kind = kind;
+    statusEl.hidden = !msg;
+  };
+  const escapeHtml = (s: string) =>
+    s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+  const fmtBytes = (n: number) =>
+    n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(2)}GB` : n >= 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)}MB` : `${Math.ceil(n / 1024)}KB`;
+
+  // ---------- 表示切り替え（カテゴリによって出す項目を変える） ----------
+  const category = () => field<HTMLSelectElement>('category').value;
+  function updateVisibility() {
+    const c = category();
+    const show: Record<string, boolean> = {
+      positioned: cfg.positioned.includes(c),
+      techdata: ['combos', 'okizeme', 'setplay'].includes(c),
+      matchups: c === 'matchups',
+      training: cfg.trainingLinkable.includes(c),
+    };
+    for (const el of root.querySelectorAll<HTMLElement>('[data-show]')) el.hidden = !show[el.dataset.show!];
+    updateUrlPreview();
+  }
+  function currentId() {
+    const c = category();
+    const slug = field('slug').value.trim() || '…';
+    if (!c) return '';
+    const pos = (form.querySelector<HTMLInputElement>('input[name=position]:checked')?.value) ?? '…';
+    return cfg.positioned.includes(c) ? `${c}/${pos}/${slug}` : `${c}/${slug}`;
+  }
+  function updateUrlPreview() {
+    const id = currentId();
+    $('[data-url-preview]').textContent = id ? `URL: /${id}/` : '';
+  }
+
+  // ---------- 動画 ----------
+  const videoList = $<HTMLOListElement>('[data-videos]');
+  function addVideoRow(v: Video = { url: '' }, note = '') {
+    const li = document.createElement('li');
+    li.className = 'ed-row';
+    li.innerHTML = `
+      <div class="ed-row-main">
+        <input class="v-url" placeholder="https://www.youtube.com/watch?v=… / https://x.com/…/status/… / mp4のURL" maxlength="500" />
+        <input class="v-title" placeholder="動画の説明（任意）" maxlength="100" />
+        <small class="v-note"></small>
+      </div>
+      <div class="ed-row-tools">
+        <button type="button" data-move="-1" title="上へ">↑</button>
+        <button type="button" data-move="1" title="下へ">↓</button>
+        <button type="button" data-remove title="削除">×</button>
+      </div>`;
+    li.querySelector<HTMLInputElement>('.v-url')!.value = v.url;
+    li.querySelector<HTMLInputElement>('.v-title')!.value = v.title ?? '';
+    li.querySelector('.v-note')!.textContent = note || describeUrl(v.url);
+    li.querySelector<HTMLInputElement>('.v-url')!.addEventListener('input', (e) => {
+      li.querySelector('.v-note')!.textContent = describeUrl((e.target as HTMLInputElement).value);
+    });
+    videoList.append(li);
+    return li;
+  }
+  function describeUrl(u: string) {
+    if (!u) return '';
+    if (/youtu\.?be/.test(u)) return 'YouTube';
+    if (/(x|twitter)\.com\/.+\/status\//.test(u)) return 'X の投稿';
+    if (u.startsWith('/media/')) return 'アップロードした動画';
+    if (/\.(mp4|webm|mov|m4v)(\?|$)/i.test(u)) return '動画ファイル';
+    return 'リンクとして表示されます';
+  }
+  const readVideos = (): Video[] =>
+    [...videoList.children].map((li) => ({
+      url: li.querySelector<HTMLInputElement>('.v-url')!.value.trim(),
+      title: li.querySelector<HTMLInputElement>('.v-title')!.value.trim() || undefined,
+    })).filter((v) => v.url);
+
+  async function refreshUsage() {
+    try {
+      const res = await fetch('/api/upload');
+      if (!res.ok || !res.headers.get('content-type')?.includes('json')) throw new Error();
+      const u = await res.json();
+      $('[data-usage]').textContent = u.configured
+        ? `使用量 ${fmtBytes(u.bytes)} / ${fmtBytes(u.limit)}（${u.count}本）`
+        : '動画の保存先が未設定です';
+    } catch {
+      $('[data-usage]').textContent = '';
+    }
+  }
+
+  $<HTMLInputElement>('[data-upload]').addEventListener('change', (e) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    if (file.size > MAX_BYTES) {
+      errorEl.textContent = `「${file.name}」は ${fmtBytes(file.size)} あります。動画は10MBまでです。長い動画はYouTubeに上げてURLを貼ってください。`;
+      return;
+    }
+    errorEl.textContent = '';
+    const li = addVideoRow({ url: '' }, `アップロード中… 0%`);
+    const urlInput = li.querySelector<HTMLInputElement>('.v-url')!;
+    urlInput.disabled = true;
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload');
+    xhr.setRequestHeader('content-type', file.type || 'video/mp4');
+    xhr.setRequestHeader('x-filename', encodeURIComponent(file.name));
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable) li.querySelector('.v-note')!.textContent = `アップロード中… ${Math.round((ev.loaded / ev.total) * 100)}%`;
+    };
+    xhr.onload = () => {
+      let d: any = {};
+      try { d = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status === 201 && d.url) {
+        urlInput.value = d.url;
+        urlInput.disabled = false;
+        unsavedUploads.add(d.url);
+        li.querySelector('.v-note')!.textContent = `アップロードした動画（${file.name} / ${fmtBytes(d.size)}）`;
+        dirty = true;
+        refreshUsage();
+      } else {
+        li.remove();
+        errorEl.textContent = d.error ?? 'アップロードに失敗しました（公開サイト上でのみ使えます）';
+      }
+    };
+    xhr.onerror = () => {
+      li.remove();
+      errorEl.textContent = 'アップロードに失敗しました';
+    };
+    xhr.send(file);
+  });
+  $('[data-add-video]').addEventListener('click', () => addVideoRow().querySelector('input')!.focus());
+
+  // ---------- コンボパーツ ----------
+  const comboList = $<HTMLOListElement>('[data-combos]');
+  function comboPreview(route: string) {
+    const steps = route.split('>').map((s) => s.trim()).filter(Boolean);
+    return steps.map((s) => `<kbd>${escapeHtml(s)}</kbd>`).join('<i>→</i>');
+  }
+  function addComboRow(c: ComboRow = { route: '' }) {
+    const li = document.createElement('li');
+    li.className = 'ed-row';
+    li.innerHTML = `
+      <div class="ed-row-main">
+        <input class="c-route" placeholder="2K > 2D > 236K (追加) > 214S" maxlength="300" />
+        <div class="ed-inline">
+          <input class="c-damage" type="number" min="0" max="9999" placeholder="ダメージ" inputmode="numeric" />
+          <input class="c-tension" type="number" min="0" max="100" placeholder="テンション%" inputmode="numeric" />
+          <input class="c-note" placeholder="補足（任意）" maxlength="200" />
+        </div>
+        <div class="c-preview"></div>
+      </div>
+      <div class="ed-row-tools">
+        <button type="button" data-move="-1" title="上へ">↑</button>
+        <button type="button" data-move="1" title="下へ">↓</button>
+        <button type="button" data-remove title="削除">×</button>
+      </div>`;
+    const q = <T extends HTMLElement>(s: string) => li.querySelector<T>(s)!;
+    q<HTMLInputElement>('.c-route').value = c.route;
+    q<HTMLInputElement>('.c-damage').value = c.damage?.toString() ?? '';
+    q<HTMLInputElement>('.c-tension').value = c.tension?.toString() ?? '';
+    q<HTMLInputElement>('.c-note').value = c.note ?? '';
+    const pv = () => (q('.c-preview').innerHTML = comboPreview(q<HTMLInputElement>('.c-route').value));
+    q('.c-route').addEventListener('input', pv);
+    pv();
+    comboList.append(li);
+    return li;
+  }
+  const readCombos = (): ComboRow[] =>
+    [...comboList.children]
+      .map((li) => {
+        const v = (s: string) => li.querySelector<HTMLInputElement>(s)!.value.trim();
+        return {
+          route: v('.c-route'),
+          damage: v('.c-damage') ? Number(v('.c-damage')) : undefined,
+          tension: v('.c-tension') ? Number(v('.c-tension')) : undefined,
+          note: v('.c-note') || undefined,
+        };
+      })
+      .filter((c) => c.route);
+  $('[data-add-combo]').addEventListener('click', () => addComboRow().querySelector('input')!.focus());
+
+  // 並べ替え・削除（動画・コンボ共通）
+  root.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    const li = t.closest<HTMLLIElement>('.ed-row');
+    if (!li) return;
+    if (t.matches('[data-remove]')) {
+      const url = li.querySelector<HTMLInputElement>('.v-url')?.value;
+      if (url && unsavedUploads.has(url)) {
+        unsavedUploads.delete(url);
+        fetch(`/api/upload?url=${encodeURIComponent(url)}`, { method: 'DELETE' }).then(refreshUsage, () => {});
+      }
+      li.remove();
+      dirty = true;
+    } else if (t.matches('[data-move]')) {
+      const dir = Number(t.dataset.move);
+      const sib = dir < 0 ? li.previousElementSibling : li.nextElementSibling?.nextElementSibling;
+      li.parentElement!.insertBefore(li, sib ?? (dir < 0 ? li.parentElement!.firstChild : null));
+      dirty = true;
+    }
+  });
+
+  // ---------- 練習方法 ----------
+  const trainingList = $('[data-training-list]');
+  function renderTraining(selected: string[]) {
+    const items = allArticles
+      .filter((a) => a.id.startsWith('training/'))
+      .map((a) => ({ slug: a.id.slice('training/'.length), title: a.title }));
+    // サイトに未反映（作ったばかり等）の練習方法も、紐づけが外れないよう一覧に残す
+    for (const slug of selected) {
+      if (!items.some((i) => i.slug === slug)) items.push({ slug, title: `${slug}（サイトに反映待ち）` });
+    }
+    trainingList.innerHTML = items.length
+      ? items
+          .map(
+            (i) =>
+              `<label class="ed-check" data-title="${escapeHtml(i.title)}"><input type="checkbox" name="training" value="${escapeHtml(i.slug)}" ${selected.includes(i.slug) ? 'checked' : ''} /><span>${escapeHtml(i.title)}</span></label>`,
+          )
+          .join('')
+      : '<p class="ed-hint">練習方法の記事はまだありません。</p>';
+  }
+
+  /** 編集モードの見た目にする */
+  function enterEditMode(id: string) {
+    editId = id;
+    document.querySelector('h1')!.textContent = '記事を編集';
+    document.title = document.title.replace('記事を書く', '記事を編集');
+    $('[data-delete]').hidden = false;
+    if (location.search !== `?id=${encodeURIComponent(id)}`) history.replaceState(null, '', `/edit/?id=${encodeURIComponent(id)}`);
+  }
+  $<HTMLInputElement>('[data-training-filter]').addEventListener('input', (e) => {
+    const q = (e.target as HTMLInputElement).value.trim();
+    for (const l of trainingList.querySelectorAll<HTMLElement>('.ed-check')) l.hidden = !!q && !l.dataset.title!.includes(q);
+  });
+  $<HTMLInputElement>('[data-new-training-toggle]').addEventListener('change', (e) => {
+    $('[data-new-training]').hidden = !(e.target as HTMLInputElement).checked;
+  });
+
+  // ---------- タグ ----------
+  let tags: string[] = [];
+  const tagBox = $('[data-tags]');
+  const renderTags = () => {
+    tagBox.innerHTML = tags
+      .map((t, i) => `<span class="ed-tag">#${escapeHtml(t)}<button type="button" data-tag-remove="${i}" aria-label="${escapeHtml(t)}を外す">×</button></span>`)
+      .join('');
+  };
+  tagBox.addEventListener('click', (e) => {
+    const i = (e.target as HTMLElement).dataset.tagRemove;
+    if (i !== undefined) {
+      tags.splice(Number(i), 1);
+      renderTags();
+      dirty = true;
+    }
+  });
+  const tagInput = $<HTMLInputElement>('[data-tag-input]');
+  const commitTag = () => {
+    const vals = tagInput.value.split(/[,、\s]+/).map((t) => t.replace(/^#/, '').trim()).filter(Boolean);
+    for (const t of vals) if (!tags.includes(t)) tags.push(t);
+    tagInput.value = '';
+    renderTags();
+  };
+  tagInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      commitTag();
+    }
+  });
+  tagInput.addEventListener('change', commitTag);
+
+  // ---------- 本文プレビュー ----------
+  const bodyEl = $<HTMLTextAreaElement>('[data-body]');
+  const previewEl = $('[data-preview]');
+  for (const tab of root.querySelectorAll<HTMLButtonElement>('[data-tab]')) {
+    tab.addEventListener('click', () => {
+      const preview = tab.dataset.tab === 'preview';
+      for (const t of root.querySelectorAll('[data-tab]')) t.setAttribute('aria-selected', String(t === tab));
+      bodyEl.hidden = preview;
+      previewEl.hidden = !preview;
+      if (preview) {
+        // Starlight の :::note 記法は簡易表示にする
+        const md = bodyEl.value.replace(/^:::(\w+)(?:\[(.*?)\])?\n([\s\S]*?)\n:::/gm, (_, k, t, c) => `> **${t || k}**\n>\n> ${c.replace(/\n/g, '\n> ')}`);
+        previewEl.innerHTML = marked.parse(escapeHtml(md).replace(/&gt;/g, '>'), { async: false }) as string;
+      }
+    });
+  }
+
+  // ---------- 読み込み・書き出し ----------
+  function fill(a: { id?: string; title: string; description?: string; data: Record<string, any>; body?: string }) {
+    const parts = (a.id ?? '').split('/');
+    field<HTMLSelectElement>('category').value = parts[0] ?? '';
+    if (parts.length === 3) {
+      const r = form.querySelector<HTMLInputElement>(`input[name=position][value=${parts[1]}]`);
+      if (r) r.checked = true;
+    }
+    field('slug').value = parts[parts.length - 1] ?? '';
+    field('title').value = a.title ?? '';
+    field('description').value = a.description ?? '';
+    const d = a.data;
+    const vs: string[] | undefined = d.versions;
+    field('noVersion').checked = !vs;
+    for (const cb of form.querySelectorAll<HTMLInputElement>('input[name=versions]')) cb.checked = !!vs?.includes(cb.value);
+    field('starter').value = d.starter ?? '';
+    const ch = d.counterHit === undefined ? '' : d.counterHit ? 'yes' : 'no';
+    form.querySelector<HTMLInputElement>(`input[name=counterHit][value="${ch}"]`)!.checked = true;
+    field('damage').value = d.damage?.toString() ?? '';
+    form.querySelector<HTMLInputElement>(`input[name=difficulty][value="${d.difficulty ?? ''}"]`)!.checked = true;
+    field('opponent').value = d.opponent ?? '';
+    videoList.replaceChildren();
+    for (const v of d.videos ?? []) addVideoRow(typeof v === 'string' ? { url: v } : v);
+    comboList.replaceChildren();
+    for (const c of d.combos ?? []) addComboRow(typeof c === 'string' ? { route: c } : c);
+    tags = [...(d.tags ?? [])];
+    renderTags();
+    bodyEl.value = a.body ?? '';
+    updateVisibility();
+  }
+
+  function collect() {
+    const c = category();
+    const techdata = ['combos', 'okizeme', 'setplay'].includes(c);
+    const ch = form.querySelector<HTMLInputElement>('input[name=counterHit]:checked')?.value;
+    const diff = form.querySelector<HTMLInputElement>('input[name=difficulty]:checked')?.value;
+    const article = {
+      category: c,
+      position: form.querySelector<HTMLInputElement>('input[name=position]:checked')?.value,
+      slug: field('slug').value.trim(),
+      title: field('title').value.trim(),
+      description: field('description').value.trim() || undefined,
+      versions: field('noVersion').checked
+        ? undefined
+        : [...form.querySelectorAll<HTMLInputElement>('input[name=versions]:checked')].map((x) => x.value),
+      starter: techdata ? field('starter').value.trim() || undefined : undefined,
+      counterHit: techdata && ch ? ch === 'yes' : undefined,
+      damage: techdata && field('damage').value ? Number(field('damage').value) : undefined,
+      difficulty: techdata && diff ? Number(diff) : undefined,
+      opponent: c === 'matchups' ? field('opponent').value.trim() || undefined : undefined,
+      tags,
+      videos: readVideos(),
+      combos: readCombos(),
+      training: cfg.trainingLinkable.includes(c)
+        ? [...form.querySelectorAll<HTMLInputElement>('input[name=training]:checked')].map((x) => x.value)
+        : [],
+      body: bodyEl.value,
+    };
+    const ntOn = cfg.trainingLinkable.includes(c) && $<HTMLInputElement>('[data-new-training-toggle]').checked;
+    const newTraining = ntOn
+      ? {
+          title: field('nt_title').value.trim(),
+          slug: field('nt_slug').value.trim(),
+          description: field('nt_description').value.trim() || undefined,
+          body: field<HTMLTextAreaElement>('nt_body').value,
+        }
+      : undefined;
+    return { article, newTraining };
+  }
+
+  /** 送信前の簡易チェック（最終的な検証はサーバー側） */
+  function check({ article: a, newTraining: nt }: ReturnType<typeof collect>): string | null {
+    if (!a.category) return 'カテゴリを選んでください';
+    if (cfg.positioned.includes(a.category) && !a.position) return '立ち位置を選んでください';
+    if (!a.title) return 'タイトルを入力してください';
+    if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(a.slug)) return 'URL名は半角英小文字・数字・ハイフンにしてください';
+    if (a.versions && a.versions.length === 0 && !confirm('使えるバージョンが1つも選ばれていません。old 記事として保存しますか？')) return '保存を中止しました';
+    if (nt && !nt.title) return '新しい練習方法のタイトルを入力してください';
+    if (nt && !/^[a-z0-9][a-z0-9-]{0,59}$/.test(nt.slug)) return '新しい練習方法のURL名は半角英小文字・数字・ハイフンにしてください';
+    return null;
+  }
+
+  async function api(method: string, url: string, body?: unknown) {
+    const res = await fetch(url, {
+      method,
+      headers: body ? { 'content-type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.headers.get('content-type')?.includes('json')) {
+      throw new Error('保存は公開サイト上でのみ使えます（このプレビュー環境では保存できません）');
+    }
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error ?? `エラーが発生しました (${res.status})`);
+    return d;
+  }
+
+  const dialog = $<HTMLDialogElement>('[data-done]');
+  $('[data-done-close]').addEventListener('click', () => dialog.close());
+  function done(title: string, id?: string) {
+    dirty = false;
+    $('[data-done-title]').textContent = title;
+    const link = $<HTMLAnchorElement>('[data-done-link]');
+    link.hidden = !id;
+    if (id) link.href = `/${id}/`;
+    dialog.showModal();
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!canSave) return;
+    errorEl.textContent = '';
+    const payload = collect();
+    const err = check(payload);
+    if (err) {
+      errorEl.textContent = err;
+      return;
+    }
+    const btn = $<HTMLButtonElement>('[data-save]');
+    btn.disabled = true;
+    btn.textContent = '保存中…';
+    try {
+      const wasEdit = !!editId;
+      const r = editId
+        ? await api('PUT', `/api/articles?id=${encodeURIComponent(editId)}`, { ...payload, sha })
+        : await api('POST', '/api/articles', payload);
+      // 続けて編集・保存できるよう、保存後の状態に合わせる
+      sha = r.sha;
+      unsavedUploads.clear();
+      if (payload.newTraining && r.training) {
+        allArticles.push({ id: `training/${r.training}`, title: payload.newTraining.title, data: {} });
+        $<HTMLInputElement>('[data-new-training-toggle]').checked = false;
+        $('[data-new-training]').hidden = true;
+        for (const n of ['nt_title', 'nt_slug', 'nt_description', 'nt_body']) field(n).value = '';
+      }
+      renderTraining(payload.newTraining && r.training ? [...payload.article.training, r.training] : payload.article.training);
+      if (r.id.startsWith('training/')) {
+        field<HTMLSelectElement>('category').disabled = true;
+        field('slug').readOnly = true;
+      }
+      enterEditMode(r.id);
+      done(wasEdit ? '更新しました' : '作成しました', r.id);
+    } catch (ex) {
+      errorEl.textContent = (ex as Error).message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '保存する';
+    }
+  });
+
+  $('[data-delete]').addEventListener('click', async () => {
+    if (!editId || !sha) return;
+    const title = field('title').value;
+    if (!confirm(`「${title}」を削除します。コメント・いいね・お気に入り・アップロードした動画も消えます。よろしいですか？`)) return;
+    try {
+      await api('DELETE', `/api/articles?id=${encodeURIComponent(editId)}&sha=${encodeURIComponent(sha)}`);
+      canSave = false;
+      done('削除しました');
+    } catch (ex) {
+      errorEl.textContent = (ex as Error).message;
+    }
+  });
+
+  form.addEventListener('input', () => {
+    dirty = true;
+    updateUrlPreview();
+  });
+  form.addEventListener('change', (e) => {
+    dirty = true;
+    if ((e.target as HTMLElement).matches('select[name=category]')) updateVisibility();
+    if ((e.target as HTMLElement).matches('input[name=noVersion]') && (e.target as HTMLInputElement).checked) {
+      for (const cb of form.querySelectorAll<HTMLInputElement>('input[name=versions]')) cb.checked = false;
+    }
+    if ((e.target as HTMLElement).matches('input[name=versions]')) field('noVersion').checked = false;
+    updateUrlPreview();
+  });
+  addEventListener('beforeunload', (e) => {
+    if (dirty) e.preventDefault();
+  });
+
+  // ---------- 初期化 ----------
+  (async () => {
+    let data: EditorData = { articles: [], tags: [], starters: [], opponents: [] };
+    try {
+      data = await (await fetch('/editor-data.json')).json();
+    } catch {}
+    allArticles = data.articles;
+    const opts = (id: string, xs: string[]) =>
+      ($(`#${id}`).innerHTML = xs.map((x) => `<option value="${escapeHtml(x)}"></option>`).join(''));
+    opts('ed-starters', data.starters);
+    opts('ed-opponents', data.opponents);
+    opts('ed-tag-list', data.tags);
+
+    if (editId) {
+      enterEditMode(editId);
+      try {
+        const a = await api('GET', `/api/articles?id=${encodeURIComponent(editId)}`);
+        sha = a.sha;
+        fill({ id: a.id, title: a.data.title, description: a.data.description, data: a.data, body: a.body });
+        renderTraining(a.data.training ?? []);
+      } catch (ex) {
+        const local = data.articles.find((x) => x.id === editId);
+        if (local) {
+          // プレビュー環境：ビルド時のデータで表示だけする
+          fill({ ...local, body: '' });
+          renderTraining(local.data.training ?? []);
+          setStatus(`${(ex as Error).message}`, 'warn');
+        } else {
+          setStatus((ex as Error).message, 'warn');
+          canSave = false;
+        }
+      }
+      if (editId!.startsWith('training/')) {
+        field<HTMLSelectElement>('category').disabled = true;
+        field('slug').readOnly = true;
+        const n = data.articles.filter((x) => (x.data.training ?? []).includes(editId!.slice('training/'.length))).length;
+        if (n) setStatus(`この練習方法は ${n} 件の記事から紐づけられています。削除すると紐づけが外れます。`);
+      }
+    } else {
+      const cat = params.get('category');
+      if (cat && cfg.categories.some((c) => c.id === cat)) field<HTMLSelectElement>('category').value = cat;
+      const pos = params.get('position');
+      if (pos) form.querySelector<HTMLInputElement>(`input[name=position][value="${pos}"]`)?.click();
+      for (const cb of form.querySelectorAll<HTMLInputElement>('input[name=versions]')) cb.checked = cb.value === cfg.current;
+      const d = new Date();
+      field('slug').value = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${Math.random().toString(36).slice(2, 6)}`;
+      renderTraining([]);
+      updateVisibility();
+    }
+    dirty = false;
+    refreshUsage();
+  })();
+</script>

@@ -7,6 +7,8 @@ on:
     # ワークフロー定義だけの変更では bot を再デプロイしない
     paths-ignore:
       - '.github/workflows/**'
+      # wiki サイトは Cloudflare Pages 側でデプロイするので bot には無関係
+      - 'wiki/**'
 
 jobs:
   deploy:

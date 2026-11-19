@@ -1,0 +1,144 @@
+---
+/**
+ * コメント欄。
+ * 本番: Cloudflare Pages Functions (/api/comments) + D1 に保存。
+ * API が無い環境（ローカル確認など）ではブラウザ内保存のプレビューモードで動く。
+ */
+interface Props {
+  pageId: string;
+}
+const { pageId } = Astro.props;
+---
+
+<section class="comments not-content" data-comments data-page={pageId}>
+  <header class="comments-head">
+    <h2>COMMENTS</h2>
+    <span class="comments-count" data-count></span>
+  </header>
+  <p class="preview-note" data-preview hidden>
+    プレビューモード：コメントはこのブラウザにだけ保存されます（公開時はサーバーに保存されます）。
+  </p>
+  <ol class="comment-list" data-list></ol>
+  <form class="comment-form" data-form>
+    <input name="name" maxlength="30" placeholder="名前（任意）" autocomplete="nickname" />
+    <textarea name="body" maxlength="2000" rows="3" required placeholder="補足・質問・別ルートなど"></textarea>
+    <div class="comment-actions">
+      <span class="error" data-error></span>
+      <button type="submit">投稿する</button>
+    </div>
+  </form>
+</section>
+
+<script>
+  type Comment = { id: string; name: string; body: string; created_at: string; mine?: boolean };
+
+  const API = '/api/comments';
+  const NAME_KEY = 'bridget-wiki:name';
+  const localKey = (p: string) => `bridget-wiki:comments:${p}`;
+
+  const safe = {
+    get(k: string) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k: string, v: string) { try { localStorage.setItem(k, v); } catch {} },
+  };
+
+  for (const root of document.querySelectorAll<HTMLElement>('[data-comments]')) {
+    const page = root.dataset.page!;
+    const list = root.querySelector<HTMLOListElement>('[data-list]')!;
+    const form = root.querySelector<HTMLFormElement>('[data-form]')!;
+    const err = root.querySelector<HTMLElement>('[data-error]')!;
+    const count = root.querySelector<HTMLElement>('[data-count]')!;
+    const nameInput = form.elements.namedItem('name') as HTMLInputElement;
+    nameInput.value = safe.get(NAME_KEY) ?? '';
+    let preview = false;
+
+    const fmt = (iso: string) =>
+      new Date(iso).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+    const render = (items: Comment[]) => {
+      list.replaceChildren(
+        ...items.map((c) => {
+          const li = document.createElement('li');
+          const head = document.createElement('div');
+          head.className = 'comment-meta';
+          const who = document.createElement('b');
+          who.textContent = c.name || '名無しのブリジット使い';
+          const when = document.createElement('time');
+          when.dateTime = c.created_at;
+          when.textContent = fmt(c.created_at);
+          head.append(who, when);
+          if (c.mine) {
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'del';
+            del.textContent = '削除';
+            del.onclick = () => remove(c.id);
+            head.append(del);
+          }
+          const body = document.createElement('p');
+          body.textContent = c.body;
+          li.append(head, body);
+          return li;
+        }),
+      );
+      count.textContent = items.length ? `${items.length}件` : 'まだコメントはありません';
+    };
+
+    const readLocal = (): Comment[] => JSON.parse(safe.get(localKey(page)) ?? '[]');
+
+    const load = async () => {
+      try {
+        const res = await fetch(`${API}?page=${encodeURIComponent(page)}`);
+        if (!res.ok || !res.headers.get('content-type')?.includes('json')) throw new Error();
+        render((await res.json()).comments);
+      } catch {
+        preview = true;
+        root.querySelector<HTMLElement>('[data-preview]')!.hidden = false;
+        render(readLocal());
+      }
+    };
+
+    const remove = async (id: string) => {
+      if (!confirm('このコメントを削除しますか？')) return;
+      if (preview) {
+        safe.set(localKey(page), JSON.stringify(readLocal().filter((c) => c.id !== id)));
+      } else {
+        await fetch(`${API}?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      }
+      load();
+    };
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      const name = nameInput.value.trim();
+      const body = (form.elements.namedItem('body') as HTMLTextAreaElement).value.trim();
+      if (!body) return;
+      safe.set(NAME_KEY, name);
+      const btn = form.querySelector('button')!;
+      btn.disabled = true;
+      try {
+        if (preview) {
+          const items = readLocal();
+          items.push({ id: crypto.randomUUID(), name, body, created_at: new Date().toISOString(), mine: true });
+          safe.set(localKey(page), JSON.stringify(items));
+        } else {
+          const res = await fetch(API, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ page, name, body }),
+          });
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? '投稿に失敗しました');
+        }
+        form.reset();
+        nameInput.value = name;
+        load();
+      } catch (e) {
+        err.textContent = (e as Error).message || '投稿に失敗しました';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    load();
+  }
+</script>

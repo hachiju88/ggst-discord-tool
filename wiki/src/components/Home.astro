@@ -1,0 +1,35 @@
+---
+import { getCollection } from 'astro:content';
+import { CATEGORIES, CURRENT_VERSION, isOld } from '../site.config';
+
+const docs = await getCollection('docs');
+const countOf = (id: string) =>
+  docs.filter((d) => d.id.startsWith(id + '/') && !isOld(d.data)).length;
+---
+
+<section class="hero-x not-content">
+  <div class="yoyo" aria-hidden="true"></div>
+  <p class="kicker">GUILTY GEAR -STRIVE- / CHARACTER WIKI</p>
+  <h1 id="_top">BRIDGET<br />LAB</h1>
+  <p class="lead">
+    コミュニティで共有されてきたブリジットの知識を、カテゴリ・立ち位置・始動技ごとに整理した攻略wikiです。
+  </p>
+  <span class="ver">現行 Ver.{CURRENT_VERSION} 対応</span>
+</section>
+
+<p class="section-label not-content">CATEGORIES</p>
+<ul class="cat-grid not-content">
+  {
+    CATEGORIES.map((c, i) => (
+      <li>
+        <a href={`/${c.id}/`}>
+          <span class="num">{String(i + 1).padStart(2, '0')}</span>
+          <span class="en">{c.en}</span>
+          <span class="ja">{c.label}</span>
+          <span class="desc">{c.desc}</span>
+          <span class="n">{countOf(c.id)} 記事</span>
+        </a>
+      </li>
+    ))
+  }
+</ul>
