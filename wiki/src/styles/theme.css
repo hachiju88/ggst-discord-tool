@@ -339,6 +339,9 @@ body {
 .comment-meta .del { margin-left: auto; padding: 0; font: inherit; color: var(--sl-color-gray-3); background: none; border: 0; cursor: pointer; text-decoration: underline; }
 .comment-list p { margin: 0.35rem 0 0; white-space: pre-wrap; color: var(--sl-color-gray-1); }
 .comment-form { display: grid; gap: 0.5rem; }
+.comment-form[hidden], .comment-login[hidden] { display: none; }
+.comment-login { margin: 0.5rem 0 0; padding: 0.8rem 1rem; font-size: var(--sl-text-sm); color: var(--sl-color-gray-2); background: var(--sl-color-gray-6); border: 1px dashed var(--sl-color-gray-5); border-radius: 6px; }
+.comment-login a { color: var(--sky); font-weight: 700; }
 .comment-form input, .comment-form textarea {
   width: 100%;
   padding: 0.6rem 0.75rem;

@@ -4,19 +4,20 @@
  *        → { likes: { [記事ID]: 件数 }, mine: { like: [記事ID], fav: [記事ID] } }
  *   POST /api/reactions  { page, kind: "like" | "fav", on: boolean }
  *
- * 誰が押したかは Cloudflare Access のメールアドレスで区別する（画面には出さない）。
+ * 誰が押したかはログインしたメールアドレスで区別する（画面には出さない）。見るだけならログイン不要。
+ * 押すにはログインが必要（未ログインは 401）。
  * お気に入りは本人にしか返さない。
  */
-import { json, userOf } from '../../server/auth';
+import { json, userOf, type AccessEnv } from '../../server/auth';
 
-interface Env {
+interface Env extends AccessEnv {
   DB: D1Database;
 }
 
 const KINDS = ['like', 'fav'] as const;
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
-  const me = userOf(request);
+  const me = await userOf(request, env);
   const [counts, mine] = await Promise.all([
     env.DB.prepare("SELECT page, COUNT(*) AS n FROM reactions WHERE kind = 'like' GROUP BY page").all<{ page: string; n: number }>(),
     me
@@ -34,7 +35,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 };
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  const me = userOf(request);
+  const me = await userOf(request, env);
   if (!me) return json({ error: 'ログインが必要です' }, 401);
   const { page, kind, on } = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   if (typeof page !== 'string' || !page || page.length > 200) return json({ error: '不正なページです' }, 400);

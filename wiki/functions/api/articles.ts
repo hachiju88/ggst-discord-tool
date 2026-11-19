@@ -6,19 +6,20 @@
  *   DELETE /api/articles?id=<記事ID>&sha=<sha>                  → 削除
  * 保存すると GitHub にコミットされ、Cloudflare Pages が自動で再ビルドする（1〜2分で反映）。
  */
-import { json, userOf } from '../../server/auth';
+import { json, userOf, type AccessEnv } from '../../server/auth';
 import { setRefs, releaseUnreferenced } from '../../server/media';
 import { commit, getFile, blobSha, ConflictError, type Change, type GitHubEnv } from '../../server/github';
 import {
   validate, toFile, parseFile, articleId, pathOf, isValidId, trainingInput, mediaKeys, InputError, type ArticleInput,
 } from '../../server/article';
 
-interface Env extends GitHubEnv {
+interface Env extends GitHubEnv, AccessEnv {
   DB: D1Database;
   MEDIA?: R2Bucket;
 }
 
 const fail = (e: unknown) => {
+  if (e instanceof AuthError) return json({ error: e.message }, 401);
   if (e instanceof InputError) return json({ error: e.message }, 400);
   if (e instanceof ConflictError) return json({ error: e.message }, 409);
   console.error(e);
@@ -49,9 +50,10 @@ function newTrainingChange(raw: any, a: ArticleInput): { change: Change; slug: s
   return { change: { path: pathOf(`training/${t.slug}`), content: toFile(t), expectSha: null }, slug: t.slug };
 }
 
-const requireUser = (req: Request) => {
-  const u = userOf(req);
-  if (!u) throw new InputError('ログインが必要です');
+class AuthError extends Error {}
+const requireUser = async (req: Request, env: Env) => {
+  const u = await userOf(req, env);
+  if (!u) throw new AuthError('ログインが必要です');
   return u;
 };
 
@@ -70,7 +72,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   try {
-    const user = requireUser(request);
+    const user = await requireUser(request, env);
     const req = (await request.json().catch(() => ({}))) as any;
     const a = validate(req.article);
     const id = articleId(a);
@@ -90,7 +92,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
 export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
   try {
-    const user = requireUser(request);
+    const user = await requireUser(request, env);
     const oldId = new URL(request.url).searchParams.get('id') ?? '';
     if (!isValidId(oldId)) throw new InputError('記事が見つかりません');
     const req = (await request.json().catch(() => ({}))) as any;
@@ -136,7 +138,7 @@ export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
 
 export const onRequestDelete: PagesFunction<Env> = async ({ request, env }) => {
   try {
-    const user = requireUser(request);
+    const user = await requireUser(request, env);
     const q = new URL(request.url).searchParams;
     const id = q.get('id') ?? '';
     const sha = q.get('sha') ?? '';

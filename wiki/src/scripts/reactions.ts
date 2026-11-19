@@ -1,13 +1,16 @@
 /**
  * いいね・お気に入りの状態をページ全体で共有する。
  * API (/api/reactions) が無い環境ではブラウザ内保存のプレビューモードで動く。
+ * 見るだけならログイン不要。押すときに未ログインならログインへ案内する。
  */
+import { loginUrl } from './login';
+
 type Kind = 'like' | 'fav';
-type State = { likes: Record<string, number>; mine: Record<Kind, Set<string>>; preview: boolean; ready: boolean };
+type State = { likes: Record<string, number>; mine: Record<Kind, Set<string>>; preview: boolean; ready: boolean; loggedIn: boolean };
 
 const API = '/api/reactions';
 const LOCAL = 'bridget-wiki:reactions';
-export const state: State = { likes: {}, mine: { like: new Set(), fav: new Set() }, preview: false, ready: false };
+export const state: State = { likes: {}, mine: { like: new Set(), fav: new Set() }, preview: false, ready: false, loggedIn: false };
 
 const saveLocal = () => {
   try {
@@ -21,6 +24,7 @@ async function load() {
     if (!res.ok || !res.headers.get('content-type')?.includes('json')) throw new Error();
     const d = await res.json();
     state.likes = d.likes;
+    state.loggedIn = !!d.loggedIn;
     state.mine = { like: new Set(d.mine.like), fav: new Set(d.mine.fav) };
   } catch {
     state.preview = true;
@@ -47,7 +51,14 @@ function render() {
   document.dispatchEvent(new CustomEvent('reactions:change'));
 }
 
+function askLogin(kind: Kind) {
+  const what = kind === 'like' ? 'いいね' : 'お気に入り';
+  if (confirm(`${what}するにはログインが必要です。ログインしますか？`)) location.href = loginUrl();
+}
+
 async function toggle(page: string, kind: Kind) {
+  if (!state.ready) return;
+  if (!state.preview && !state.loggedIn) return askLogin(kind);
   const set = state.mine[kind];
   const on = !set.has(page);
   const prev = state.likes[page] ?? 0;
@@ -61,10 +72,15 @@ async function toggle(page: string, kind: Kind) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ page, kind, on }),
     });
+    if (res.status === 401) {
+      state.loggedIn = false;
+      throw Object.assign(new Error(), { login: true });
+    }
     if (!res.ok) throw new Error();
     const d = await res.json();
     state.likes[page] = d.likes;
-  } catch {
+  } catch (e) {
+    if ((e as { login?: boolean }).login) setTimeout(() => askLogin(kind));
     on ? set.delete(page) : set.add(page);
     state.likes[page] = prev;
   }
