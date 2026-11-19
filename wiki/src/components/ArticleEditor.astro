@@ -197,6 +197,16 @@ const config = {
   import { marked } from 'marked';
   import { MOVES, type Move } from '../lib/moves';
   import { attachCombobox, resolveNotation, isImeEnter, trackComposition } from '../scripts/combobox';
+  import { loginUrl } from '../scripts/login';
+
+  /**
+   * 書いている途中でログインが切れたとき：このページを離れると書きかけが消えるので、
+   * 別タブでログインしてもらい、戻ってきたらもう一度保存してもらう。
+   */
+  function askRelogin() {
+    const msg = 'ログインが切れています。別のタブでログインしますか？（書きかけの内容はこのタブに残ります。ログイン後にもう一度「保存する」を押してください）';
+    if (confirm(msg)) window.open('/login?next=/login-done/', '_blank');
+  }
 
   type Video = { url: string; title?: string };
   type ComboRow = { route: string; damage?: number; tension?: number; note?: string };
@@ -353,6 +363,7 @@ const config = {
       } else {
         li.remove();
         errorEl.textContent = d.error ?? 'アップロードに失敗しました（公開サイト上でのみ使えます）';
+        if (xhr.status === 401) askRelogin();
       }
     };
     xhr.onerror = () => {
@@ -690,6 +701,7 @@ const config = {
       throw new Error('保存は公開サイト上でのみ使えます（このプレビュー環境では保存できません）');
     }
     const d = await res.json();
+    if (res.status === 401) askRelogin();
     if (!res.ok) throw new Error(d.error ?? `エラーが発生しました (${res.status})`);
     return d;
   }
@@ -779,6 +791,22 @@ const config = {
 
   // ---------- 初期化 ----------
   (async () => {
+    // このページは Access で守られているが、API 用のクッキーは /login で付く。
+    // 直接ここを開いた・クッキーが切れたときは、/login を経由して付け直す（失敗が続くときはループしない）
+    try {
+      const res = await fetch('/api/reactions');
+      if (res.ok && res.headers.get('content-type')?.includes('json') && !(await res.json()).loggedIn) {
+        const KEY = 'bridget-wiki:login-tried';
+        const tried = Number(sessionStorage.getItem(KEY) ?? 0);
+        if (Date.now() - tried > 60_000) {
+          sessionStorage.setItem(KEY, String(Date.now()));
+          location.replace(loginUrl());
+          return;
+        }
+        setStatus('ログインを確認できませんでした。保存できない場合はサイドバーの「ログイン」から入り直してください。', 'warn');
+      }
+    } catch {}
+
     let data: EditorData = { articles: [], tags: [], opponents: [] };
     try {
       data = await (await fetch('/editor-data.json')).json();

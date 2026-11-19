@@ -19,7 +19,10 @@ const { pageId } = Astro.props;
     プレビューモード：コメントはこのブラウザにだけ保存されます（公開時はサーバーに保存されます）。
   </p>
   <ol class="comment-list" data-list></ol>
-  <form class="comment-form" data-form>
+  <p class="comment-login" data-login hidden>
+    コメントするには<a href="/login" data-login-link>ログイン</a>してください。
+  </p>
+  <form class="comment-form" data-form hidden>
     <input name="name" maxlength="30" placeholder="名前（任意）" autocomplete="nickname" />
     <textarea name="body" maxlength="2000" rows="3" required placeholder="補足・質問・別ルートなど"></textarea>
     <div class="comment-actions">
@@ -30,6 +33,7 @@ const { pageId } = Astro.props;
 </section>
 
 <script>
+  import { loginUrl } from '../scripts/login';
   type Comment = { id: string; name: string; body: string; created_at: string; mine?: boolean };
 
   const API = '/api/comments';
@@ -49,6 +53,13 @@ const { pageId } = Astro.props;
     const count = root.querySelector<HTMLElement>('[data-count]')!;
     const nameInput = form.elements.namedItem('name') as HTMLInputElement;
     nameInput.value = safe.get(NAME_KEY) ?? '';
+    const loginNote = root.querySelector<HTMLElement>('[data-login]')!;
+    root.querySelector<HTMLAnchorElement>('[data-login-link]')!.href = loginUrl();
+    /** ログイン中ならフォーム、未ログインならログイン案内を出す */
+    const showForm = (loggedIn: boolean) => {
+      form.hidden = !loggedIn;
+      loginNote.hidden = loggedIn;
+    };
     let preview = false;
 
     const fmt = (iso: string) =>
@@ -89,10 +100,13 @@ const { pageId } = Astro.props;
       try {
         const res = await fetch(`${API}?page=${encodeURIComponent(page)}`);
         if (!res.ok || !res.headers.get('content-type')?.includes('json')) throw new Error();
-        render((await res.json()).comments);
+        const d = await res.json();
+        showForm(!!d.loggedIn);
+        render(d.comments);
       } catch {
         preview = true;
         root.querySelector<HTMLElement>('[data-preview]')!.hidden = false;
+        showForm(true);
         render(readLocal());
       }
     };
@@ -102,7 +116,14 @@ const { pageId } = Astro.props;
       if (preview) {
         safe.set(localKey(page), JSON.stringify(readLocal().filter((c) => c.id !== id)));
       } else {
-        await fetch(`${API}?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const res = await fetch(`${API}?id=${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => null);
+        if (res?.status === 401) {
+          showForm(false);
+          alert('ログインが切れています。ログインしてから削除してください。');
+        } else if (!res?.ok) {
+          const d = await res?.json().catch(() => ({}));
+          alert(d?.error ?? 'コメントを削除できませんでした');
+        }
       }
       load();
     };
@@ -127,6 +148,10 @@ const { pageId } = Astro.props;
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ page, name, body }),
           });
+          if (res.status === 401) {
+            showForm(false);
+            throw new Error('ログインが切れました。もう一度ログインしてください');
+          }
           if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? '投稿に失敗しました');
         }
         form.reset();
