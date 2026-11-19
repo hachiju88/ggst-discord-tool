@@ -2,20 +2,38 @@ import { execFileSync } from 'node:child_process';
 
 /**
  * 記事ファイルごとの最終更新日（git の最終コミット日）。
- * ビルド時に1回だけ git log を読む。git が使えない環境では空（日付なし）になる。
+ * ビルド時に1回だけ git log を読む。
+ *
+ * 履歴が浅い（shallow clone）と、一番古いコミットで全ファイルが「追加」扱いになり
+ * 全記事が同じ日付になってしまう。そのときはまず履歴を取り直し、
+ * それでも浅いままなら日付は使わない（空の Map を返す → 表示側は日付なしで並べる）。
  */
 let cache: Map<string, Date> | undefined;
+
+const git = (args: string[], timeout = 15_000) =>
+  execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout, maxBuffer: 32 * 1024 * 1024 }).trim();
+
+function isShallow(): boolean {
+  return git(['rev-parse', '--is-shallow-repository']) === 'true';
+}
 
 export function lastCommitDates(): Map<string, Date> {
   if (cache) return cache;
   cache = new Map();
   try {
-    const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-    const log = execFileSync(
-      'git',
-      ['log', '--format=@%cI', '--name-only', '--', 'src/content/docs'],
-      { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
-    );
+    if (isShallow()) {
+      try {
+        git(['fetch', '--unshallow', '--quiet'], 120_000);
+      } catch {
+        // 取り直せない環境（ネットワークなし等）は下でそのまま判定
+      }
+      if (isShallow()) {
+        console.warn('[dates] git の履歴が浅いため、記事の更新日は表示しません');
+        return cache;
+      }
+    }
+    const root = git(['rev-parse', '--show-toplevel']);
+    const log = git(['log', '--format=@%cI', '--name-only', '--', 'src/content/docs'], 60_000);
     let current: Date | undefined;
     for (const line of log.split('\n')) {
       if (line.startsWith('@')) current = new Date(line.slice(1));
@@ -25,14 +43,14 @@ export function lastCommitDates(): Map<string, Date> {
       }
     }
   } catch {
-    // git が無い・履歴が無い → 日付なしで続行
+    // git が無い・リポジトリでない → 日付なしで続行
   }
   return cache;
 }
 
 export function lastUpdatedOf(filePath: string | undefined): Date | undefined {
   if (!filePath) return undefined;
-  const map = lastCommitDates();
-  for (const [abs, date] of map) if (abs.endsWith('/' + filePath.replace(/^\.?\//, ''))) return date;
+  const rel = '/' + filePath.replace(/^\.?\//, '');
+  for (const [abs, date] of lastCommitDates()) if (abs.endsWith(rel)) return date;
   return undefined;
 }

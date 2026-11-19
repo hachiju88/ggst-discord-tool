@@ -73,7 +73,7 @@ body {
 @keyframes bl-slide { from { opacity: 0; transform: translateX(40px); } }
 @keyframes bl-ripple { from { opacity: 0.8; transform: scale(0.9); } to { opacity: 0; transform: scale(2.4); } }
 .main-pane .sl-markdown-content, .main-pane .content-panel:first-child > .sl-container > :is(h1, .eyebrow, .title-meta) {
-  animation: bl-rise 0.6s var(--ease-out) both;
+  animation: bl-rise 0.6s var(--ease-out) backwards;
 }
 
 /* ヘッダー */
@@ -407,7 +407,7 @@ body {
   font-size: 1.05rem;
   letter-spacing: 0.08em;
   color: rgb(245 244 248 / 0.55);
-  animation: bl-rise 0.8s var(--ease-out) 0.6s both;
+  animation: bl-rise 0.8s var(--ease-out) 0.6s backwards;
 }
 .hero-x .hero-hud b { font-weight: 400; color: var(--hero-teal); }
 .live { display: inline-flex; align-items: center; gap: 0.45em; color: var(--hero-teal, var(--sky)); }
@@ -421,7 +421,7 @@ body {
   animation: bl-glow 2.4s ease-in-out infinite;
 }
 .hero-x .hero-text { position: relative; z-index: 1; padding: 3rem 0 2.5rem 2.5rem; }
-.hero-x .rv { animation: bl-rise 0.8s var(--ease-out) var(--d, 0s) both; }
+.hero-x .rv { animation: bl-rise 0.8s var(--ease-out) var(--d, 0s) backwards; }
 .hero-x .ggst-logo { display: block; width: min(100%, 15rem); height: auto; margin: 0 0 1.4rem; }
 .hero-x .kicker { font-family: var(--display); font-weight: 700; letter-spacing: 0.35em; font-size: 0.8rem; color: var(--hero-pink); margin: 0; }
 .hero-x h1 {
@@ -453,7 +453,7 @@ body {
 .btn:hover { transform: translateY(-2px); border-color: var(--hero-teal, var(--sky)); color: var(--hero-ink, var(--sl-color-white)); }
 .btn.primary { color: #071a18; background: var(--hero-teal, var(--sky)); border-color: transparent; box-shadow: 0 0 0 0 rgb(63 214 196 / 0.5); }
 .btn.primary:hover { box-shadow: 0 0 24px rgb(63 214 196 / 0.45); color: #071a18; }
-.hero-x .hero-art-wrap { position: relative; z-index: 0; align-self: end; animation: bl-slide 1s var(--ease-out) 0.1s both; }
+.hero-x .hero-art-wrap { position: relative; z-index: 0; align-self: end; animation: bl-slide 1s var(--ease-out) 0.1s backwards; }
 .hero-x .hero-art {
   display: block;
   width: 118%;
@@ -841,6 +841,7 @@ body {
 .cards > .card:nth-child(4) { animation-delay: 0.12s; }
 .cards > .card:nth-child(5) { animation-delay: 0.16s; }
 .cards > .card:nth-child(n + 6) { animation-delay: 0.2s; }
+.cards.is-settled > .card { animation: none; }
 .sidebar-content a { transition: background 0.2s, color 0.2s, padding 0.25s var(--ease-out); }
 .sidebar-content a:not([aria-current='page']):hover { padding-inline-start: calc(var(--sl-sidebar-item-padding-inline, 0.5rem) + 0.3rem); }
 

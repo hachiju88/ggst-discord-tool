@@ -5,11 +5,12 @@ import { lastUpdatedOf } from '../lib/dates';
 
 const catIds = CATEGORIES.map((c) => c.id) as string[];
 const docs = await getCollection('docs');
+// 現行バージョンで使える記事だけを数える・並べる（old はカテゴリの記事数と同じく除外）
 const articles = docs.filter((d) => {
   const top = d.id.split('/')[0];
-  return catIds.includes(top) && d.id !== top;
+  return catIds.includes(top) && d.id !== top && !isOld(d.data);
 });
-const countOf = (id: string) => articles.filter((d) => d.id.startsWith(id + '/') && !isOld(d.data)).length;
+const countOf = (id: string) => articles.filter((d) => d.id.startsWith(id + '/')).length;
 const pad = (n: number, w = 2) => String(n).padStart(w, '0');
 
 const latest = articles
@@ -17,7 +18,7 @@ const latest = articles
   .sort((a, b) => (b.at?.getTime() ?? 0) - (a.at?.getTime() ?? 0) || a.d.id.localeCompare(b.d.id))
   .slice(0, 6);
 const fmt = (at?: Date) => {
-  if (!at) return '--/--';
+  if (!at) return '';
   const jst = new Date(at.getTime() + 9 * 3600e3);
   return `${pad(jst.getUTCMonth() + 1)}/${pad(jst.getUTCDate())}`;
 };
@@ -27,9 +28,10 @@ const combos = articles.filter((d) => d.id.startsWith('combos/')).length;
 
 <section class="hero-x not-content">
   <div class="hero-bg" aria-hidden="true"></div>
-  <div class="hero-hud" aria-hidden="true">
-    <span class="live">LIVE LAB</span>
-    <span>ARTICLES <b>{pad(articles.length, 3)}</b> · COMBOS <b>{pad(combos, 3)}</b> · VER <b>{CURRENT_VERSION}</b></span>
+  <div class="hero-hud">
+    <span class="live" aria-hidden="true">LIVE LAB</span>
+    <span aria-hidden="true">ARTICLES <b>{pad(articles.length, 3)}</b> · COMBOS <b>{pad(combos, 3)}</b> · VER <b>{CURRENT_VERSION}</b></span>
+    <span class="sr-only">現行 Ver.{CURRENT_VERSION} 対応。記事 {articles.length} 件、うちコンボ {combos} 件。</span>
   </div>
   <div class="hero-text">
     <img class="ggst-logo rv" style="--d:0.05s" src="/img/ggst-logo.webp" width="1000" height="203" alt="GUILTY GEAR -STRIVE-" />
@@ -75,7 +77,7 @@ const combos = articles.filter((d) => d.id.startsWith('combos/')).length;
         latest.map(({ d, at }) => (
           <li>
             <a href={`/${d.id}/`}>
-              <span class="rx">RX {fmt(at)}</span>
+              <span class="rx">{at ? `RX ${fmt(at)}` : 'RX'}</span>
               <span class="t">
                 <span class="c">{catOf(d.id).en}</span>
                 {d.data.title}
@@ -102,8 +104,8 @@ const combos = articles.filter((d) => d.id.startsWith('combos/')).length;
 <script>
   // スクロールで見えたら .is-in を付ける（JSが動かない場合は最初から表示）
   const els = document.querySelectorAll<HTMLElement>('.place');
+  // js-place クラスは <head> のインラインスクリプトで先に付けている
   if ('IntersectionObserver' in window) {
-    document.documentElement.classList.add('js-place');
     const io = new IntersectionObserver(
       (entries) => {
         for (const e of entries) if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); }
