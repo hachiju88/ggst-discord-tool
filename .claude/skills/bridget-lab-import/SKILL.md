@@ -169,11 +169,11 @@ git push origin HEAD:main
 node wiki/scripts/bridget-lab.mjs mark <msgId> ok      # ✅
 node wiki/scripts/bridget-lab.mjs mark <msgId> ask     # ❓
 node wiki/scripts/bridget-lab.mjs reply <msgId> "📘 記事にしました：近S始動 カウンターヒット確認コンボ
-https://<サイト>/combos/center/close-s-ch-confirm/"
+https://bridget-wiki.pages.dev/combos/center/close-s-ch-confirm/"
 ```
 
 - まとまりで扱った投稿は全部に同じリアクションを付け、返信は最後の1件にだけする。
-- リンクは環境変数 `WIKI_BASE_URL`（末尾の / なし）+ `/<記事ID>/`。未設定ならタイトルだけ書く。
+- リンクは `https://bridget-wiki.pages.dev/<記事ID>/`（記事IDはファイルのパスから `wiki/src/content/docs/` と `.md` を除いたもの）。
 - 返信の形：新規 `📘 記事にしました：…` ／ 追記 `📝 追記しました：…` ／ 記載済み `📎 記載済みです：…` ／ 食い違い `❓ 「…」の△△と食い違っています（記事は変えていません）`。
 
 ### 9. 報告
