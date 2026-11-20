@@ -38,7 +38,7 @@ tags:
 ### 関連
 - カイの確定反撃 → [「カイ対策」](https://bridget-wiki.pages.dev/matchups/ky/)
 - 状況別のコンボ →「6P対空・2P止め・近Sからのコンボルーティン」
-- 近S後の読み合い → [「起き攻めの択と近S後の三すくみ」](https://bridget-wiki.pages.dev/okizeme/center/close-s-meaty/)
+- 近S後の読み合い → [「起き攻めの択と近S後の三すくみ」](https://bridget-wiki.pages.dev/okizeme/center/okizeme-options/)
 
 ---
 > 出典：GGST-Beginners Discord「#ブリジット☆キルマシーン工房」 はちやん（2026/09/23）
