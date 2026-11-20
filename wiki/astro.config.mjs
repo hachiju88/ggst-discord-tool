@@ -54,6 +54,8 @@ export default defineConfig({
         MarkdownContent: './src/components/overrides/MarkdownContent.astro',
       },
       lastUpdated: false,
+      // 記事下の「前へ・次へ」は出さない（一覧のページ送りで移動する）
+      pagination: false,
       sidebar: [
         {
           label: 'はじめに',

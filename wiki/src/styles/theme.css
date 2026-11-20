@@ -325,6 +325,23 @@ body {
 .card-training { margin-left: auto; font-size: 0.72rem; font-weight: 700; color: var(--gold); }
 .card-training::before { content: '◎ '; }
 .article-list .empty { padding: 2rem; text-align: center; color: var(--sl-color-gray-3); }
+.pager { display: flex; align-items: center; justify-content: center; gap: 1rem; margin: 1.5rem 0 0.5rem; }
+.pager[hidden] { display: none; }
+.pager-pos { min-width: 4.5rem; text-align: center; font-family: var(--display); font-weight: 700; color: var(--sl-color-white); }
+.pager-btn {
+  padding: 0.45rem 1.1rem;
+  font: inherit;
+  font-size: var(--sl-text-sm);
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--sl-color-gray-1);
+  background: transparent;
+  border: 1px solid var(--sl-color-gray-4);
+  border-radius: 4px;
+}
+.pager-btn:hover:not(:disabled) { border-color: var(--sky); color: var(--sl-color-white); }
+.pager-btn:focus-visible { outline: 2px solid var(--sky); }
+.pager-btn:disabled { opacity: 0.35; cursor: default; }
 
 /* ===== コメント ===== */
 .comments { margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--sl-color-gray-5); }
