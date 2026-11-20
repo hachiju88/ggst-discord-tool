@@ -2,7 +2,8 @@
 /**
  * 記事一覧＋絞り込み。category を省略すると全記事。
  * 絞り込み: バージョン / カテゴリ / 立ち位置 / 始動技 / カウンターヒット / タグ / お気に入り
- * 並び替え: 標準 / いいねが多い順
+ * 並び替え: 新着順（記事の作成日が新しい順） / いいねが多い順
+ * 10件ずつページ送り（ページ番号と並び順は URL の ?page= / ?sort= に入れる。記事から戻ったときに同じページを出すため）
  */
 import { getCollection } from 'astro:content';
 import Meta from './Meta.astro';
@@ -10,6 +11,7 @@ import VideoPlayer from './VideoPlayer.astro';
 import Combo from './Combo.astro';
 import Reactions from './Reactions.astro';
 import { CATEGORIES, POSITIONED, VERSIONS, CURRENT_VERSION, isOld, validVersions, type CategoryId } from '../site.config';
+import { createdOf } from '../lib/dates';
 
 interface Props {
   category?: CategoryId;
@@ -23,7 +25,9 @@ const docs = (await getCollection('docs'))
     if (!catIds.includes(top) || d.id === top) return false; // 一覧ページ自身は除外
     return category ? top === category : true;
   })
-  .sort((a, b) => a.id.localeCompare(b.id, 'ja'));
+  .map((d) => ({ d, at: createdOf(d.filePath)?.getTime() ?? Infinity })) // 未コミット（手元で書いた直後）は一番上
+  .sort((a, b) => b.at - a.at || a.d.id.localeCompare(b.d.id, 'ja'))
+  .map(({ d }) => d);
 
 const showPosition = !category || POSITIONED.includes(category);
 const starters = [...new Set(docs.map((d) => d.data.starter).filter(Boolean))] as string[];
@@ -101,7 +105,7 @@ const firstCombo = (d: (typeof docs)[number]) => {
     <label>
       <span>並び順</span>
       <select name="sort">
-        <option value="">標準</option>
+        <option value="">新着順</option>
         <option value="likes">いいねが多い順</option>
       </select>
     </label>
@@ -179,6 +183,11 @@ const firstCombo = (d: (typeof docs)[number]) => {
     }
   </ul>
   <p class="empty" hidden>条件に合う記事がありません。</p>
+  <nav class="pager" aria-label="ページ送り" hidden>
+    <button type="button" class="pager-btn" data-page-prev>← 前へ</button>
+    <span class="pager-pos" data-page-pos aria-live="polite"></span>
+    <button type="button" class="pager-btn" data-page-next>次へ →</button>
+  </nav>
 </div>
 
 <script>
@@ -191,10 +200,27 @@ const firstCombo = (d: (typeof docs)[number]) => {
     const cards = [...root.querySelectorAll<HTMLElement>('.card')];
     const count = root.querySelector('[data-count]')!;
     const empty = root.querySelector<HTMLElement>('.empty')!;
+    const pager = root.querySelector<HTMLElement>('.pager')!;
+    const prevBtn = root.querySelector<HTMLButtonElement>('[data-page-prev]')!;
+    const nextBtn = root.querySelector<HTMLButtonElement>('[data-page-next]')!;
+    const pagePos = root.querySelector<HTMLElement>('[data-page-pos]')!;
+    const PER_PAGE = 10;
 
     // ?fav=1 でお気に入りのみを最初から有効に
     const params = new URLSearchParams(location.search);
     if (params.get('fav') === '1') (form.elements.namedItem('fav') as HTMLInputElement).checked = true;
+    const sortSelect = form.elements.namedItem('sort') as HTMLSelectElement;
+    if (params.get('sort') === 'likes') sortSelect.value = 'likes';
+    let page = Math.max(1, Math.floor(Number(params.get('page'))) || 1);
+
+    const setUrlParams = () => {
+      const url = new URL(location.href);
+      if (page > 1) url.searchParams.set('page', String(page));
+      else url.searchParams.delete('page');
+      if (sortSelect.value) url.searchParams.set('sort', sortSelect.value);
+      else url.searchParams.delete('sort');
+      history.replaceState(history.state, '', url);
+    };
 
     const apply = () => {
       const fd = new FormData(form);
@@ -208,7 +234,7 @@ const firstCombo = (d: (typeof docs)[number]) => {
       const videoOnly = fd.has('video');
       const sort = String(fd.get('sort') ?? '');
 
-      let n = 0;
+      const matched: HTMLElement[] = [];
       for (const c of cards) {
         const d = c.dataset;
         const old = d.old === '1';
@@ -223,19 +249,31 @@ const firstCombo = (d: (typeof docs)[number]) => {
           (!favOnly || state.mine.fav.has(d.id!)) &&
           (!videoOnly || d.video === '1') &&
           tags.every((t) => d.tags!.split('|').includes(t));
-        c.hidden = !ok;
-        if (ok) n++;
+        if (ok) matched.push(c);
       }
+      const n = matched.length;
 
-      const sorted = [...cards].sort((a, b) =>
+      const byOrder = (a: HTMLElement, b: HTMLElement) =>
         sort === 'likes'
           ? (state.likes[b.dataset.id!] ?? 0) - (state.likes[a.dataset.id!] ?? 0) ||
             Number(a.dataset.index) - Number(b.dataset.index)
-          : Number(a.dataset.index) - Number(b.dataset.index),
-      );
+          : Number(a.dataset.index) - Number(b.dataset.index);
+      const sorted = [...cards].sort(byOrder);
       if (sorted.some((c, i) => list.children[i] !== c)) list.append(...sorted);
 
+      // 10件ずつ表示する
+      // お気に入りの読み込み中は件数が0に見えるので、ページ番号を切り詰めない（読み込み後に同じページを出す）
       const loading = favOnly && !state.ready;
+      const pages = Math.max(1, Math.ceil(n / PER_PAGE));
+      if (!loading) page = Math.min(page, pages);
+      const shown = new Set(matched.sort(byOrder).slice((page - 1) * PER_PAGE, page * PER_PAGE));
+      for (const c of cards) c.hidden = !shown.has(c);
+      pager.hidden = pages <= 1;
+      prevBtn.disabled = page <= 1;
+      nextBtn.disabled = page >= pages;
+      pagePos.textContent = `${page} / ${pages}`;
+      if (!loading) setUrlParams();
+
       count.textContent = loading ? '-' : String(n);
       empty.hidden = n > 0;
       if (favOnly && !loading && !state.preview && !state.loggedIn) {
@@ -257,12 +295,22 @@ const firstCombo = (d: (typeof docs)[number]) => {
     setTimeout(settle, 1000);
     form.addEventListener('change', () => {
       settle();
+      page = 1; // 条件を変えたら1ページ目から
       apply();
     });
+    const goto = (p: number) => {
+      settle();
+      page = p;
+      apply();
+      const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      root.querySelector('.list-head')!.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    };
+    prevBtn.addEventListener('click', () => goto(page - 1));
+    nextBtn.addEventListener('click', () => goto(page + 1));
     // お気に入りを外したときは一覧から消さず、次に条件を変えたときに反映する
     let first = true;
     document.addEventListener('reactions:change', () => {
-      if (first || (form.elements.namedItem('sort') as HTMLSelectElement).value === 'likes') apply();
+      if (first || sortSelect.value === 'likes') apply();
       first = false;
     });
     apply();
