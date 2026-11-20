@@ -35,15 +35,24 @@ export function lastCommitDates(): Map<string, Date> {
       }
     }
     const root = git(['rev-parse', '--show-toplevel']);
-    const log = git(['log', '--format=@%cI', '--name-only', '--', 'src/content/docs'], 60_000);
+    // -M: サイトで URL を変えた記事（同じコミットで追加＋削除）を名前変更として扱い、作成日を引き継ぐ
+    const log = git(['log', '--format=@%cI', '--name-status', '-M', '--', 'src/content/docs'], 60_000);
+    const renamedTo = new Map<string, string>(); // 古いパス → 今のパス
+    const now = (p: string) => renamedTo.get(p) ?? p;
     let current: Date | undefined;
     for (const line of log.split('\n')) {
-      if (line.startsWith('@')) current = new Date(line.slice(1));
-      else if (line && current) {
-        const abs = `${root}/${line}`;
-        if (!cache.has(abs)) cache.set(abs, current);
-        createdCache.set(abs, current); // 新しい順に読むので、最後に残るのが最初のコミット
+      if (line.startsWith('@')) {
+        current = new Date(line.slice(1));
+        continue;
       }
+      if (!line || !current) continue;
+      const [status, ...paths] = line.split('\t');
+      if (!paths.length) continue;
+      const target = now(paths[paths.length - 1]);
+      const abs = `${root}/${target}`;
+      if (!cache.has(abs)) cache.set(abs, current);
+      createdCache.set(abs, current); // 新しい順に読むので、最後に残るのが最初のコミット
+      if (status.startsWith('R') && paths.length === 2) renamedTo.set(paths[0], target);
     }
   } catch {
     // git が無い・リポジトリでない → 日付なしで続行

@@ -3,7 +3,7 @@
  * 記事一覧＋絞り込み。category を省略すると全記事。
  * 絞り込み: バージョン / カテゴリ / 立ち位置 / 始動技 / カウンターヒット / タグ / お気に入り
  * 並び替え: 新着順（記事の作成日が新しい順） / いいねが多い順
- * 10件ずつページ送り（ページ番号は URL の ?page= に入れる。記事から戻ったときに同じページを出すため）
+ * 10件ずつページ送り（ページ番号と並び順は URL の ?page= / ?sort= に入れる。記事から戻ったときに同じページを出すため）
  */
 import { getCollection } from 'astro:content';
 import Meta from './Meta.astro';
@@ -209,12 +209,16 @@ const firstCombo = (d: (typeof docs)[number]) => {
     // ?fav=1 でお気に入りのみを最初から有効に
     const params = new URLSearchParams(location.search);
     if (params.get('fav') === '1') (form.elements.namedItem('fav') as HTMLInputElement).checked = true;
+    const sortSelect = form.elements.namedItem('sort') as HTMLSelectElement;
+    if (params.get('sort') === 'likes') sortSelect.value = 'likes';
     let page = Math.max(1, Math.floor(Number(params.get('page'))) || 1);
 
-    const setPageParam = () => {
+    const setUrlParams = () => {
       const url = new URL(location.href);
       if (page > 1) url.searchParams.set('page', String(page));
       else url.searchParams.delete('page');
+      if (sortSelect.value) url.searchParams.set('sort', sortSelect.value);
+      else url.searchParams.delete('sort');
       history.replaceState(history.state, '', url);
     };
 
@@ -258,17 +262,18 @@ const firstCombo = (d: (typeof docs)[number]) => {
       if (sorted.some((c, i) => list.children[i] !== c)) list.append(...sorted);
 
       // 10件ずつ表示する
+      // お気に入りの読み込み中は件数が0に見えるので、ページ番号を切り詰めない（読み込み後に同じページを出す）
+      const loading = favOnly && !state.ready;
       const pages = Math.max(1, Math.ceil(n / PER_PAGE));
-      page = Math.min(page, pages);
+      if (!loading) page = Math.min(page, pages);
       const shown = new Set(matched.sort(byOrder).slice((page - 1) * PER_PAGE, page * PER_PAGE));
       for (const c of cards) c.hidden = !shown.has(c);
       pager.hidden = pages <= 1;
       prevBtn.disabled = page <= 1;
       nextBtn.disabled = page >= pages;
       pagePos.textContent = `${page} / ${pages}`;
-      setPageParam();
+      if (!loading) setUrlParams();
 
-      const loading = favOnly && !state.ready;
       count.textContent = loading ? '-' : String(n);
       empty.hidden = n > 0;
       if (favOnly && !loading && !state.preview && !state.loggedIn) {
@@ -297,14 +302,15 @@ const firstCombo = (d: (typeof docs)[number]) => {
       settle();
       page = p;
       apply();
-      root.querySelector('.list-head')!.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      root.querySelector('.list-head')!.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
     };
     prevBtn.addEventListener('click', () => goto(page - 1));
     nextBtn.addEventListener('click', () => goto(page + 1));
     // お気に入りを外したときは一覧から消さず、次に条件を変えたときに反映する
     let first = true;
     document.addEventListener('reactions:change', () => {
-      if (first || (form.elements.namedItem('sort') as HTMLSelectElement).value === 'likes') apply();
+      if (first || sortSelect.value === 'likes') apply();
       first = false;
     });
     apply();

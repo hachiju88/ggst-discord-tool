@@ -454,32 +454,53 @@ body {
   color: var(--hero-ink);
 }
 
-/* ネオン管：点灯時にチカチカ点き、その後はときどきプツッと途切れる */
-.hero-x .neon { --tube: var(--hero-teal); --on: 0 0 2px #fff, 0 0 8px var(--tube), 0 0 22px var(--tube), 0 0 46px var(--tube); display: inline-block; }
-.hero-x .n-teal { --tube: var(--hero-teal); color: #e6fffb; animation: bl-neon-on 1.6s linear 0.5s backwards, bl-neon 7.3s linear 2.1s infinite; }
-.hero-x .n-pink { --tube: var(--hero-pink); color: #ffe6ee; animation: bl-neon-on 1.4s linear 0.9s backwards, bl-neon 5.9s linear 3.4s infinite; }
-.hero-x .neon { text-shadow: var(--on); } /* 子（.flk）は継承するので、管が消えると一緒に消える */
+/* ネオン管：消えた管（暗いガラス）の上に光る文字を重ね、光る側の opacity だけを切り替える。
+   opacity は合成だけで済むので、ぼかした影を毎フレーム描き直さない。steps で一瞬で切り替える */
+.hero-x .neon { position: relative; display: inline-block; white-space: nowrap; }
+.hero-x .tube-off { color: rgb(255 255 255 / 0.13); }
+.hero-x .tube-on { position: absolute; inset: 0; will-change: opacity; }
+.hero-x .n-teal .tube-on { color: #e6fffb; text-shadow: 0 0 2px #fff, 0 0 8px var(--hero-teal), 0 0 22px var(--hero-teal), 0 0 46px var(--hero-teal); animation: bl-neon-on 1.6s steps(1, end) 0.5s backwards, bl-neon 7.3s steps(1, end) 2.1s infinite; }
+.hero-x .n-pink .tube-on { color: #ffe6ee; text-shadow: 0 0 2px #fff, 0 0 8px var(--hero-pink), 0 0 22px var(--hero-pink), 0 0 46px var(--hero-pink); animation: bl-neon-on 1.4s steps(1, end) 0.9s backwards, bl-neon 5.9s steps(1, end) 3.4s infinite; }
 /* 1文字だけ接触不良 */
-.hero-x .flk { display: inline-block; }
-.hero-x .f1 { animation: bl-flicker 3.7s linear 2.6s infinite; }
-.hero-x .f2 { animation: bl-flicker 4.9s linear 3.9s infinite reverse; }
-.hero-x .neon-sub { text-shadow: 0 0 6px rgb(255 93 143 / 0.8), 0 0 16px rgb(255 93 143 / 0.5); animation: bl-sub 9s linear 1.5s infinite; }
+.hero-x .flk { display: inline-block; will-change: opacity; }
+.hero-x .f1 { animation: bl-flicker 3.7s steps(1, end) 2.6s infinite; }
+.hero-x .f2 { animation: bl-flicker 4.9s steps(1, end) 3.9s infinite; }
+.hero-x .neon-sub { display: inline-block; text-shadow: 0 0 6px rgb(255 93 143 / 0.8), 0 0 16px rgb(255 93 143 / 0.5); will-change: opacity; animation: bl-sub 9s steps(1, end) 1.5s infinite; }
 
 @keyframes bl-neon-on {
-  0%, 9%, 15%, 31%, 37%, 58% { color: rgb(255 255 255 / 0.12); text-shadow: none; }
-  10%, 14%, 32%, 36%, 59%, 100% { text-shadow: var(--on); }
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  14% { opacity: 0; }
+  32% { opacity: 1; }
+  36% { opacity: 0; }
+  59%, 100% { opacity: 1; }
 }
 @keyframes bl-neon {
-  0%, 41%, 41.8%, 43%, 43.6%, 88%, 88.7%, 100% { text-shadow: var(--on); }
-  41.2%, 41.6%, 43.2%, 43.4%, 88.2%, 88.5% { color: rgb(255 255 255 / 0.15); text-shadow: none; }
+  0% { opacity: 1; }
+  41.2% { opacity: 0; }
+  41.6% { opacity: 1; }
+  43.2% { opacity: 0; }
+  43.4% { opacity: 1; }
+  88.2% { opacity: 0; }
+  88.5%, 100% { opacity: 1; }
 }
 @keyframes bl-flicker {
-  0%, 12%, 12.8%, 14%, 15.5%, 60%, 61%, 62.5%, 100% { opacity: 1; }
-  12.2%, 12.6%, 14.3%, 15.2%, 60.3%, 60.8%, 61.6%, 62.2% { opacity: 0.12; }
+  0% { opacity: 1; }
+  12.2% { opacity: 0.1; }
+  12.6% { opacity: 1; }
+  14.3% { opacity: 0.1; }
+  15.2% { opacity: 1; }
+  60.3% { opacity: 0.1; }
+  60.8% { opacity: 1; }
+  61.6% { opacity: 0.1; }
+  62.2%, 100% { opacity: 1; }
 }
 @keyframes bl-sub {
-  0%, 30%, 31%, 70.5%, 72%, 100% { opacity: 1; }
-  30.3%, 30.7%, 70.8%, 71.6% { opacity: 0.35; }
+  0% { opacity: 1; }
+  30.3% { opacity: 0.35; }
+  30.7% { opacity: 1; }
+  70.8% { opacity: 0.35; }
+  71.6%, 100% { opacity: 1; }
 }
 .hero-x .lead { max-width: 23rem; margin: 1.2rem 0 0; color: var(--hero-sub); font-size: 1rem; text-shadow: 0 1px 8px #0a0911; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.4rem; }
