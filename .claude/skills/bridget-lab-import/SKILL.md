@@ -30,7 +30,12 @@ node wiki/scripts/bridget-lab.mjs pending > "${TMPDIR:-/tmp}/bridget-lab/pending
 
 - 一時ファイル（画像・動画のダウンロード先も）は `${TMPDIR:-/tmp}/bridget-lab/` に置く（リポジトリに入れない）。
 - `pending` が空なら、何もせずに「未処理の投稿はありません」と報告して終わる。コミットもしない。
-- 一回で扱うのは古い順に **30件まで**。残りは次回に回す。
+- 一回で扱うのは古い順に **30件くらいまで**。区切りは「まとまり」（手順 2）の切れ目にする。30件目のまとまりが31件目以降に続いていたら、そのまとまりの最後までを含める。残りは次回に回す。
+- `warning` が出ていたら、最後の報告にそのまま書く。
+- **前回の途中で止まった分を先に片付ける。** 記事のコミットにはメッセージIDを書いている（手順 7）。`pending` の投稿のうち、IDが main のコミットにすでにあるものは取り込み済み（前回、プッシュの後にリアクションを付ける前に止まった）。記事は触らず、手順 8 の要領でリアクションと返信だけ付ける。
+  ```bash
+  git log origin/main --format=%B | grep -o 'bridget-lab: [0-9]*' | sort -u
+  ```
 
 ### 2. 投稿を読む
 
@@ -40,6 +45,7 @@ node wiki/scripts/bridget-lab.mjs pending > "${TMPDIR:-/tmp}/bridget-lab/pending
 - **動画の添付**は、記事にすると決めた後で `download` → `upload-video`（手順 5）。
 - **X の投稿**は `embeds` の `description` が本文、`author` が投稿者。動画付き（`hasVideo: true`）なら、その X の URL を記事の `videos` に入れる（サイトが埋め込みで再生する）。
 - **YouTube の URL** もそのまま `videos` に入れる。時刻指定（`&t=42s`）があれば残す。
+- **ほかの bot・Webhook の投稿**（`byOtherBot: true`）は、X のリンクを貼り直す bot などのことがある。中身が材料なら同じように扱い、関係ない通知（レベルアップなど）なら ❓ にする。
 - **同じ人が続けて投稿したもの**（目安として10分以内）で、話が続いているもの（例：本文の直後に動画だけの投稿）は、ひとまとまりの材料として扱う。
 - **❓ の投稿への返信**（`replyTo.status` が `ask`）は補足情報。返信先の本文（`replyTo.content`）と合わせて判断する。記事にできたら、返信先にも `mark <返信先id> ok` を付ける（❓ は自動で外れる）。
 
@@ -125,12 +131,16 @@ tags:
   - 普通の投稿・転送：`> 出典：Discord「BRIDGET LAB」 投稿者名（YYYY/MM/DD）`（転送は `forwarded.date` があればその日付）
   - X の投稿：`> 出典：X 投稿者名（YYYY/MM/DD）`
   - 本文に元ネタが書いてあれば `／参照元：〇〇` を足す（既存記事と同じ形）
-- **動画の添付**は、記事の ID（例 `combos/center/close-s-ch-confirm`）が決まってから置く:
+- **動画の添付**は、記事ファイルを書いた後で置く（記事ファイルが無いと `upload-video` は断る）:
   ```bash
   node wiki/scripts/bridget-lab.mjs download <msgId> <スクラッチのフォルダ>
   node wiki/scripts/bridget-lab.mjs upload-video <保存したファイル> <記事ID>
   ```
-  出てきた `/media/videos/...` を `videos` に `url` と `title` で入れる。❓ にする投稿の動画は置かない。
+  記事ID は `wiki/src/content/docs/` からのパスで `.md` を除いたもの（例 `combos/center/close-s-ch-confirm`）。出てきた `/media/videos/...` を `videos` に `url` と `title` で入れる。❓ にする投稿の動画は置かない。
+- **置いた動画の URL は全部控えておく。** その記事を main に入れられなかったとき（ビルドで外した、❓ に変えた、プッシュに失敗した、途中でやめた）は、必ず消す。消さないと R2 に残り続ける:
+  ```bash
+  node wiki/scripts/bridget-lab.mjs discard-video /media/videos/202611/xxxx.mp4
+  ```
 
 **追記するとき:**
 - 内容に合う見出しの下に箇条書きで足す。合う見出しが無ければ `## ` を新しく作る。
@@ -146,19 +156,22 @@ tags:
 cd wiki && npm run build
 ```
 
-失敗したらエラーを読んで直す（バージョンの書き間違い、`training` の指定先が無い、など）。直せないものはその材料だけ ❓ にして、記事から外す。
+失敗したらエラーを読んで直す（バージョンの書き間違い、`training` の指定先が無い、など）。直せないものはその材料だけ ❓ にして、記事から外す（置いた動画は `discard-video` で消す）。
 
 ### 7. main に反映する
 
 ```bash
 git add wiki/src/content/docs
 git commit -m "wiki: Discordから取り込み（作成N件・追記N件）" -m "- 作成「タイトル」
-- 追記「タイトル」"
+- 追記「タイトル」" -m "bridget-lab: <msgId>
+bridget-lab: <msgId>"
 git push origin HEAD:main
 ```
 
-- 記事に変更が無い（記載済み・❓ だけ）ならコミットしない。
-- プッシュが拒否されたら（サイトの編集と重なったなど）、`git pull --rebase origin main` してからもう一度ビルドして押す。3回失敗したら、リアクションを付けずに終わって報告する。
+- 3つ目の段落には、このコミットで ✅ にする投稿（記事にした・追記した・記載済み）の ID を1行ずつ全部書く。次の回が、途中で止まった分を見分けるのに使う。
+
+- 記事に変更が無い（記載済み・❓ だけ）なら、コミットせずに手順 8 へ進む。
+- プッシュが拒否されたら（サイトの編集と重なったなど）、`git pull --rebase origin main` してからもう一度ビルドして押す。3回失敗したら、置いた動画を `discard-video` で全部消し、リアクションを付けずに終わって報告する。
 - main 以外のブランチや PR は作らない（サイトのフォームと同じく、main に入れると Cloudflare が1〜2分で反映する）。
 
 ### 8. Discord に結果を付ける

@@ -9,6 +9,8 @@ on:
       - '.github/workflows/**'
       # wiki サイトは Cloudflare Pages 側でデプロイするので bot には無関係
       - 'wiki/**'
+      # Claude Code のスキル（wiki の取り込みなど）も bot には無関係
+      - '.claude/**'
 
 jobs:
   deploy:

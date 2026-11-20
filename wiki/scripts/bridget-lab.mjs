@@ -6,7 +6,8 @@
  *   node wiki/scripts/bridget-lab.mjs check                      接続確認
  *   node wiki/scripts/bridget-lab.mjs pending                    未処理の投稿を JSON で出す（古い順）
  *   node wiki/scripts/bridget-lab.mjs download <msgId> <dir>     投稿の添付（転送元の添付も含む）を保存
- *   node wiki/scripts/bridget-lab.mjs upload-video <file> <記事ID> 動画を R2 に置き、/media/... の URL を出す
+ *   node wiki/scripts/bridget-lab.mjs upload-video <file> <記事ID> 動画を R2 に置き、/media/... の URL を出す（記事ファイルを先に作っておく）
+ *   node wiki/scripts/bridget-lab.mjs discard-video </media/...>  取り込みをやめたときに、置いた動画を消す
  *   node wiki/scripts/bridget-lab.mjs mark <msgId> ok|ask        ✅ / ❓ を付ける（もう片方は外す）
  *   node wiki/scripts/bridget-lab.mjs reply <msgId> <本文>        投稿に返信する
  *
@@ -20,6 +21,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -29,6 +31,7 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
     stdio: 'inherit',
     env: { ...process.env, NODE_USE_ENV_PROXY: '1' },
   });
+  if (r.error) console.error(`エラー: スクリプトを起動し直せませんでした: ${r.error.message}`);
   process.exit(r.status ?? 1);
 }
 
@@ -37,10 +40,16 @@ const CF = 'https://api.cloudflare.com/client/v4';
 const CHANNEL_NAME = 'bridgetlab'; // 「BRIDGET LAB」「bridget-lab」など（記号・大文字小文字は無視）
 const D1_NAME = 'bridget-wiki';
 const BUCKET = process.env.CF_R2_BUCKET || 'bridget-wiki-media';
-const MAX_SCAN = 1000; // さかのぼって見る投稿の数
+const MAX_SCAN = 3000; // さかのぼって見る投稿の数
 const MAX_VIDEO = 50 * 1024 * 1024;
 const EMOJI = { ok: '✅', ask: '❓' };
 const VIDEO_TYPES = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' };
+const MEDIA_USER = 'discord:bridget-lab';
+// wiki/src/site.config.ts の CATEGORIES / POSITIONED と同じ（変えたらここも直す）
+const CATEGORY_IDS = ['basics', 'neutral', 'combos', 'okizeme', 'setplay', 'matchups', 'training', 'faq'];
+const POSITIONED = ['combos', 'okizeme', 'setplay'];
+const SLUG = /^[a-z0-9][a-z0-9-]{0,59}$/;
+const DOCS_DIR = new URL('../src/content/docs/', import.meta.url);
 
 const die = (msg) => {
   console.error(`エラー: ${msg}`);
@@ -142,23 +151,31 @@ function simplify(m, ch, bot) {
 async function allMessages(ch) {
   const all = [];
   let before;
-  while (all.length < MAX_SCAN) {
+  let truncated = false;
+  for (;;) {
+    if (all.length >= MAX_SCAN) {
+      truncated = true;
+      break;
+    }
     const page = await discord(`/channels/${ch.id}/messages?limit=100${before ? `&before=${before}` : ''}`);
     all.push(...page);
     if (page.length < 100) break;
     before = page[page.length - 1].id;
   }
-  return all.reverse(); // 古い順
+  return { msgs: all.reverse(), truncated }; // 古い順
 }
 
 async function cmdPending() {
   const [ch, bot] = await Promise.all([channel(), discord('/users/@me')]);
-  const msgs = await allMessages(ch);
+  const { msgs, truncated } = await allMessages(ch);
+  // 自分（この bot）の返信だけ除く。ほかの bot・Webhook の投稿（X のリンクを貼り直す bot など）は材料として残す
   const pending = msgs
-    .filter((m) => m.author.id !== bot.id && !m.author.bot && [0, 19].includes(m.type) && statusOf(m) === 'pending')
-    .map((m) => simplify(m, ch, bot));
+    .filter((m) => m.author.id !== bot.id && [0, 19].includes(m.type) && statusOf(m) === 'pending')
+    .map((m) => ({ ...simplify(m, ch, bot), ...(m.author.bot || m.webhook_id ? { byOtherBot: true } : {}) }));
   const onHold = msgs.filter((m) => statusOf(m) === 'ask').length;
-  console.log(JSON.stringify({ channel: ch.name, pending, onHoldCount: onHold }, null, 2));
+  const out = { channel: ch.name, pending, onHoldCount: onHold };
+  if (truncated) out.warning = `直近 ${MAX_SCAN} 件しか見ていません。これより古い未処理・保留の投稿は対象外です`;
+  console.log(JSON.stringify(out, null, 2));
 }
 
 async function getMessage(id) {
@@ -252,9 +269,18 @@ const d1 = (ids, sql, params) =>
     body: JSON.stringify({ sql, params }),
   });
 
+/** 記事IDとして正しい形か（server/article.ts の isValidId と同じ規則） */
+function isValidId(id) {
+  const parts = id.split('/');
+  if (!CATEGORY_IDS.includes(parts[0])) return false;
+  if (POSITIONED.includes(parts[0])) return parts.length === 3 && ['center', 'corner'].includes(parts[1]) && SLUG.test(parts[2]);
+  return parts.length === 2 && SLUG.test(parts[1]);
+}
+
 async function cmdUploadVideo(file, page) {
   if (!file || !page) die('使い方: upload-video <ファイル> <記事ID（例: combos/center/2k-basic）>');
-  if (!/^[a-z]+(\/(center|corner))?\/[a-z0-9][a-z0-9-]{0,59}$/.test(page)) die(`記事IDの形が正しくありません: ${page}`);
+  if (!isValidId(page)) die(`記事IDの形が正しくありません: ${page}`);
+  if (!existsSync(new URL(`${page}.md`, DOCS_DIR))) die(`記事ファイルがありません: wiki/src/content/docs/${page}.md（先に記事を書いてから動画を置く）`);
   const ext = extname(file).toLowerCase();
   const type = VIDEO_TYPES[ext];
   if (!type) die('mp4 / webm / mov の動画だけ置けます');
@@ -271,9 +297,23 @@ async function cmdUploadVideo(file, page) {
     body: buf,
   });
   // サイトのフォームでアップロードしたときと同じように記録する（記事から外されたら自動で消えるように）
-  await d1(ids, 'INSERT INTO media (key, user, size, created_at) VALUES (?, ?, ?, ?)', [key, 'discord:bridget-lab', buf.length, now.toISOString()]);
+  await d1(ids, 'INSERT INTO media (key, user, size, created_at) VALUES (?, ?, ?, ?)', [key, MEDIA_USER, buf.length, now.toISOString()]);
   await d1(ids, 'INSERT OR IGNORE INTO media_refs (key, page) VALUES (?, ?)', [key, page]);
   console.log(`/media/${key}`);
+}
+
+/** upload-video で置いた動画を消す（記事を main に入れられなかったとき・❓ にしたとき） */
+async function cmdDiscardVideo(url) {
+  const key = (url ?? '').replace(/^\/media\//, '');
+  if (!/^videos\/\d{6}\/[0-9a-f-]{36}\.(mp4|webm|mov)$/.test(key)) die('使い方: discard-video /media/videos/YYYYMM/xxxx.mp4');
+  const ids = await cfIds();
+  const rows = await d1(ids, 'SELECT user FROM media WHERE key = ?', [key]);
+  const user = rows?.[0]?.results?.[0]?.user;
+  if (user !== MEDIA_USER) die(`この取り込みで置いた動画ではないので消しません: ${url}`);
+  await cf(`/accounts/${ids.account}/r2/buckets/${BUCKET}/objects/${key.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE' });
+  await d1(ids, 'DELETE FROM media_refs WHERE key = ?', [key]);
+  await d1(ids, 'DELETE FROM media WHERE key = ?', [key]);
+  console.log(`消しました: /media/${key}`);
 }
 
 async function cmdCheck() {
@@ -302,6 +342,7 @@ const commands = {
   pending: cmdPending,
   download: cmdDownload,
   'upload-video': cmdUploadVideo,
+  'discard-video': cmdDiscardVideo,
   mark: cmdMark,
   reply: cmdReply,
 };
