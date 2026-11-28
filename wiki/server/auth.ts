@@ -165,3 +165,64 @@ export async function writer(
 
 export const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
+
+// ---------- ログインしていない人（ゲスト） ----------
+/**
+ * ゲストを区別するクッキー（ブラウザごとのランダムID）。いいね・お気に入り・コメントに使う。
+ * 中身はただの乱数で、知っている人＝その本人として扱う（推測できない長さにしてある）。
+ * データベースには `anon:<ID>` の形で入れる（メールアドレスとは @ の有無で重ならない）。
+ */
+export const ANON_COOKIE = '__Host-bl_anon';
+const ANON_MAX_AGE = 400 * 24 * 60 * 60; // ブラウザが許す上限（約400日）
+const ANON_ID = /^[0-9a-f]{32}$/;
+export const ANON_PREFIX = 'anon:';
+
+/** ゲストのクッキーの ID（無い・形が違うときは null） */
+export const anonIdOf = (req: Request) => {
+  const v = cookieOf(req, ANON_COOKIE);
+  return v && ANON_ID.test(v) ? v : null;
+};
+
+/** ログインしていればメールアドレス、ゲストなら `anon:<ID>`、どちらも無ければ null（読むときに使う） */
+export async function viewerOf(req: Request, env: AccessEnv): Promise<{ id: string | null; email: string | null }> {
+  const email = await userOf(req, env);
+  if (email) return { id: email, email };
+  const anon = anonIdOf(req);
+  return { id: anon ? ANON_PREFIX + anon : null, email: null };
+}
+
+export const clearAnonCookie = () => `${ANON_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+
+/**
+ * ゲストも書き込める API の入口：同じサイトからの送信なら、書き込む人の ID を返す。
+ * ゲストでクッキーがまだ無ければ新しく作り、setCookie にレスポンスへ付ける値を入れる（withCookie で付ける）。
+ */
+export async function actor(
+  req: Request,
+  env: AccessEnv,
+  opts: { json?: boolean } = {},
+): Promise<{ user: string; email: string | null; setCookie?: string } | { error: Response }> {
+  if (!sameOrigin(req, opts)) return { error: json({ error: '不正なリクエストです' }, 403) };
+  const v = await viewerOf(req, env);
+  if (v.id) return { user: v.id, email: v.email };
+  const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return {
+    user: ANON_PREFIX + id,
+    email: null,
+    setCookie: `${ANON_COOKIE}=${id}; Path=/; Max-Age=${ANON_MAX_AGE}; HttpOnly; Secure; SameSite=Lax`,
+  };
+}
+
+export const withCookie = (res: Response, setCookie?: string) => {
+  if (setCookie) res.headers.append('Set-Cookie', setCookie);
+  return res;
+};
+
+/** 管理者（ADMIN_EMAILS にカンマ区切りで書いたメールアドレス）か */
+export const isAdmin = (email: string | null, env: { ADMIN_EMAILS?: string }) =>
+  !!email &&
+  (env.ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(email.toLowerCase());

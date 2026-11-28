@@ -3,14 +3,17 @@ CREATE TABLE IF NOT EXISTS comments (
   page TEXT NOT NULL,
   name TEXT NOT NULL DEFAULT '',
   body TEXT NOT NULL,
-  author TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  author TEXT NOT NULL,         -- メールアドレス、ゲストなら anon:<ID>
+  created_at TEXT NOT NULL,
+  ip_hash TEXT                  -- ゲストの投稿だけ：IPアドレスの鍵付きハッシュ（連投の制限に使う）
 );
 CREATE INDEX IF NOT EXISTS idx_comments_page ON comments(page, created_at);
+CREATE INDEX IF NOT EXISTS idx_comments_ip ON comments(ip_hash, created_at);
+CREATE INDEX IF NOT EXISTS idx_comments_author ON comments(author, created_at);
 
 CREATE TABLE IF NOT EXISTS reactions (
   page TEXT NOT NULL,
-  user TEXT NOT NULL,
+  user TEXT NOT NULL,           -- メールアドレス、ゲストなら anon:<ID>
   kind TEXT NOT NULL CHECK (kind IN ('like', 'fav')),
   created_at TEXT NOT NULL,
   PRIMARY KEY (page, user, kind)
@@ -39,3 +42,4 @@ CREATE TABLE IF NOT EXISTS media_refs (
   PRIMARY KEY (key, page)
 );
 CREATE INDEX IF NOT EXISTS idx_media_refs_page ON media_refs(page);
+CREATE INDEX IF NOT EXISTS idx_reactions_user ON reactions(user);

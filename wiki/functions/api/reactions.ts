@@ -4,11 +4,11 @@
  *        → { likes: { [記事ID]: 件数 }, mine: { like: [記事ID], fav: [記事ID] } }
  *   POST /api/reactions  { page, kind: "like" | "fav", on: boolean }
  *
- * 誰が押したかはログインしたメールアドレスで区別する（画面には出さない）。見るだけならログイン不要。
- * 押すにはログインが必要（未ログインは 401）。
+ * 誰が押したかは、ログインしていればメールアドレス、ゲストならブラウザごとのID（クッキー）で区別する（画面には出さない）。
+ * ログインしなくても押せる。ゲストのものはログインしたときにアカウントへ引き継ぐ（functions/login.ts）。
  * お気に入りは本人にしか返さない。
  */
-import { json, userOf, writer, type AccessEnv } from '../../server/auth';
+import { actor, json, viewerOf, withCookie, type AccessEnv } from '../../server/auth';
 
 interface Env extends AccessEnv {
   DB: D1Database;
@@ -17,7 +17,7 @@ interface Env extends AccessEnv {
 const KINDS = ['like', 'fav'] as const;
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
-  const me = await userOf(request, env);
+  const { id: me, email } = await viewerOf(request, env);
   const [counts, mine] = await Promise.all([
     env.DB.prepare("SELECT page, COUNT(*) AS n FROM reactions WHERE kind = 'like' GROUP BY page").all<{ page: string; n: number }>(),
     me
@@ -25,7 +25,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       : Promise.resolve({ results: [] as { page: string; kind: string }[] }),
   ]);
   return json({
-    loggedIn: !!me,
+    loggedIn: !!email,
     likes: Object.fromEntries(counts.results.map((r) => [r.page, r.n])),
     mine: {
       like: mine.results.filter((r) => r.kind === 'like').map((r) => r.page),
@@ -35,7 +35,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 };
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  const w = await writer(request, env, { json: true });
+  const w = await actor(request, env, { json: true });
   if ('error' in w) return w.error;
   const me = w.user;
   const { page, kind, on } = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -52,5 +52,5 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM reactions WHERE page = ? AND kind = 'like'")
     .bind(page)
     .first<{ n: number }>();
-  return json({ ok: true, likes: row?.n ?? 0 });
+  return withCookie(json({ ok: true, likes: row?.n ?? 0 }), w.setCookie);
 };

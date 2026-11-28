@@ -1,9 +1,8 @@
 /**
  * いいね・お気に入りの状態をページ全体で共有する。
  * API (/api/reactions) が無い環境ではブラウザ内保存のプレビューモードで動く。
- * 見るだけならログイン不要。押すときに未ログインならログインへ案内する。
+ * ログインしなくても押せる（ゲストはブラウザごとに区別され、ログインするとアカウントへ引き継がれる）。
  */
-import { loginUrl } from './login';
 
 type Kind = 'like' | 'fav';
 type State = { likes: Record<string, number>; mine: Record<Kind, Set<string>>; preview: boolean; ready: boolean; loggedIn: boolean };
@@ -51,13 +50,7 @@ function render() {
   document.dispatchEvent(new CustomEvent('reactions:change'));
 }
 
-function askLogin(kind: Kind) {
-  const what = kind === 'like' ? 'いいね' : 'お気に入り';
-  if (confirm(`${what}するにはログインが必要です。ログインしますか？`)) location.href = loginUrl();
-}
-
 async function toggle(page: string, kind: Kind) {
-  if (!state.preview && !state.loggedIn) return askLogin(kind);
   const set = state.mine[kind];
   const on = !set.has(page);
   const prev = state.likes[page] ?? 0;
@@ -71,15 +64,10 @@ async function toggle(page: string, kind: Kind) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ page, kind, on }),
     });
-    if (res.status === 401) {
-      state.loggedIn = false;
-      throw Object.assign(new Error(), { login: true });
-    }
     if (!res.ok) throw new Error();
     const d = await res.json();
     state.likes[page] = d.likes;
-  } catch (e) {
-    if ((e as { login?: boolean }).login) setTimeout(() => askLogin(kind));
+  } catch {
     on ? set.delete(page) : set.add(page);
     state.likes[page] = prev;
   }
