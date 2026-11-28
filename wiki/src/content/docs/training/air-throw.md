@@ -3,6 +3,19 @@ title: 防御の練習方法
 description: ソルのレコーディングで画面端の4択を練習。空ダは垂直、前ジャンプは斜めで迎える
 versions:
   - "2.02"
+videos:
+  - url: /media/videos/202611/6abc3ead-ef71-4502-95d0-0230bebcad7c.mp4
+    title: ガード練習設定方法
+  - url: /media/videos/202611/2c0e1ffb-b553-4721-86b4-775429a28482.mp4
+    title: FD貼りっぱ
+  - url: /media/videos/202611/539fc1f5-747a-4654-a086-9e0bc592c34b.mp4
+    title: ファジージャンプ
+  - url: /media/videos/202611/d2a8b984-2358-4537-a4a1-c430390e0a95.mp4
+    title: 前P対空
+  - url: /media/videos/202611/beabcaee-f7c0-4ce9-8d78-08d6f204b4c9.mp4
+    title: 空投げ1
+  - url: /media/videos/202611/8674b3b7-84a5-442a-919a-8f6123561bfc.mp4
+    title: 空投げ2
 tags:
   - 空投げ
   - 対空
@@ -43,3 +56,4 @@ tags:
 
 ---
 > 出典：練習メニュー・フィードバック（2026/10/31, 11/03）
+> 出典（追記）：Discord「BRIDGET LAB」 はちやん（2026/11/28）
