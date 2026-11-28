@@ -48,3 +48,17 @@ export function parseVideo(input: VideoInput): Video {
 }
 
 export const youtubeThumb = (id: string) => `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+
+/**
+ * 本文に書いた動画 `![タイトル](URL)` を取り出す。URL が動画（YouTube・X・動画ファイル）のものだけ。
+ * 本文の好きな位置に動画を置くための記法。
+ */
+const BODY_VIDEO = /!\[([^\]\n]*)\]\(\s*<?([^\s()<>]+)>?(?:\s+"[^"\n]*")?\s*\)/g;
+export const BODY_VIDEO_URL = /^(https:\/\/|\/media\/|\/samples\/)/;
+
+export function bodyVideos(body: string | undefined): { url: string; title?: string }[] {
+  if (!body) return [];
+  return [...body.matchAll(BODY_VIDEO)]
+    .map((m) => ({ url: m[2], title: m[1].trim() || undefined }))
+    .filter((v) => BODY_VIDEO_URL.test(v.url) && parseVideo(v).type !== 'link');
+}

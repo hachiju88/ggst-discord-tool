@@ -166,7 +166,7 @@ const config = {
     </section>
 
     <section class="ed-section">
-      <h2>本文 <small>Markdown が使えます（## 見出し、- 箇条書き、**太字**、表など）</small></h2>
+      <h2>本文 <small>Markdown が使えます（## 見出し、- 箇条書き、**太字**、表など）。![タイトル](動画URL) と書くとその位置に動画を置けます</small></h2>
       <div class="ed-tabs" role="tablist">
         <button type="button" role="tab" aria-selected="true" data-tab="write">書く</button>
         <button type="button" role="tab" aria-selected="false" data-tab="preview">プレビュー</button>
@@ -603,6 +603,18 @@ const config = {
         // Starlight の :::note 記法は簡易表示にする
         const md = bodyEl.value.replace(/^:::(\w+)(?:\[(.*?)\])?\n([\s\S]*?)\n:::/gm, (_, k, t, c) => `> **${t || k}**\n>\n> ${c.replace(/\n/g, '\n> ')}`);
         previewEl.innerHTML = marked.parse(escapeHtml(md).replace(/&gt;/g, '>'), { async: false }) as string;
+        // 本文に置いた動画ファイル（![タイトル](URL)）はプレビューでも動画として出す
+        for (const img of previewEl.querySelectorAll<HTMLImageElement>('img')) {
+          const src = img.getAttribute('src') ?? '';
+          if (!/^(https:\/\/|\/media\/|\/samples\/)\S+\.(mp4|webm|mov|m4v)$/i.test(src)) continue;
+          const v = document.createElement('video');
+          v.src = src;
+          v.controls = true;
+          v.preload = 'metadata';
+          v.playsInline = true;
+          v.style.width = '100%';
+          img.replaceWith(v);
+        }
       }
     });
   }

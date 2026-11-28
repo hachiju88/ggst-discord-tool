@@ -4,11 +4,14 @@ import Comments from '../Comments.astro';
 import VideoPlayer from '../VideoPlayer.astro';
 import Combo from '../Combo.astro';
 import RelatedTraining from '../RelatedTraining.astro';
+import { bodyVideos } from '../../lib/video';
 
 const route = Astro.locals.starlightRoute;
 const data = route.entry.data as Record<string, any>;
 const showComments = data.comments !== false && data.template !== 'splash';
-const videos = data.videos ?? [];
+// 本文に置いた動画（![タイトル](URL)）は上にまとめて出さない。1本目は一覧カードのサムネとして使われる
+const inBody = new Set(bodyVideos(route.entry.body).map((v) => v.url));
+const videos = (data.videos ?? []).filter((v: any) => !inBody.has(typeof v === 'string' ? v : v.url));
 const combos = (data.combos ?? []).map((c: any) => (typeof c === 'string' ? { route: c } : c));
 ---
 
@@ -25,3 +28,7 @@ const combos = (data.combos ?? []).map((c: any) => (typeof c === 'string' ? { ro
 <Default><slot /></Default>
 <RelatedTraining />
 {showComments && <Comments pageId={route.id} />}
+
+<script>
+  import '../../scripts/player';
+</script>

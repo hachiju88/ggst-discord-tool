@@ -3,6 +3,7 @@
  * サイト側の content.config.ts と同じルールで検証し、ビルドが壊れる記事を保存しないようにする。
  */
 import { parse, stringify } from 'yaml';
+import { bodyVideos } from '../src/lib/video';
 import { CATEGORIES, POSITIONED, TRAINING_LINKABLE, VERSIONS, type CategoryId } from '../src/site.config';
 
 export const CONTENT_DIR = 'wiki/src/content/docs';
@@ -174,10 +175,9 @@ export function trainingInput(raw: any, versions: string[] | undefined): Article
   return validate({ ...raw, category: 'training', versions, tags: raw?.tags ?? [], videos: [], combos: [], training: [] });
 }
 
-/** 記事から参照している、このサイトにアップロードした動画のキー */
-export function mediaKeys(data: { videos?: (string | { url: string })[] }): string[] {
-  return (data.videos ?? [])
-    .map((v) => (typeof v === 'string' ? v : v?.url))
+/** 記事から参照している、このサイトにアップロードした動画のキー（本文の ![タイトル](URL) も含む） */
+export function mediaKeys(data: { videos?: (string | { url: string })[] }, body?: string): string[] {
+  return [...(data.videos ?? []).map((v) => (typeof v === 'string' ? v : v?.url)), ...bodyVideos(body).map((v) => v.url)]
     .filter((u): u is string => typeof u === 'string' && u.startsWith('/media/'))
     .map((u) => u.slice('/media/'.length));
 }

@@ -2,6 +2,7 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import remarkEscapeHtml from './src/lib/remark-escape-html.mjs';
+import remarkVideo from './src/lib/remark-video.ts';
 
 const positioned = (dir, label) => ({
   label,
@@ -20,8 +21,8 @@ const simple = (dir, label) => ({
 });
 
 export default defineConfig({
-  // 本文中の生HTMLは文字として表示（XSS対策）
-  markdown: { remarkPlugins: [remarkEscapeHtml] },
+  // 本文中の生HTMLは文字として表示（XSS対策）。その後で本文の ![タイトル](動画URL) をプレイヤーにする
+  markdown: { remarkPlugins: [remarkEscapeHtml, remarkVideo] },
   integrations: [
     starlight({
       title: 'BRIDGET LAB',

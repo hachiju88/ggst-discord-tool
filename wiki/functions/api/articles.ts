@@ -87,7 +87,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     const content = toFile(a);
     const changes: Change[] = [...(nt ? [nt.change] : []), { path: pathOf(id), content, expectSha: null }];
     await commit(env, changes, `wiki: 記事を作成「${a.title}」${nt ? '＋練習方法' : ''}`);
-    await setRefs(env, id, mediaKeys(a));
+    await setRefs(env, id, mediaKeys(a, a.body));
     await log(env, id, 'create', user);
     if (nt) await log(env, `training/${nt.slug}`, 'create', user);
     return json({ ok: true, id, sha: await blobSha(content), training: nt?.slug }, 201);
@@ -130,9 +130,9 @@ export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
       ]);
     }
     // 記事から外したアップロード動画は、ほかの記事でも使われていなければ削除して容量を空ける
-    const keep = new Set(mediaKeys(a));
+    const keep = new Set(mediaKeys(a, a.body));
     await setRefs(env, id, [...keep], oldId);
-    await releaseUnreferenced(env, mediaKeys(old.data).filter((k) => !keep.has(k)));
+    await releaseUnreferenced(env, mediaKeys(old.data, old.body).filter((k) => !keep.has(k)));
 
     await log(env, id, id === oldId ? 'update' : `move:${oldId}`, user);
     if (nt) await log(env, `training/${nt.slug}`, 'create', user);
@@ -151,7 +151,8 @@ export const onRequestDelete: PagesFunction<Env> = async ({ request, env }) => {
     if (!isValidId(id) || !sha) throw new InputError('記事が見つかりません');
     const cur = await getFile(env, pathOf(id));
     if (!cur) throw new ConflictError('この記事はすでに削除されています');
-    const title = parseFile(cur.text).data.title ?? id;
+    const curFile = parseFile(cur.text);
+    const title = curFile.data.title ?? id;
     await commit(env, [{ path: pathOf(id), delete: true, expectSha: sha }], `wiki: 記事を削除「${title}」`);
 
     await env.DB.batch([
@@ -159,7 +160,7 @@ export const onRequestDelete: PagesFunction<Env> = async ({ request, env }) => {
       env.DB.prepare('DELETE FROM reactions WHERE page = ?').bind(id),
     ]);
     await setRefs(env, id, []);
-    await releaseUnreferenced(env, mediaKeys(parseFile(cur.text).data));
+    await releaseUnreferenced(env, mediaKeys(curFile.data, curFile.body));
     await log(env, id, 'delete', user);
     return json({ ok: true });
   } catch (e) {

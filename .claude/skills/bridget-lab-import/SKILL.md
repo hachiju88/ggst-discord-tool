@@ -137,6 +137,7 @@ tags:
   node wiki/scripts/bridget-lab.mjs upload-video <保存したファイル> <記事ID>
   ```
   記事ID は `wiki/src/content/docs/` からのパスで `.md` を除いたもの（例 `combos/center/close-s-ch-confirm`）。出てきた `/media/videos/...` を `videos` に `url` と `title` で入れる。❓ にする投稿の動画は置かない。
+- **動画を本文の特定の位置に置くよう頼まれたら**（「〇〇の見出しの最後に置く」など）、`videos` に入れたうえで、本文のその位置に `![タイトル](/media/videos/...)` を1行ずつ書く（続けて書くと横に並ぶ）。サムネに指定された動画は `videos` の1本目にする。
 - **置いた動画の URL は全部控えておく。** その記事を main に入れられなかったとき（ビルドで外した、❓ に変えた、プッシュに失敗した、途中でやめた）は、必ず消す。消さないと R2 に残り続ける:
   ```bash
   node wiki/scripts/bridget-lab.mjs discard-video /media/videos/202611/xxxx.mp4
