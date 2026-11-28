@@ -1,3 +1,5 @@
+-- 新しく作るデータベース用。前から使っているデータベースには、これではなく migrations/ の SQL を実行する
+-- （このファイルを丸ごと流すと、まだ無い列へのインデックスでエラーになる）
 CREATE TABLE IF NOT EXISTS comments (
   id TEXT PRIMARY KEY,
   page TEXT NOT NULL,
@@ -16,6 +18,7 @@ CREATE TABLE IF NOT EXISTS reactions (
   user TEXT NOT NULL,           -- メールアドレス、ゲストなら anon:<ID>
   kind TEXT NOT NULL CHECK (kind IN ('like', 'fav')),
   created_at TEXT NOT NULL,
+  ip_hash TEXT,                 -- ゲストの分だけ：IPアドレスの鍵付きハッシュ（いいねの水増し対策）
   PRIMARY KEY (page, user, kind)
 );
 CREATE INDEX IF NOT EXISTS idx_reactions_kind ON reactions(kind, page);
@@ -43,3 +46,10 @@ CREATE TABLE IF NOT EXISTS media_refs (
 );
 CREATE INDEX IF NOT EXISTS idx_media_refs_page ON media_refs(page);
 CREATE INDEX IF NOT EXISTS idx_reactions_user ON reactions(user);
+CREATE INDEX IF NOT EXISTS idx_reactions_ip ON reactions(ip_hash, created_at);
+
+-- サーバーだけが使う鍵（ip_hash：IPアドレスのハッシュの鍵。初回に自動で作る）
+CREATE TABLE IF NOT EXISTS app_keys (
+  name TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);

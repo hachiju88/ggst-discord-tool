@@ -7,16 +7,18 @@
  * 読むのはログイン不要。書くのもログイン不要（ゲスト）。
  *   - ログインしている人：今までどおり（確認なし・回数制限なし）
  *   - ゲスト：Cloudflare Turnstile（人間かどうかの確認）を通ったときだけ受け付け、連投を制限する
+ *     （同じブラウザは GUEST_INTERVAL_SEC 秒に1件、同じブラウザか同じIPアドレスで1時間に GUEST_PER_HOUR 件まで）
  *     Turnstile の鍵（TURNSTILE_SITE_KEY / TURNSTILE_SECRET_KEY）が無いときは、ゲストの投稿を受け付けない
  * 投稿者の識別には、ログインしたメールアドレスかゲストのID（クッキー）を使う。保存するが、画面には出さない。
  * ゲストが自分のコメントを消せるのは、書いたときと同じブラウザからだけ（ログインすると引き継がれる）。
  *
  * 環境変数（Pages の「変数とシークレット」）:
  *   TURNSTILE_SITE_KEY    Turnstile のサイトキー（テキスト）
- *   TURNSTILE_SECRET_KEY  Turnstile のシークレットキー（シークレット）。IP アドレスを伏せて記録する鍵にも使う
+ *   TURNSTILE_SECRET_KEY  Turnstile のシークレットキー（シークレット）
  *   ADMIN_EMAILS          どのコメントでも消せる人のメールアドレス（カンマ区切り）
  */
 import { ANON_PREFIX, actor, isAdmin, json, viewerOf, withCookie, type AccessEnv } from '../../server/auth';
+import { ipHashOf } from '../../server/guest';
 
 interface Env extends AccessEnv {
   DB: D1Database;
@@ -26,8 +28,10 @@ interface Env extends AccessEnv {
 }
 
 /** ゲストの連投制限（同じ人＝同じIDか同じIPアドレス） */
-const GUEST_INTERVAL_SEC = 30; // 前の投稿から最低これだけ空ける
-const GUEST_PER_HOUR = 10; // 1時間にこれだけまで
+const GUEST_INTERVAL_SEC = 30; // 同じブラウザは、前の投稿から最低これだけ空ける（IPは見ない：同じ回線の別の人を巻き込まないように）
+const GUEST_PER_HOUR = 10; // 同じブラウザか同じIPアドレスで、1時間にこれだけまで
+
+const TOO_MANY = 'しばらく時間をおいてから投稿してください（ログインすると制限はありません）';
 
 const guestEnabled = (env: Env) => !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY);
 
@@ -61,37 +65,45 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   if (body.length > 2000) return json({ error: '本文は2000文字までです' }, 400);
   const displayName = typeof name === 'string' ? name.trim().slice(0, 30) : '';
 
-  let ipHash: string | null = null;
-  if (!w.email) {
-    // ゲスト
-    if (!guestEnabled(env)) return json({ error: 'コメントするにはログインが必要です' }, 401);
-    const ip = request.headers.get('CF-Connecting-IP') ?? '';
-    ipHash = await hmac(env.TURNSTILE_SECRET_KEY!, ip);
-
-    const now = Date.now();
-    const recent = await env.DB.prepare(
-      `SELECT
-         SUM(CASE WHEN created_at > ? THEN 1 ELSE 0 END) AS short,
-         COUNT(*) AS hour
-       FROM comments WHERE (ip_hash = ? OR author = ?) AND created_at > ?`,
-    )
-      .bind(new Date(now - GUEST_INTERVAL_SEC * 1000).toISOString(), ipHash, me, new Date(now - 3600_000).toISOString())
-      .first<{ short: number | null; hour: number }>();
-    if ((recent?.short ?? 0) > 0) return json({ error: `続けて投稿するには${GUEST_INTERVAL_SEC}秒ほど待ってください` }, 429);
-    if ((recent?.hour ?? 0) >= GUEST_PER_HOUR) {
-      return json({ error: 'しばらく時間をおいてから投稿してください（ログインすると制限はありません）' }, 429);
-    }
-
-    if (typeof turnstile !== 'string' || !turnstile || !(await verifyTurnstile(env.TURNSTILE_SECRET_KEY!, turnstile, ip))) {
-      return json({ error: '確認に失敗しました。もう一度お試しください', retryTurnstile: true }, 403);
-    }
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  if (w.email) {
+    await env.DB.prepare('INSERT INTO comments (id, page, name, body, author, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(id, page, displayName, body.trim(), me, new Date(now).toISOString())
+      .run();
+    return json({ ok: true }, 201);
   }
 
-  await env.DB.prepare(
-    'INSERT INTO comments (id, page, name, body, author, created_at, ip_hash) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  // ゲスト
+  if (!guestEnabled(env)) return json({ error: 'コメントするにはログインが必要です' }, 401);
+  const ipHash = await ipHashOf(request, env.DB);
+  if (!ipHash) return json({ error: '接続元を確認できませんでした' }, 400);
+  const since = new Date(now - GUEST_INTERVAL_SEC * 1000).toISOString();
+  const hourAgo = new Date(now - 3600_000).toISOString();
+  const LIMITED = `EXISTS (SELECT 1 FROM comments WHERE author = ?1 AND created_at > ?2)`;
+  const HOURLY = `(SELECT COUNT(*) FROM comments WHERE (ip_hash = ?3 OR author = ?1) AND created_at > ?4)`;
+
+  // 先に制限を見る（Turnstile のトークンを無駄にしないように、エラーの文言を出し分けるため）
+  const recent = await env.DB.prepare(`SELECT ${LIMITED} AS short, ${HOURLY} AS hour`)
+    .bind(me, since, ipHash, hourAgo)
+    .first<{ short: number; hour: number }>();
+  if (recent?.short) return json({ error: `続けて投稿するには${GUEST_INTERVAL_SEC}秒ほど待ってください` }, 429);
+  if ((recent?.hour ?? 0) >= GUEST_PER_HOUR) return json({ error: TOO_MANY }, 429);
+
+  const ip = request.headers.get('CF-Connecting-IP') ?? '';
+  if (typeof turnstile !== 'string' || !turnstile || !(await verifyTurnstile(env.TURNSTILE_SECRET_KEY!, turnstile, ip))) {
+    return json({ error: '確認に失敗しました。もう一度お試しください', retryTurnstile: true }, 403);
+  }
+
+  // 制限の確認と書き込みを1文で行う（同時に何本も送られても上限を超えない）
+  const r = await env.DB.prepare(
+    `INSERT INTO comments (id, page, name, body, author, created_at, ip_hash)
+     SELECT ?5, ?6, ?7, ?8, ?1, ?9, ?3
+     WHERE NOT ${LIMITED} AND ${HOURLY} < ?10`,
   )
-    .bind(crypto.randomUUID(), page, displayName, body.trim(), me, new Date().toISOString(), ipHash)
+    .bind(me, since, ipHash, hourAgo, id, page, displayName, body.trim(), new Date(now).toISOString(), GUEST_PER_HOUR)
     .run();
+  if (!r.meta.changes) return json({ error: TOO_MANY }, 429);
   return withCookie(json({ ok: true }, 201), w.setCookie);
 };
 
@@ -100,11 +112,10 @@ export const onRequestDelete: PagesFunction<Env> = async ({ request, env }) => {
   const w = await actor(request, env);
   if ('error' in w) return w.error;
   if (!id) return json({ error: 'id is required' }, 400);
-  if (isAdmin(w.email, env)) {
-    await env.DB.prepare('DELETE FROM comments WHERE id = ?').bind(id).run();
-  } else {
-    await env.DB.prepare('DELETE FROM comments WHERE id = ? AND author = ?').bind(id, w.user).run();
-  }
+  const r = isAdmin(w.email, env)
+    ? await env.DB.prepare('DELETE FROM comments WHERE id = ?').bind(id).run()
+    : await env.DB.prepare('DELETE FROM comments WHERE id = ? AND author = ?').bind(id, w.user).run();
+  if (!r.meta.changes) return json({ error: 'このコメントは削除できません（すでに消えているか、ほかの人のコメントです）' }, 404);
   return json({ ok: true });
 };
 
@@ -121,13 +132,4 @@ async function verifyTurnstile(secret: string, token: string, ip: string): Promi
     console.error('turnstile verify failed', e);
     return false;
   }
-}
-
-/** IP アドレスをそのまま残さないように、鍵付きハッシュにして記録する */
-async function hmac(secret: string, value: string): Promise<string> {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
-    'sign',
-  ]);
-  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value));
-  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
 }

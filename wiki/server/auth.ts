@@ -171,11 +171,14 @@ export const json = (data: unknown, status = 200) =>
  * ゲストを区別するクッキー（ブラウザごとのランダムID）。いいね・お気に入り・コメントに使う。
  * 中身はただの乱数で、知っている人＝その本人として扱う（推測できない長さにしてある）。
  * データベースには `anon:<ID>` の形で入れる（メールアドレスとは @ の有無で重ならない）。
+ * 最初の書き込みが同時に何本も飛ぶと別々のIDになるので、いいねの読み込み（GET /api/reactions）で先に渡しておく。
  */
 export const ANON_COOKIE = '__Host-bl_anon';
 const ANON_MAX_AGE = 400 * 24 * 60 * 60; // ブラウザが許す上限（約400日）
 const ANON_ID = /^[0-9a-f]{32}$/;
 export const ANON_PREFIX = 'anon:';
+/** ログインしているつもりの画面から送るときに付けるヘッダー（ログインが切れていたら、ゲストとして書き込まずに 401 を返す） */
+export const LOGIN_HEADER = 'X-Bl-Login';
 
 /** ゲストのクッキーの ID（無い・形が違うときは null） */
 export const anonIdOf = (req: Request) => {
@@ -191,11 +194,18 @@ export async function viewerOf(req: Request, env: AccessEnv): Promise<{ id: stri
   return { id: anon ? ANON_PREFIX + anon : null, email: null };
 }
 
+/** 新しいゲストのIDと、それを入れるクッキー */
+export function newAnon(): { user: string; setCookie: string } {
+  const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return { user: ANON_PREFIX + id, setCookie: `${ANON_COOKIE}=${id}; Path=/; Max-Age=${ANON_MAX_AGE}; HttpOnly; Secure; SameSite=Lax` };
+}
+
 export const clearAnonCookie = () => `${ANON_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
 
 /**
  * ゲストも書き込める API の入口：同じサイトからの送信なら、書き込む人の ID を返す。
- * ゲストでクッキーがまだ無ければ新しく作り、setCookie にレスポンスへ付ける値を入れる（withCookie で付ける）。
+ * - ログインしているつもりの画面（LOGIN_HEADER 付き）なのにログインが切れていたら、401 を返す
+ * - ゲストでクッキーがまだ無ければ新しく作り、setCookie にレスポンスへ付ける値を入れる（withCookie で付ける）
  */
 export async function actor(
   req: Request,
@@ -204,13 +214,12 @@ export async function actor(
 ): Promise<{ user: string; email: string | null; setCookie?: string } | { error: Response }> {
   if (!sameOrigin(req, opts)) return { error: json({ error: '不正なリクエストです' }, 403) };
   const v = await viewerOf(req, env);
-  if (v.id) return { user: v.id, email: v.email };
-  const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
-  return {
-    user: ANON_PREFIX + id,
-    email: null,
-    setCookie: `${ANON_COOKIE}=${id}; Path=/; Max-Age=${ANON_MAX_AGE}; HttpOnly; Secure; SameSite=Lax`,
-  };
+  if (v.email) return { user: v.email, email: v.email };
+  if (req.headers.get(LOGIN_HEADER) === '1') {
+    return { error: json({ error: 'ログインが切れています', loginExpired: true }, 401) };
+  }
+  if (v.id) return { user: v.id, email: null };
+  return { ...newAnon(), email: null };
 }
 
 export const withCookie = (res: Response, setCookie?: string) => {
