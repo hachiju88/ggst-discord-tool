@@ -25,6 +25,10 @@ const { pageId } = Astro.props;
   <form class="comment-form" data-form hidden>
     <input name="name" maxlength="30" placeholder="名前（任意）" autocomplete="nickname" />
     <textarea name="body" maxlength="2000" rows="3" required placeholder="補足・質問・別ルートなど"></textarea>
+    <p class="comment-guest-note" data-guest-note hidden>
+      ログインせずに投稿できます。自分のコメントを消せるのはこのブラウザからだけです（<a href="/login" data-login-link>ログイン</a>すると引き継がれます）。
+    </p>
+    <div class="comment-turnstile" data-turnstile hidden></div>
     <div class="comment-actions">
       <span class="error" data-error></span>
       <button type="submit">投稿する</button>
@@ -34,7 +38,29 @@ const { pageId } = Astro.props;
 
 <script>
   import { loginUrl } from '../scripts/login';
-  type Comment = { id: string; name: string; body: string; created_at: string; mine?: boolean };
+  // ゲストのクッキーはいいねの読み込みで付くので、書き込みはそれを待ってから送る
+  import { loaded as reactionsLoaded, loginExpired } from '../scripts/reactions';
+  type Comment = { id: string; name: string; body: string; created_at: string; mine?: boolean; canDelete?: boolean; guest?: boolean };
+  type Turnstile = {
+    render: (el: HTMLElement, opts: Record<string, unknown>) => string;
+    reset: (id: string) => void;
+    getResponse: (id: string) => string | undefined;
+  };
+  const TURNSTILE_SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+  let turnstileLoading: Promise<Turnstile> | undefined;
+  /** Turnstile（人間かどうかの確認）のスクリプトは、ゲストがコメント欄を開いたときだけ読み込む */
+  const loadTurnstile = () =>
+    (turnstileLoading ??= new Promise<Turnstile>((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = TURNSTILE_SRC;
+      s.async = true;
+      s.onload = () => ((window as any).turnstile ? resolve((window as any).turnstile) : reject(new Error()));
+      s.onerror = () => {
+        turnstileLoading = undefined;
+        reject(new Error());
+      };
+      document.head.append(s);
+    }));
 
   const API = '/api/comments';
   const NAME_KEY = 'bridget-wiki:name';
@@ -54,13 +80,38 @@ const { pageId } = Astro.props;
     const nameInput = form.elements.namedItem('name') as HTMLInputElement;
     nameInput.value = safe.get(NAME_KEY) ?? '';
     const loginNote = root.querySelector<HTMLElement>('[data-login]')!;
-    root.querySelector<HTMLAnchorElement>('[data-login-link]')!.href = loginUrl();
-    /** ログイン中ならフォーム、未ログインならログイン案内を出す */
-    const showForm = (loggedIn: boolean) => {
-      form.hidden = !loggedIn;
-      loginNote.hidden = loggedIn;
-    };
+    const guestNote = root.querySelector<HTMLElement>('[data-guest-note]')!;
+    const tsBox = root.querySelector<HTMLElement>('[data-turnstile]')!;
+    for (const a of root.querySelectorAll<HTMLAnchorElement>('[data-login-link]')) a.href = loginUrl();
     let preview = false;
+    let guest = false; // ゲストとして投稿する（Turnstile が要る）
+    let loggedIn = false;
+    /** ログインしているつもりで書き込むときのヘッダー（切れていたらゲストとして書き込まずに 401 になる） */
+    const loginHeader = (): Record<string, string> => (loggedIn ? { 'X-Bl-Login': '1' } : {});
+    let tsWidget: string | undefined;
+    let ts: Turnstile | undefined;
+
+    /** ログイン中・ゲスト投稿できるならフォーム、どちらでもなければログイン案内を出す */
+    const showForm = (isLoggedIn: boolean, siteKey?: string) => {
+      loggedIn = isLoggedIn;
+      guest = !loggedIn && !!siteKey;
+      form.hidden = !loggedIn && !guest;
+      loginNote.hidden = !form.hidden;
+      guestNote.hidden = !guest;
+      tsBox.hidden = !guest;
+      if (guest && !tsWidget) {
+        loadTurnstile()
+          .then((t) => {
+            if (tsWidget) return;
+            ts = t;
+            tsWidget = t.render(tsBox, { sitekey: siteKey, language: 'ja', theme: 'auto', size: 'flexible' });
+          })
+          .catch(() => (err.textContent = '確認用の部品を読み込めませんでした。ページを読み込み直してください'));
+      }
+    };
+    const resetTurnstile = () => {
+      if (ts && tsWidget) ts.reset(tsWidget);
+    };
 
     const fmt = (iso: string) =>
       new Date(iso).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -76,8 +127,15 @@ const { pageId } = Astro.props;
           const when = document.createElement('time');
           when.dateTime = c.created_at;
           when.textContent = fmt(c.created_at);
-          head.append(who, when);
-          if (c.mine) {
+          head.append(who);
+          if (c.guest) {
+            const tag = document.createElement('span');
+            tag.className = 'comment-guest';
+            tag.textContent = 'ゲスト';
+            head.append(tag);
+          }
+          head.append(when);
+          if (c.canDelete ?? c.mine) {
             const del = document.createElement('button');
             del.type = 'button';
             del.className = 'del';
@@ -101,7 +159,7 @@ const { pageId } = Astro.props;
         const res = await fetch(`${API}?page=${encodeURIComponent(page)}`);
         if (!res.ok || !res.headers.get('content-type')?.includes('json')) throw new Error();
         const d = await res.json();
-        showForm(!!d.loggedIn);
+        showForm(!!d.loggedIn, d.guest?.siteKey);
         render(d.comments);
       } catch {
         preview = true;
@@ -116,10 +174,10 @@ const { pageId } = Astro.props;
       if (preview) {
         safe.set(localKey(page), JSON.stringify(readLocal().filter((c) => c.id !== id)));
       } else {
-        const res = await fetch(`${API}?id=${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => null);
+        await reactionsLoaded;
+        const res = await fetch(`${API}?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers: loginHeader() }).catch(() => null);
         if (res?.status === 401) {
-          showForm(false);
-          alert('ログインが切れています。ログインしてから削除してください。');
+          loginExpired();
         } else if (!res?.ok) {
           const d = await res?.json().catch(() => ({}));
           alert(d?.error ?? 'コメントを削除できませんでした');
@@ -143,14 +201,24 @@ const { pageId } = Astro.props;
           items.push({ id: crypto.randomUUID(), name, body, created_at: new Date().toISOString(), mine: true });
           safe.set(localKey(page), JSON.stringify(items));
         } else {
+          const turnstile = guest && ts && tsWidget ? ts.getResponse(tsWidget) : undefined;
+          if (guest && !turnstile) throw new Error('「人間であることを確認」が終わってから投稿してください');
+          await reactionsLoaded;
           const res = await fetch(API, {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ page, name, body }),
+            headers: { 'content-type': 'application/json', ...loginHeader() },
+            body: JSON.stringify({ page, name, body, turnstile }),
           });
+          // 確認のトークンは1回しか使えないので、結果にかかわらず取り直す
+          if (guest) resetTurnstile();
           if (res.status === 401) {
-            showForm(false);
-            throw new Error('ログインが切れました。もう一度ログインしてください');
+            const d = await res.json().catch(() => ({}));
+            if (d.loginExpired) {
+              loginExpired(); // ログインし直さなければ、コメント欄も読み込み直してゲスト用に切り替わる
+              throw new Error('ログインが切れていたため投稿していません。もう一度投稿してください');
+            }
+            load();
+            throw new Error('コメントするにはログインが必要です');
           }
           if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? '投稿に失敗しました');
         }
@@ -164,6 +232,9 @@ const { pageId } = Astro.props;
       }
     });
 
+    // ログインが切れた・ゲストのデータを引き継いだときは読み込み直す（フォームの切り替え・削除ボタン）
+    document.addEventListener('login:expired', () => load());
+    document.addEventListener('guest:merged', () => load());
     load();
   }
 </script>

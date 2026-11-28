@@ -359,6 +359,11 @@ body {
 .comment-form[hidden], .comment-login[hidden] { display: none; }
 .comment-login { margin: 0.5rem 0 0; padding: 0.8rem 1rem; font-size: var(--sl-text-sm); color: var(--sl-color-gray-2); background: var(--sl-color-gray-6); border: 1px dashed var(--sl-color-gray-5); border-radius: 6px; }
 .comment-login a { color: var(--sky); font-weight: 700; }
+.comment-guest { padding: 0 0.4em; font-size: 0.7rem; color: var(--sl-color-gray-3); border: 1px solid var(--sl-color-gray-5); border-radius: 3px; }
+.comment-guest-note { margin: 0.4rem 0 0; font-size: 0.78rem; color: var(--sl-color-gray-3); }
+.comment-guest-note a { color: var(--sky); }
+.comment-guest-note[hidden], .comment-turnstile[hidden] { display: none; }
+.comment-turnstile { margin-top: 0.5rem; }
 .comment-form input, .comment-form textarea {
   width: 100%;
   padding: 0.6rem 0.75rem;

@@ -1,7 +1,9 @@
 /**
  * いいね・お気に入りの状態をページ全体で共有する。
  * API (/api/reactions) が無い環境ではブラウザ内保存のプレビューモードで動く。
- * 見るだけならログイン不要。押すときに未ログインならログインへ案内する。
+ * ログインしなくても押せる（ゲストはブラウザごとに区別される）。
+ * ログイン中にゲストのときのデータが残っていれば、アカウントへ引き継ぐかを聞く。
+ * ログインしているつもりで押したのにログインが切れていたら（401）、ゲストとして書き込まずに知らせる。
  */
 import { loginUrl } from './login';
 
@@ -9,6 +11,8 @@ type Kind = 'like' | 'fav';
 type State = { likes: Record<string, number>; mine: Record<Kind, Set<string>>; preview: boolean; ready: boolean; loggedIn: boolean };
 
 const API = '/api/reactions';
+/** ログインしているつもりの画面から書き込むときに付けるヘッダー（server/auth.ts の LOGIN_HEADER） */
+export const loginHeader = (): Record<string, string> => (state.loggedIn ? { 'X-Bl-Login': '1' } : {});
 const LOCAL = 'bridget-wiki:reactions';
 export const state: State = { likes: {}, mine: { like: new Set(), fav: new Set() }, preview: false, ready: false, loggedIn: false };
 
@@ -26,6 +30,7 @@ async function load() {
     state.likes = d.likes;
     state.loggedIn = !!d.loggedIn;
     state.mine = { like: new Set(d.mine.like), fav: new Set(d.mine.fav) };
+    if (d.guestData) setTimeout(() => askMerge(d.guestData));
   } catch {
     state.preview = true;
     let d = { like: [] as string[], fav: [] as string[] };
@@ -37,6 +42,35 @@ async function load() {
   }
   state.ready = true;
   render();
+}
+
+/** ゲストのときのデータをアカウントへ引き継ぐか聞く（共用のPCで前の人のデータを取り込まないように） */
+async function askMerge(g: { likes: number; favs: number; comments: number }) {
+  const items = [g.likes && `いいね${g.likes}件`, g.favs && `お気に入り${g.favs}件`, g.comments && `コメント${g.comments}件`].filter(Boolean);
+  const merge = confirm(
+    `このブラウザに、ログインせずに付けた ${items.join('・')} があります。\nあなたのアカウントに引き継ぎますか？\n\n` +
+      '（共用のPCなどで、ほかの人が付けたものならキャンセルしてください）',
+  );
+  const res = await fetch('/api/guest-merge', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ merge }),
+  }).catch(() => null);
+  if (merge && res?.ok) {
+    await load();
+    document.dispatchEvent(new CustomEvent('guest:merged'));
+  }
+}
+
+/** ログインが切れていたとき：ログインし直すか、ゲストとして続けるか */
+export function loginExpired() {
+  state.loggedIn = false;
+  if (confirm('ログインが切れています。ログインし直しますか？\n（キャンセルすると、ログインしていない状態で続けます）')) {
+    location.href = loginUrl();
+    return;
+  }
+  load();
+  document.dispatchEvent(new CustomEvent('login:expired'));
 }
 
 function render() {
@@ -51,13 +85,7 @@ function render() {
   document.dispatchEvent(new CustomEvent('reactions:change'));
 }
 
-function askLogin(kind: Kind) {
-  const what = kind === 'like' ? 'いいね' : 'お気に入り';
-  if (confirm(`${what}するにはログインが必要です。ログインしますか？`)) location.href = loginUrl();
-}
-
 async function toggle(page: string, kind: Kind) {
-  if (!state.preview && !state.loggedIn) return askLogin(kind);
   const set = state.mine[kind];
   const on = !set.has(page);
   const prev = state.likes[page] ?? 0;
@@ -68,20 +96,18 @@ async function toggle(page: string, kind: Kind) {
   try {
     const res = await fetch(API, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...loginHeader() },
       body: JSON.stringify({ page, kind, on }),
     });
-    if (res.status === 401) {
-      state.loggedIn = false;
-      throw Object.assign(new Error(), { login: true });
-    }
-    if (!res.ok) throw new Error();
-    const d = await res.json();
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(d.error), { status: res.status });
     state.likes[page] = d.likes;
   } catch (e) {
-    if ((e as { login?: boolean }).login) setTimeout(() => askLogin(kind));
     on ? set.delete(page) : set.add(page);
     state.likes[page] = prev;
+    const { status, message } = e as Error & { status?: number };
+    if (status === 401) setTimeout(loginExpired);
+    else if (status === 429 && message) setTimeout(() => alert(message));
   }
   render();
 }
@@ -94,4 +120,5 @@ document.addEventListener('click', (e) => {
   loaded.then(() => toggle(b.dataset.page!, b.dataset.kind as Kind));
 });
 
-const loaded = load();
+/** 最初の読み込み（ゲストのクッキーもここで付く）。書き込みはこれを待ってから送る */
+export const loaded = load();
